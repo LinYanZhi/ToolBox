@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "aminos",
+    "ls",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
