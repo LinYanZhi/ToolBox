@@ -1,0 +1,3 @@
+# 静态链接 VC 运行时，消除 VCRUNTIME140.dll 依赖
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
