@@ -1,6 +1,8 @@
 # 排除 cargo 锁文件和构建产物
 .idea
-/aminos/target
+
 /aminos-link
-/ls/target
+
 /target
+
+/.exe

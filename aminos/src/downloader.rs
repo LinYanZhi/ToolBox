@@ -84,10 +84,61 @@ fn insecure_agent(connect_timeout: u64, read_timeout: u64) -> anyhow::Result<ure
 
 // ── Public API ───────────────────────────────────────────
 
+/// 查找与 as.exe 同目录的 aria2c.exe
+fn find_aria2c() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let aria2c = exe.parent()?.join("aria2c.exe");
+    if aria2c.is_file() {
+        Some(aria2c)
+    } else {
+        None
+    }
+}
+
+/// 使用 aria2c 多线程下载（自动检测并启用）
+///
+/// aria2c 会分多线程下载，速度远快于单线程 HTTPS。
+/// 参数: -x 16 最多 16 连接, -s 16 16 分块, --retry-wait 3 重试等待 3s
+fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> {
+    let aria2c = find_aria2c()
+        .ok_or_else(|| anyhow::anyhow!("未找到 aria2c.exe"))?;
+
+    let filename = target_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let parent = target_path.parent().unwrap_or(Path::new("."));
+
+    println!("  使用 aria2c 多线程下载: {} ...", filename);
+
+    let status = std::process::Command::new(&aria2c)
+        .args([
+            "-x", "16",           // 最多 16 连接
+            "-s", "16",           // 16 分块
+            "-k", "1M",           // 每块 1MB
+            "--retry-wait", "3",  // 重试等待 3 秒
+            "--max-tries", "5",   // 最多重试 5 次
+            "--connect-timeout", "30",
+            "--timeout", "600",
+            "--allow-overwrite", "true",
+            "--auto-file-renaming", "false",
+            "--dir", &parent.to_string_lossy(),
+            "--out", &filename,
+            "--summary-interval", "0",
+            url,
+        ])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .context("运行 aria2c 失败")?;
+
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        bail!("aria2c 退出码 {}", code);
+    }
+
+    Ok(())
+}
+
 /// Download a file from `url` to `target_path`, showing a progress bar.
 ///
-/// Tries: normal TLS → insecure TLS → system curl.exe.
-/// Returns the actual error from each attempt if all fail.
+/// Tries: normal TLS → insecure TLS → aria2c (if found) → system curl.exe.
 pub fn download_with_progress(url: &str, target_path: &Path, renew: bool) -> anyhow::Result<()> {
     if target_path.exists() && !renew {
         println!("  使用缓存: {}", target_path.display());
@@ -107,7 +158,21 @@ pub fn download_with_progress(url: &str, target_path: &Path, renew: bool) -> any
             match with_browser_headers(agent.get(url), url).call() {
                 Ok(resp) => return download_body(resp, target_path),
                 Err(e) => {
-                    // Tier 3: system curl
+                    // Tier 3: aria2c (多线程，与 as.exe 同目录时自动启用)
+                    if find_aria2c().is_some() {
+                        match try_aria2c_download(url, target_path) {
+                            Ok(()) => return Ok(()),
+                            Err(aria2_err) => {
+                                // Tier 4: system curl
+                                if let Err(e2) = try_curl_download(url, target_path) {
+                                    bail!("无法下载 (TLS: {}; insecure TLS: {}; aria2c: {}; curl: {})",
+                                        err_normal, e, aria2_err, e2);
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
+                    // Tier 3 (no aria2c): system curl
                     if let Err(e2) = try_curl_download(url, target_path) {
                         bail!("无法下载 (TLS: {}; insecure TLS: {}; curl: {})", err_normal, e, e2);
                     }
@@ -116,7 +181,19 @@ pub fn download_with_progress(url: &str, target_path: &Path, renew: bool) -> any
             }
         }
         Err(e) => {
-            // Tier 3: system curl directly
+            // If insecure agent fails, still try aria2c if available
+            if find_aria2c().is_some() {
+                match try_aria2c_download(url, target_path) {
+                    Ok(()) => return Ok(()),
+                    Err(aria2_err) => {
+                        if let Err(e2) = try_curl_download(url, target_path) {
+                            bail!("无法下载 (TLS: {}; insecure init: {}; aria2c: {}; curl: {})",
+                                err_normal, e, aria2_err, e2);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
             if let Err(e2) = try_curl_download(url, target_path) {
                 bail!("无法下载 (TLS: {}; insecure init: {}; curl: {})", err_normal, e, e2);
             }
@@ -171,10 +248,69 @@ fn download_body(resp: ureq::Response, target_path: &Path) -> anyhow::Result<()>
         pb.finish_and_clear();
     }
 
+    // 校验：检查文件签名是否匹配预期类型
+    let fname_lower = filename.to_lowercase();
+    let mut preview = String::new();
+    let valid = validate_file_signature(target_path, &fname_lower, &mut preview);
+    if !valid {
+        let _ = fs::remove_file(target_path);
+        anyhow::bail!("文件签名不匹配，下载到了非安装包内容（前 200 字节: {}）",
+            preview.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(80).collect::<String>());
+    }
+
     Ok(())
 }
 
-/// Download using system curl.exe as a last resort.
+/// 校验下载文件的签名是否合法
+fn validate_file_signature(path: &Path, fname_lower: &str, preview: &mut String) -> bool {
+    // 只读前 4KB，够检查魔数了
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        _ => return false,
+    };
+    let mut header = [0u8; 4096];
+    let n = match std::io::Read::read(&mut file, &mut header) {
+        Ok(n) if n >= 4 => n,
+        _ => return false,
+    };
+
+    // 预览：把前 200 字节转成字符串（用于诊断报错）
+    if let Ok(s) = String::from_utf8(header[..n.min(200)].to_vec()) {
+        *preview = s;
+    }
+
+    // 按扩展名检查文件魔数
+    if fname_lower.ends_with(".exe") || fname_lower.ends_with(".dll") || fname_lower.ends_with(".msi") {
+        // PE 文件: MZ 开头 (4D 5A)
+        header[0] == 0x4D && header[1] == 0x5A
+    } else if fname_lower.ends_with(".zip") || fname_lower.ends_with(".7z") {
+        // ZIP: PK\x03\x04, 7z: 37 7A BC AF 27 1C
+        (header[0] == 0x50 && header[1] == 0x4B && header[2] == 0x03 && header[3] == 0x04)
+            || (header[0] == 0x37 && header[1] == 0x7A)
+    } else if fname_lower.ends_with(".rar") {
+        header[0] == 0x52 && header[1] == 0x61 && header[2] == 0x72 && header[3] == 0x21
+    } else if fname_lower.ends_with(".tar") {
+        // tar 无固定魔数，用 n > 1KB 兜底
+        n > 1024
+    } else if fname_lower.ends_with(".gz") || fname_lower.ends_with(".xz") || fname_lower.ends_with(".bz2") {
+        // gz: 1F 8B, xz: FD 37 7A 58 5A, bz2: 42 5A 68
+        (header[0] == 0x1F && header[1] == 0x8B)
+            || (header[0] == 0xFD && header[1] == 0x37)
+            || (header[0] == 0x42 && header[1] == 0x5A)
+    } else if fname_lower.ends_with(".iso") {
+        // ISO: CD 00 1, or CD 01 1
+        header[0] == 0x43 && header[1] == 0x44 && header[2] == 0x30
+    } else if fname_lower.ends_with(".appx") || fname_lower.ends_with(".msix") {
+        // APPX/MSIX: 也是 ZIP 格式 (PK\x03\x04)
+        header[0] == 0x50 && header[1] == 0x4B && header[2] == 0x03 && header[3] == 0x04
+    } else if fname_lower.ends_with(".dmg") {
+        // DMG: 无法仅用前 4 字节判断，用 n > 1KB 兜底
+        n > 1024
+    } else {
+        // 未知类型，信任大小
+        n > 1024
+    }
+}
 fn try_curl_download(url: &str, target_path: &Path) -> anyhow::Result<()> {
     let curl = "C:\\Windows\\System32\\curl.exe";
     if !std::path::Path::new(curl).exists() {

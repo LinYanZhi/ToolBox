@@ -765,14 +765,14 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
     let max_name = entries.iter().map(|(n, _)| display_width(n)).max().unwrap_or(4).min(50);
 
     println!("\n\x1b[1;33m下载缓存\x1b[0m  \x1b[90m{}\x1b[0m\n", downloads.display());
-    println!("{}{}",
+    println!("  {}{}",
         pad("文件", max_name + 2),
         pad("大小", 12));
 
     for (name, size) in &entries {
         println!("  {}{}",
             pad(&truncate_display(name, max_name), max_name + 2),
-            format_size(*size as f64));
+            pad(&format_size(*size as f64), 12));
     }
 
     println!("\n\x1b[90m共 {} 个文件，{} 空间\x1b[0m", entries.len(), format_size(total_size as f64));
