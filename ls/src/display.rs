@@ -296,7 +296,7 @@ impl Formatter {
             }
         } else {
             match item.link_type {
-                crate::links::LinkType::Symlink | crate::links::LinkType::HardFile => {
+                crate::links::LinkType::Symlink => {
                     Some("cyan")
                 }
                 _ => {
@@ -311,6 +311,7 @@ impl Formatter {
     }
 
     /// 获取项目颜色（含 Python/Java 环境检测，可能触发子进程）
+    #[allow(dead_code)]
     pub fn get_item_color(&self, item: &ItemInfo) -> Option<&str> {
         if item.is_dir {
             // 检测 Python 环境

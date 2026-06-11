@@ -13,8 +13,6 @@ pub enum LinkType {
     Symlink,
     /// Windows 目录连接点
     Junction,
-    /// 硬链接文件
-    HardFile,
     /// .lnk 快捷方式
     Shortcut,
     /// 未知
@@ -26,7 +24,6 @@ pub enum LinkType {
 pub struct LinkInfo {
     pub link_type: LinkType,
     pub target: Option<String>,
-    pub hardlink_count: Option<u32>,
 }
 
 /// 检测路径是否为 Junction
@@ -66,41 +63,6 @@ pub fn get_junction_target(path: &Path) -> Option<String> {
             return Some(normalize_path(target.trim()));
         }
     }
-    None
-}
-
-/// 获取硬链接的目标路径和计数
-pub fn get_hardlink_target(path: &Path) -> Option<(String, u32)> {
-    let output = Command::new("fsutil")
-        .args(["hardlink", "list", &path.to_string_lossy()])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let targets: Vec<String> = stdout
-        .lines()
-        .map(|l| normalize_path(l.trim()))
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    let count = targets.len() as u32;
-    if count <= 1 {
-        return None;
-    }
-
-    let current = normalize_path(&path.to_string_lossy());
-    let current_lower = current.to_lowercase();
-
-    for target in &targets {
-        if target.to_lowercase() != current_lower {
-            return Some((target.clone(), count));
-        }
-    }
-
     None
 }
 
@@ -299,7 +261,6 @@ pub fn get_link_info(path: &Path) -> LinkInfo {
             return LinkInfo {
                 link_type: LinkType::Unknown,
                 target: None,
-                hardlink_count: None,
             };
         }
     };
@@ -310,7 +271,6 @@ pub fn get_link_info(path: &Path) -> LinkInfo {
         return LinkInfo {
             link_type: LinkType::Symlink,
             target,
-            hardlink_count: None,
         };
     }
 
@@ -320,7 +280,6 @@ pub fn get_link_info(path: &Path) -> LinkInfo {
         return LinkInfo {
             link_type: LinkType::Shortcut,
             target,
-            hardlink_count: None,
         };
     }
 
@@ -330,14 +289,12 @@ pub fn get_link_info(path: &Path) -> LinkInfo {
         return LinkInfo {
             link_type: LinkType::Junction,
             target,
-            hardlink_count: None,
         };
     }
 
     LinkInfo {
         link_type: if metadata.is_dir() { LinkType::Dir } else { LinkType::File },
         target: None,
-        hardlink_count: None,
     }
 }
 

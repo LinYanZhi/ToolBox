@@ -15,7 +15,6 @@ pub struct ItemInfo {
     pub is_file: bool,
     pub link_type: LinkType,
     pub link_target: Option<String>,
-    pub hardlink_count: Option<u32>,
     pub size: u64,
     pub create_time: Option<SystemTime>,
     pub modify_time: Option<SystemTime>,
@@ -34,25 +33,25 @@ impl ItemInfo {
 
         let is_symlink = file_type.is_symlink();
 
-        let (link_type, link_target, hardlink_count) = if is_symlink {
+        let (link_type, link_target) = if is_symlink {
             let target = fs::read_link(&path).ok().map(|p| p.to_string_lossy().to_string());
-            (LinkType::Symlink, target, None)
+            (LinkType::Symlink, target)
         } else if name.to_lowercase().ends_with(".lnk") {
             if file_type.is_file() {
                 let target = links::get_lnk_target(&path);
-                (LinkType::Shortcut, target, None)
+                (LinkType::Shortcut, target)
             } else {
-                (LinkType::File, None, None)
+                (LinkType::File, None)
             }
         } else if file_type.is_dir() && links::is_junction(&path) {
             let target = links::get_junction_target(&path);
-            (LinkType::Junction, target, None)
+            (LinkType::Junction, target)
         } else if file_type.is_file() {
-            (LinkType::File, None, None)
+            (LinkType::File, None)
         } else if file_type.is_dir() {
-            (LinkType::Dir, None, None)
+            (LinkType::Dir, None)
         } else {
-            (LinkType::Unknown, None, None)
+            (LinkType::Unknown, None)
         };
 
         let size = if file_type.is_file() {
@@ -71,7 +70,6 @@ impl ItemInfo {
             is_file: file_type.is_file(),
             link_type,
             link_target,
-            hardlink_count,
             size,
             create_time,
             modify_time,

@@ -206,9 +206,8 @@ fn print_help() {
 fn print_clap_error(err: &clap::error::Error) {
     use clap::error::ErrorKind;
     match err.kind() {
-        ErrorKind::UnknownFlag => {
+        ErrorKind::UnknownArgument => {
             let raw = err.to_string();
-            // 提取出未知的 flag 名称
             if let Some(flag) = raw.lines().find_map(|l| {
                 let l = l.trim();
                 l.strip_prefix("error: unexpected argument '")
@@ -517,7 +516,6 @@ fn handle_link_check(path: &str) {
     let type_name = match info.link_type {
         links::LinkType::Symlink => "符号链接 (Symbolic Link)",
         links::LinkType::Junction => "目录连接点 (Junction)",
-        links::LinkType::HardFile => "硬链接 (Hard Link)",
         links::LinkType::Shortcut => "快捷方式 (.lnk)",
         links::LinkType::Dir => "普通目录",
         links::LinkType::File => "普通文件",
@@ -529,12 +527,6 @@ fn handle_link_check(path: &str) {
 
     if let Some(ref target) = info.target {
         println!("目标: {}", target);
-    }
-
-    if let Some(count) = info.hardlink_count {
-        if count > 1 {
-            println!("链接计数: {}", count);
-        }
     }
 }
 
