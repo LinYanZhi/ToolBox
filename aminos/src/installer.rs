@@ -7,6 +7,7 @@ use anyhow::{bail, Context};
 
 use crate::downloader;
 use crate::paths;
+use crate::pe_version;
 use crate::registry;
 use crate::software::{self, SoftwareDef, VersionInfo};
 
@@ -150,9 +151,24 @@ pub fn install_software(
     let shortcut_key = create_app_shortcut(name, vi, &install_path);
 
     // 8. Record
-    software::record_installation(name, ver, install_path.as_deref().unwrap_or_default())?;
+    let pe_ver = pe_version::get_pe_version(&installer_path);
+    let (canonical_version, provenance) = if let Some(ref pv) = pe_ver {
+        (pv.clone(), "pe")
+    } else {
+        (ver.to_string(), "source")
+    };
+    software::record_installation(
+        name,
+        &canonical_version,
+        install_path.as_deref().unwrap_or_default(),
+        provenance,
+        ver,
+    )?;
 
-    println!("\n✓ {} {} 安装完成", display, ver);
+    println!("\n✓ {} {} 安装完成", display, canonical_version);
+    if provenance == "pe" && canonical_version != ver {
+        println!("  \x1b[90m(源声明 v{}, PE 真实 v{})\x1b[0m", ver, canonical_version);
+    }
     if let Some(ref sk) = shortcut_key {
         println!("  快捷方式: {}", sk);
     }
@@ -280,6 +296,12 @@ fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool) -
     let tmp = dl.join(format!("{}.downloading", filename));
     downloader::download_with_fallback(name, urls, &tmp, renew)?;
     fs::rename(&tmp, &target)?;
+
+    // 最终验证：rename 后的文件必须通过签名检查
+    if !downloader::verify_downloaded_file(&target) {
+        let _ = std::fs::remove_file(&target);
+        bail!("{}: 下载后验证失败（文件损坏或反盗链页面）", name);
+    }
 
     Ok(target)
 }

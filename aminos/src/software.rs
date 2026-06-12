@@ -58,6 +58,19 @@ pub struct SoftwareDef {
 pub struct InstallRecord {
     pub version: String,
     pub install_path: String,
+    /// 版本来源：pe | source | registry
+    #[serde(default = "default_provenance")]
+    pub version_provenance: String,
+    /// 源 JSON 中声明的版本 key
+    #[serde(default)]
+    pub source_version: String,
+    /// 安装时间（Unix 时间戳）
+    #[serde(default)]
+    pub install_time: u64,
+}
+
+fn default_provenance() -> String {
+    "source".to_string()
 }
 
 // ── Software definitions ─────────────────────────────────
@@ -286,13 +299,19 @@ pub fn write_installed_db(db: &HashMap<String, InstallRecord>) -> anyhow::Result
     Ok(())
 }
 
-pub fn record_installation(name: &str, version: &str, install_path: &str) -> anyhow::Result<()> {
+pub fn record_installation(name: &str, version: &str, install_path: &str, version_provenance: &str, source_version: &str) -> anyhow::Result<()> {
     let mut db = read_installed_db()?;
     db.insert(
         name.to_string(),
         InstallRecord {
             version: version.to_string(),
             install_path: install_path.to_string(),
+            version_provenance: version_provenance.to_string(),
+            source_version: source_version.to_string(),
+            install_time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         },
     );
     write_installed_db(&db)

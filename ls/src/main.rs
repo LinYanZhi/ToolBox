@@ -39,9 +39,6 @@ struct Cli {
     #[arg(short = 'd', long = "only-dirs")]
     only_dirs: bool,
 
-    #[arg(short = 'l', num_args = 0..=1, default_missing_value = "10")]
-    limit: Option<usize>,
-
     #[arg(short = 'a', long = "abs-path")]
     abs_path: bool,
 
@@ -57,7 +54,7 @@ struct Cli {
     #[arg(long = "link")]
     link: Option<String>,
 
-    #[arg(long = "help")]
+    #[arg(short = 'h', long = "help")]
     help: bool,
 
     #[arg(short = 'v', long = "version")]
@@ -66,12 +63,12 @@ struct Cli {
 
 fn version_info() -> &'static str {
     concat!(
-        "ls ",
+        "\x1b[1;36mls \x1b[32m",
         env!("CARGO_PKG_VERSION"),
-        " (Rust 版)\n\
-         一个轻量级的目录列表工具\n\
+        "\x1b[0m (\x1b[90mRust 版\x1b[0m)\n\
+         \x1b[33m一个轻量级的目录列表工具\x1b[0m\n\
          ---\n\
-         GitHub: https://github.com/LinYanZhi/ToolBox"
+         \x1b[34mGitHub: \x1b[0m\x1b[4mhttps://github.com/LinYanZhi/ToolBox\x1b[0m"
     )
     .trim()
 }
@@ -96,8 +93,7 @@ fn main() {
     }
 
     // 加载配置
-    let config_path = find_config_file();
-    let color_config = config::ColorConfig::from_yaml(&config_path);
+    let color_config = config::ColorConfig::default();
     let formatter = Formatter::new(color_config, cli.no_color);
 
     if let Some(link_path) = &cli.link {
@@ -151,11 +147,6 @@ fn main() {
     // 排序
     sort_items(&mut items, &cli.sort);
 
-    // 限制数量
-    if let Some(limit) = cli.limit {
-        items.truncate(limit);
-    }
-
     // 计算最大宽度
     let max_width = if cli.right_align {
         items.iter().map(|item| display::display_width(&item.name)).max().unwrap_or(0)
@@ -178,28 +169,31 @@ fn main() {
 
 /// 打印中文帮助信息
 fn print_help() {
-    println!("用法: ls [选项] [目录]");
+    println!("\x1b[1;33m用法:\x1b[0m ls \x1b[36m[-h]\x1b[0m \x1b[36m[-n]\x1b[0m \x1b[36m[-s\x1b[0m \x1b[90m{{\x1b[0m\x1b[90mdefault,name,suffix,create,update\x1b[0m\x1b[90m}}\x1b[0m\x1b[36m]\x1b[0m");
+    println!("\x1b[36m            [-e\x1b[0m \x1b[4mEXCLUDE\x1b[0m\x1b[36m [\x1b[0m\x1b[4mEXCLUDE\x1b[0m\x1b[36m ...]]\x1b[0m");
+    println!("\x1b[36m            [-i\x1b[0m \x1b[4mINCLUDE\x1b[0m\x1b[36m [\x1b[0m\x1b[4mINCLUDE\x1b[0m\x1b[36m ...]]\x1b[0m \x1b[36m[-f]\x1b[0m \x1b[36m[-d]\x1b[0m");
+    println!("\x1b[36m            [-a]\x1b[0m \x1b[36m[-r]\x1b[0m \x1b[36m[-z]\x1b[0m \x1b[36m[-t\x1b[0m \x1b[90m[\x1b[0m\x1b[4mTREE\x1b[0m\x1b[90m]\x1b[0m\x1b[36m]\x1b[0m \x1b[36m[--link\x1b[0m \x1b[4mPATH\x1b[0m\x1b[36m]\x1b[0m");
+    println!("\x1b[36m            [\x1b[0m\x1b[4mdirectory\x1b[0m\x1b[36m]\x1b[0m");
     println!();
-    println!("列出目录内容");
+    println!("\x1b[1;33m列出目录内容\x1b[0m");
     println!();
-    println!("参数:");
-    println!("  [directory]            要列出的目录路径（默认: 当前目录）");
+    println!("\x1b[1;33m位置参数:\x1b[0m");
+    println!("  \x1b[4mdirectory\x1b[0m              要列出的目录路径（默认: 当前目录）");
     println!();
-    println!("选项:");
-    println!("  -n, --no-color         不使用颜色输出");
-    println!("  -s, --sort <排序>      排序方式: default name suffix create update（默认: default）");
-    println!("  -e, --exclude <后缀>   排除指定后缀的文件，如 -e .txt .md");
-    println!("  -i, --include <后缀>   只包含指定后缀的文件，如 -i .rs .py");
-    println!("  -f, --only-files       只显示文件，不显示目录");
-    println!("  -d, --only-dirs        只显示目录，不显示文件");
-    println!("  -l [数量]              限制输出数量（默认: 10）");
-    println!("  -a, --abs-path         打印完整路径");
-    println!("  -r, --right-align      右对齐文件名");
-    println!("  -z, --size             显示文件大小");
-    println!("  -t [深度]              树形显示目录结构，可指定深度如 -t 3");
-    println!("  --link <路径>          检查指定路径的链接信息");
-    println!("  -v, --version          显示版本信息");
-    println!("  --help                 显示帮助信息");
+    println!("\x1b[1;33m选项:\x1b[0m");
+    println!("  \x1b[36m-h\x1b[0m, \x1b[36m--help\x1b[0m              \x1b[90m显示帮助信息\x1b[0m");
+    println!("  \x1b[36m-n\x1b[0m, \x1b[36m--no-color\x1b[0m          \x1b[90m不使用颜色输出\x1b[0m");
+    println!("  \x1b[36m-s\x1b[0m, \x1b[36m--sort\x1b[0m \x1b[90m<\x1b[0m\x1b[4m排序\x1b[0m\x1b[90m>\x1b[0m       \x1b[90m排序方式: default name suffix create update\x1b[0m");
+    println!("  \x1b[36m-e\x1b[0m, \x1b[36m--exclude\x1b[0m \x1b[90m<\x1b[0m\x1b[4m后缀\x1b[0m\x1b[90m>\x1b[0m    \x1b[90m排除指定后缀的文件，如 -e .txt .md\x1b[0m");
+    println!("  \x1b[36m-i\x1b[0m, \x1b[36m--include\x1b[0m \x1b[90m<\x1b[0m\x1b[4m后缀\x1b[0m\x1b[90m>\x1b[0m    \x1b[90m只包含指定后缀的文件，如 -i .rs .py\x1b[0m");
+    println!("  \x1b[36m-f\x1b[0m, \x1b[36m--only-files\x1b[0m         \x1b[90m只显示文件\x1b[0m");
+    println!("  \x1b[36m-d\x1b[0m, \x1b[36m--only-dirs\x1b[0m          \x1b[90m只显示目录\x1b[0m");
+    println!("  \x1b[36m-a\x1b[0m, \x1b[36m--abs-path\x1b[0m           \x1b[90m打印完整路径\x1b[0m");
+    println!("  \x1b[36m-r\x1b[0m, \x1b[36m--right-align\x1b[0m        \x1b[90m右对齐文件名\x1b[0m");
+    println!("  \x1b[36m-z\x1b[0m, \x1b[36m--size\x1b[0m               \x1b[90m显示文件大小\x1b[0m");
+    println!("  \x1b[36m-t\x1b[0m \x1b[90m[\x1b[0m\x1b[4m深度\x1b[0m\x1b[90m]\x1b[0m                 \x1b[90m树形显示目录结构，-t 3 指定深度，不带数字无限递归\x1b[0m");
+    println!("  \x1b[36m--link\x1b[0m \x1b[4mPATH\x1b[0m               \x1b[90m检查指定路径的链接信息\x1b[0m");
+    println!("  \x1b[36m-v\x1b[0m, \x1b[36m--version\x1b[0m            \x1b[90m显示版本信息\x1b[0m");
 }
 
 /// 拦截 clap 错误并输出中文提示
@@ -271,26 +265,6 @@ fn print_clap_error(err: &clap::error::Error) {
     }
 }
 
-/// 查找配置文件
-fn find_config_file() -> std::path::PathBuf {
-    let exe_path = std::env::current_exe().ok();
-    if let Some(exe_dir) = exe_path.and_then(|p| p.parent().map(|p| p.to_path_buf())) {
-        let config_path = exe_dir.join("ls.yaml");
-        if config_path.exists() {
-            return config_path;
-        }
-    }
-
-    let cwd_path = std::env::current_dir().ok().map(|p| p.join("ls.yaml"));
-    if let Some(ref path) = cwd_path {
-        if path.exists() {
-            return path.clone();
-        }
-    }
-
-    std::path::PathBuf::new()
-}
-
 /// 格式化单个项目行
 fn format_item_line(
     item: &ItemInfo,
@@ -310,7 +284,7 @@ fn format_item_line(
         if cli.no_color {
             line.push_str(&abs_path);
         } else {
-            let color = formatter.get_item_color_light(item);
+            let color = formatter.get_item_color(item);
             match color {
                 Some(c) => line.push_str(&display::colored(&abs_path, c)),
                 None => line.push_str(&abs_path),
@@ -385,14 +359,12 @@ fn format_item_line(
 }
 
 /// 带引号的环境版本号输出
-fn format_text_colored(text: &str, formatter: &Formatter, cli: &Cli) -> String {
+fn format_text_colored(text: &str, _formatter: &Formatter, cli: &Cli) -> String {
     let quoted = format!("\"{}\"", text);
     if cli.no_color {
         quoted
-    } else if let Some(ref c) = formatter.config.dir_type_color {
-        display::colored(&quoted, c)
     } else {
-        quoted
+        display::colored(&quoted, "90")
     }
 }
 
@@ -488,7 +460,7 @@ fn print_tree(
         if cli.no_color {
             println!("{}{}{}", prefix, connector, item.name);
         } else {
-            let color = formatter.get_item_color_light(item);
+            let color = formatter.get_item_color(item);
             match color {
                 Some(c) => println!("{}{}{}", prefix, connector, display::colored(&item.name, c)),
                 None => println!("{}{}{}", prefix, connector, item.name),
@@ -530,4 +502,3 @@ fn handle_link_check(path: &str) {
     }
 }
 
-pub use config::ColorConfig;
