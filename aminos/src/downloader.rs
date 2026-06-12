@@ -684,70 +684,23 @@ pub fn expand_github_urls(urls: &[String]) -> Vec<String> {
 
 /// Format bytes as human-readable (matches Python `format_size`).
 pub fn format_size(size_bytes: f64) -> String {
-    let mut size = size_bytes;
-    for unit in &["B", "KB", "MB", "GB"] {
-        if size < 1024.0 {
-            return format!("{:.1} {}", size, unit);
-        }
-        size /= 1024.0;
-    }
-    format!("{:.1} TB", size)
+    color::format_size(size_bytes as u64)
 }
 
-/// Display width of a string (CJK-aware, simplified: CJK chars = 2 width).
+/// Display width of a string (delegates to color).
 pub fn display_width(s: &str) -> usize {
-    s.chars().map(|c| {
-        if c as u32 >= 0x1100
-            && (c as u32 <= 0x115f
-                || c as u32 == 0x2329
-                || c as u32 == 0x232a
-                || (c as u32 >= 0x2e80 && c as u32 <= 0xa4cf)
-                || (c as u32 >= 0xac00 && c as u32 <= 0xd7a3)
-                || (c as u32 >= 0xf900 && c as u32 <= 0xfaff)
-                || (c as u32 >= 0xfe10 && c as u32 <= 0xfe19)
-                || (c as u32 >= 0xfe30 && c as u32 <= 0xfe6f)
-                || (c as u32 >= 0xff01 && c as u32 <= 0xff60)
-                || (c as u32 >= 0xffe0 && c as u32 <= 0xffe6)
-                || (c as u32 >= 0x1f300 && c as u32 <= 0x1f64f)
-                || (c as u32 >= 0x1f900 && c as u32 <= 0x1f9ff)
-                || (c as u32 >= 0x20000 && c as u32 <= 0x2fffd)
-                || (c as u32 >= 0x30000 && c as u32 <= 0x3fffd))
-        {
-            2
-        } else {
-            1
-        }
-    }).sum()
+    use color::DisplayWidth;
+    s.display_width()
 }
 
-/// Left-pad a string to `width` visual columns (CJK-aware).
+/// Left-pad a string to `width` visual columns (delegates to color).
 pub fn pad(s: &str, width: usize) -> String {
-    let dw = display_width(s);
-    if dw >= width {
-        return s.to_string();
-    }
-    format!("{}{}", s, " ".repeat(width - dw))
+    color::pad_left(s, width)
 }
 
-/// Truncate a string to `max_width` visual columns, append "..." if needed.
+/// Truncate a string to `max_width` visual columns (delegates to color).
 pub fn truncate_display(s: &str, max_width: usize) -> String {
-    let suf = "...";
-    let suf_w = display_width(suf);
-    if display_width(s) <= max_width {
-        return s.to_string();
-    }
-    let mut result = String::new();
-    let mut w = 0usize;
-    for c in s.chars() {
-        let cw = if (c as u32) >= 0x2e80 && (c as u32) <= 0x9fff { 2 } else { 1 };
-        if w + cw > max_width - suf_w {
-            result.push_str(suf);
-            break;
-        }
-        result.push(c);
-        w += cw;
-    }
-    result
+    color::truncate(s, max_width)
 }
 
 // ── Speed test ────────────────────────────────────────────

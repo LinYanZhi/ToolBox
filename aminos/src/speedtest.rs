@@ -6,6 +6,7 @@ use std::time::Instant;
 use crate::downloader::{self, display_width, format_size, pad, expand_github_urls};
 
 use crate::software::{self, SoftwareDef};
+use color;
 
 pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
     let start = Instant::now();
@@ -60,7 +61,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
     let max_idx_w = total.to_string().len();
     let speed_w: usize = 12;
 
-    println!("\n\x1b[90m共 {} 个下载源，正在并发测速...\x1b[0m\n", total);
+    println!("\n{}\n", color::gray(format!("共 {} 个下载源，正在并发测速...", total)));
 
     // Concurrent speed test — chunked to limit concurrency (match Python's max_workers=12)
     let results = Arc::new(Mutex::new(Vec::new()));
@@ -87,11 +88,11 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
                 // Print with lock for consistent ordering
                 let _guard = print_lock.lock().unwrap();
-                let (plain, color) = match speed {
-                    Some(s) => (format_size(s * 1024.0) + "/s", "\x1b[32m"),
-                    None => ("不可用".to_string(), "\x1b[33m"),
+                let (plain, color_code) = match speed {
+                    Some(s) => (format_size(s * 1024.0) + "/s", color::GREEN),
+                    None => ("不可用".to_string(), color::YELLOW),
                 };
-                let marker = format!("{}{}{}", color, pad(&plain, speed_w), "\x1b[0m");
+                let marker = color_code.paint(&pad(&plain, speed_w));
 
                 let idx_str = format!("{:0>w$}", current, w = max_idx_w);
                 let prefix = format!("  [{}/{}] {}", idx_str, total, pad(&display, max_name_w + 1));
@@ -109,7 +110,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
     let elapsed = start.elapsed().as_secs_f64();
     let results = results.lock().unwrap();
 
-    println!("\n\x1b[32m{}\x1b[0m", "═".repeat(70));
+    println!("\n{}", color::green("═".repeat(70)));
 
     if per_software {
         // ── 以软件为单位统计 ──
@@ -159,14 +160,14 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
             let name_d = downloader::truncate_display(name, name_w);
             let ver_d = downloader::truncate_display(version, ver_w);
             let speed_str = match best {
-                Some(s) => format!("\x1b[32m{:>10}\x1b[0m", format_size(s * 1024.0) + "/s"),
+                Some(s) => color::green(format!("{:>10}", format_size(s * 1024.0) + "/s")),
                 None => pad("-", 10),
             };
             let status = if *available {
                 avail_count += 1;
-                "\x1b[32m可用\x1b[0m"
+                color::green("可用".to_string())
             } else {
-                "\x1b[33m不可用\x1b[0m"
+                color::yellow("不可用".to_string())
             };
             println!(
                 "  {}{}{}  {}",
@@ -178,17 +179,19 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
         }
 
         let unavailable = summary.len() - avail_count;
-        print!("\n\x1b[90m总计: {} 个软件 | \x1b[32m{} 可用\x1b[0m | \x1b[33m{} 不可用\x1b[0m    耗时 {:.0}s\x1b[0m",
-            summary.len(), avail_count, unavailable, elapsed);
+        print!("\n{}", color::gray(format!("总计: {} 个软件 | ", summary.len())));
+        print!("{}", color::green(format!("{} 可用", avail_count)));
+        print!(" | {}    耗时 {:.0}s",
+            color::yellow(format!("{} 不可用", unavailable)), elapsed);
 
         if unavailable > 0 {
-            println!("\n\n  \x1b[33m⚠ 以下软件所有源均不可用:\x1b[0m");
+            println!("\n\n  {}", color::yellow("⚠ 以下软件所有源均不可用:"));
             for (name, _, _, _) in &summary {
                 if let Some((_, urls)) = by_sw.get(name) {
                     let all_dead = urls.iter().all(|r| r.3.is_none());
                     if all_dead {
                         for (_disp, _ver, url, _sp) in urls.iter() {
-                            println!("    \x1b[90m{}:\x1b[0m {}", name, url);
+                            println!("    {}: {}", color::gray(format!("{}", name)), url);
                         }
                     }
                 }
@@ -227,27 +230,29 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
         for (display, version, url, speed) in &avail {
             let s = speed.unwrap();
-            let marker = format!("\x1b[32m{:>10}\x1b[0m", format_size(s * 1024.0) + "/s");
+            let marker = color::green(format!("{:>10}", format_size(s * 1024.0) + "/s"));
             let name_d = downloader::truncate_display(display, name_w);
             let ver_d = downloader::truncate_display(version, ver_w);
             println!(
-                "  {}{}{}  \x1b[90m{}\x1b[0m",
+                "  {}{}{}  {}",
                 pad(&name_d, name_w + 2),
                 pad(&ver_d, ver_w + 1),
                 marker,
-                url,
+                color::gray(url.clone()),
             );
         }
 
         let unavailable = total - avail.len();
-        print!("\n\x1b[90m总计: {} 个源 | \x1b[32m{} 可用\x1b[0m | \x1b[33m{} 不可用\x1b[0m    耗时 {:.0}s\x1b[0m",
-            total, avail.len(), unavailable, elapsed);
+        print!("\n{}", color::gray(format!("总计: {} 个源 | ", total)));
+        print!("{}", color::green(format!("{} 可用", avail.len())));
+        print!(" | {}    耗时 {:.0}s",
+            color::yellow(format!("{} 不可用", unavailable)), elapsed);
 
         if unavailable > 0 {
-            println!("\n\n  \x1b[33m⚠ 以下源不可用，建议检查或更新:\x1b[0m");
+            println!("\n\n  {}", color::yellow("⚠ 以下源不可用，建议检查或更新:"));
             for (display, _, url, speed) in results.iter() {
                 if speed.is_none() {
-                    println!("    \x1b[90m{}:\x1b[0m {}", display, url);
+                    println!("    {}: {}", color::gray(format!("{}", display)), url);
                 }
             }
         }

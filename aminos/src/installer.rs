@@ -10,6 +10,7 @@ use crate::paths;
 use crate::pe_version;
 use crate::registry;
 use crate::software::{self, SoftwareDef, VersionInfo};
+use color;
 
 // ── Installer type detection ──────────────────────────────
 
@@ -167,7 +168,7 @@ pub fn install_software(
 
     println!("\n✓ {} {} 安装完成", display, canonical_version);
     if provenance == "pe" && canonical_version != ver {
-        println!("  \x1b[90m(源声明 v{}, PE 真实 v{})\x1b[0m", ver, canonical_version);
+        println!("  {}", color::gray(format!("(源声明 v{}, PE 真实 v{})", ver, canonical_version)));
     }
     if let Some(ref sk) = shortcut_key {
         println!("  快捷方式: {}", sk);

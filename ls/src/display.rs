@@ -1,9 +1,15 @@
+use color::{DisplayWidth, Style};
+
 use crate::config::ColorConfig;
 use crate::scanner::ItemInfo;
 
-/// 带颜色的文本
-pub fn colored(text: &str, code: &str) -> String {
-    format!("\x1b[{}m{}\x1b[0m", code, text)
+/// 根据 ANSI 数字码着色文本（与 config 中存储的数字码兼容）
+pub fn paint_by_code(text: &str, code: &str) -> String {
+    if let Ok(n) = code.parse::<u8>() {
+        Style::new(n).paint(text)
+    } else {
+        text.to_string()
+    }
 }
 
 /// 格式化时间戳（Unix 秒 → YYYY-MM-DD HH:mm:ss）
@@ -80,24 +86,6 @@ pub fn format_timestamp(secs: i64) -> String {
     }
 }
 
-/// 格式化文件大小
-pub fn format_size(size: u64) -> String {
-    if size < 1024 {
-        format!("{}B", size)
-    } else if size < 1024 * 1024 {
-        format!("{:.1}KB", size as f64 / 1024.0)
-    } else if size < 1024 * 1024 * 1024 {
-        format!("{:.1}MB", size as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1}GB", size as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
-/// 计算显示宽度（中文字符占2）
-pub fn display_width(s: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(s)
-}
-
 /// 文件大小着色结果
 struct SizeStyle {
     color: String,
@@ -140,7 +128,7 @@ impl Formatter {
         if self.no_color {
             text
         } else {
-            colored(&text, "90")
+            color::gray(&text)
         }
     }
 
@@ -150,14 +138,14 @@ impl Formatter {
         if self.no_color {
             text
         } else {
-            colored(&text, "90")
+            color::gray(&text)
         }
     }
 
     /// 打印文件名（带颜色）
     pub fn print_file_name(&self, item: &ItemInfo, right_align: bool, max_width: usize) -> String {
         let name = &item.name;
-        let width = display_width(name);
+        let width = name.display_width();
         let padding = if right_align && width < max_width {
             max_width - width
         } else {
@@ -173,7 +161,7 @@ impl Formatter {
         match color {
             Some(code) => {
                 if item.is_dir || item.link_type != crate::links::LinkType::File {
-                    format!("{}{} ", pad_str, colored(name, code))
+                    format!("{}{} ", pad_str, paint_by_code(name, code))
                 } else {
                     // 仅后缀着色：文件名用白色，后缀用扩展名颜色
                     let ext = std::path::Path::new(name)
@@ -182,14 +170,14 @@ impl Formatter {
                         .unwrap_or_default();
                     let name_part = name.strip_suffix(&ext).unwrap_or(name);
                     if ext.is_empty() {
-                        format!("{}{} ", pad_str, colored(name, "97"))
+                        format!("{}{} ", pad_str, paint_by_code(name, "97"))
                     } else {
                         let ext_color = self.config.ext_color(&ext);
                         match ext_color {
                             Some(ec) if ec != code => {
-                                format!("{}{}{} ", pad_str, colored(name_part, "97"), colored(&ext, ec))
+                                format!("{}{}{} ", pad_str, paint_by_code(name_part, "97"), paint_by_code(&ext, ec))
                             }
-                            _ => format!("{}{} ", pad_str, colored(name, code)),
+                            _ => format!("{}{} ", pad_str, paint_by_code(name, code)),
                         }
                     }
                 }
@@ -227,7 +215,7 @@ impl Formatter {
         if self.no_color {
             text
         } else {
-            colored(&text, &color)
+            paint_by_code(&text, color)
         }
     }
 
@@ -247,7 +235,7 @@ impl Formatter {
 
         if let Some(parent) = parent {
             if !parent.is_empty() && parent != "." {
-                result.push_str(&colored(parent, &self.config.dir_link_path_color));
+                result.push_str(&paint_by_code(parent, &self.config.dir_link_path_color));
                 result.push('\\');
             }
         }
@@ -266,7 +254,7 @@ impl Formatter {
                 "97"
             };
 
-            result.push_str(&colored(name, color));
+            result.push_str(&paint_by_code(name, color));
         } else {
             result.push_str(&target);
         }
@@ -276,7 +264,7 @@ impl Formatter {
 
     /// 打印文件大小
     pub fn print_size(&self, item: &ItemInfo, max_width: usize) -> String {
-        let size_str = format_size(item.size);
+        let size_str = color::format_size(item.size);
         let padding = if max_width > size_str.len() {
             max_width - size_str.len()
         } else {
@@ -290,12 +278,12 @@ impl Formatter {
 
         let style = get_size_style(item.size, &self.config.size_rules);
         let colored_size = if style.mode == "full" {
-            colored(&size_str, &style.color)
+            paint_by_code(&size_str, &style.color)
         } else {
             let split_idx = size_str.len()
                 - size_str.chars().rev().position(|c| c.is_alphabetic()).unwrap_or(0);
             let (num_part, unit_part) = size_str.split_at(split_idx);
-            format!("{}{}", num_part, colored(unit_part, &style.color))
+            format!("{}{}", num_part, paint_by_code(unit_part, &style.color))
         };
         format!("{}{} ", pad_str, colored_size)
     }

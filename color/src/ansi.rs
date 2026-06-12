@@ -1,5 +1,29 @@
 use std::borrow::Cow;
 
+// ── ANSI 转义常量（用于 const/compile-time 场景如 clap help_template）──
+
+/// # 用法
+/// ```ignore
+/// use color::ansi;
+/// const HELP: &str = concat!(ansi::BOLD_CYAN, "标题", ansi::RESET, "\n");
+/// ```
+pub const ESC:  &str = "\x1b[";
+pub const RESET: &str = "\x1b[0m";
+pub const BOLD: &str = "\x1b[1m";
+pub const DIM: &str = "\x1b[2m";
+pub const BOLD_CYAN: &str = "\x1b[1;36m";
+pub const BOLD_YELLOW: &str = "\x1b[1;33m";
+pub const BOLD_GREEN: &str = "\x1b[1;32m";
+pub const BOLD_RED: &str = "\x1b[1;31m";
+pub const CYAN: &str = "\x1b[36m";
+pub const GREEN: &str = "\x1b[32m";
+pub const YELLOW: &str = "\x1b[33m";
+pub const RED: &str = "\x1b[31m";
+pub const GRAY: &str = "\x1b[90m";
+pub const BLUE: &str = "\x1b[34m";
+pub const MAGENTA: &str = "\x1b[35m";
+pub const DARK_GRAY: &str = "\x1b[2;90m";
+
 /// 启用 Windows 终端 ANSI 转义序列支持。
 ///
 /// 在 Windows 10 及以上版本中，需要启用 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`

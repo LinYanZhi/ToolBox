@@ -8,6 +8,7 @@ mod speedtest;
 
 use clap::{CommandFactory, Parser, Subcommand};
 
+use color::DisplayWidth;
 use crate::downloader::{display_width, format_size, pad, truncate_display};
 
 const HELP_TEMPLATE: &str = "\
@@ -22,17 +23,12 @@ const HELP_TEMPLATE: &str = "\
 {options}
 
 \x1b[1;33m示例:\x1b[0m
-  \x1b[36mas source update\x1b[0m        下载软件源
-  \x1b[36mas list\x1b[0m                 列出所有可安装的软件
-  \x1b[36mas install 7zip\x1b[0m         安装指定软件
-  \x1b[36mas upgrade\x1b[0m              升级所有已安装的软件
-  \x1b[36mas upgrade --check\x1b[0m      仅检查更新
-  \x1b[36mas info 7zip\x1b[0m            查看软件详情
-  \x1b[36mas info 7zip --urls\x1b[0m     查看所有下载地址
-  \x1b[36mas source dirs\x1b[0m          查看所有数据目录
+  \x1b[36mas list\x1b[0m
+  \x1b[36mas install 7zip\x1b[0m
+  \x1b[36mas uninstall 7zip\x1b[0m
 
 \x1b[1;33m提示:\x1b[0m
-  更多帮助请运行 \x1b[36mas <命令> --help\x1b[0m
+  更多示例请运行 \x1b[36mas -e\x1b[0m
 ";
 
 /// 仅含选项的子命令帮助模板
@@ -71,6 +67,10 @@ const HELP_TEMPLATE_SUBCMDS: &str = "\
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// 显示所有命令的示例用法
+    #[arg(short = 'e', long = "example")]
+    example: bool,
 }
 
 #[derive(Subcommand)]
@@ -141,15 +141,6 @@ enum Command {
         #[arg(short, long)]
         force: bool,
     },
-    /// 测速所有下载源
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Speedtest {
-        /// 可选：仅测速指定软件
-        name: Vec<String>,
-        /// 以软件为单位统计（任一源可用即为通）
-        #[arg(short = 'S', long = "software")]
-        software: bool,
-    },
     /// 查看已下载的缓存文件
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Cache {
@@ -196,35 +187,18 @@ enum SourceCmd {
         #[arg(short, long)]
         open: bool,
     },
-}
-
-fn enable_ansi() {
-    #[cfg(windows)]
-    {
-        unsafe extern "system" {
-            fn GetStdHandle(nStdHandle: u32) -> isize;
-            fn GetConsoleMode(hConsoleHandle: isize, lpMode: *mut u32) -> i32;
-            fn SetConsoleMode(hConsoleHandle: isize, dwMode: u32) -> i32;
-        }
-        const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-
-        unsafe {
-            for &handle_id in &[0xFFFFFFF5u32, 0xFFFFFFF4u32] {
-                let h = GetStdHandle(handle_id);
-                if h <= 0 {
-                    continue;
-                }
-                let mut mode: u32 = 0;
-                if GetConsoleMode(h, &mut mode) != 0 {
-                    let _ = SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-                }
-            }
-        }
-    }
+    /// 测速所有下载源
+    Speedtest {
+        /// 可选：仅测速指定软件
+        name: Vec<String>,
+        /// 以软件为单位统计（任一源可用即为通）
+        #[arg(short = 'S', long = "software")]
+        software: bool,
+    },
 }
 
 fn main() {
-    enable_ansi();
+    color::enable_ansi();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -234,6 +208,10 @@ fn main() {
     };
     match cli.command {
         None => {
+            if cli.example {
+                run_example();
+                return;
+            }
             let _ = Cli::command().print_help();
         }
         Some(Command::Install { names, version, gui, renew, download_only }) => {
@@ -248,9 +226,6 @@ fn main() {
         Some(Command::Info { name, urls }) => {
             let _ = run(|| run_info(&name, urls));
         }
-        Some(Command::Speedtest { name, software }) => {
-            let _ = run(|| speedtest::speedtest(&name, software));
-        }
         Some(Command::Source { action }) => {
             let _ = run(|| run_source(action));
         }
@@ -260,6 +235,85 @@ fn main() {
         Some(Command::Upgrade { names, check, renew }) => {
             let _ = run(|| run_upgrade(names, check, renew));
         }
+    }
+}
+
+/// 显示所有命令的详细示例用法
+fn run_example() {
+    println!();
+    println!("  {}",
+        color::bold_cyan("aminos 命令参考手册"));
+    println!();
+
+    let examples: &[(&str, &str, &[(&str, &str)])] = &[
+        ("install", "安装指定软件", &[
+            ("as install 7zip", "安装 7-Zip（最新版）"),
+            ("as install vscode python git", "同时安装多个软件"),
+            ("as install 7zip -v 1.0.0", "安装指定版本"),
+            ("as install 7zip --gui", "使用图形界面向导安装"),
+            ("as install 7zip --renew", "强制重新下载并安装"),
+            ("as install 7zip --download-only", "仅下载，不安装"),
+        ]),
+        ("list", "列出可用软件及安装状态", &[
+            ("as list", "列出所有软件"),
+            ("as list -i", "仅显示已安装的软件"),
+            ("as list -m", "仅显示未安装的软件"),
+            ("as list -S python", "搜索名称包含 python 的软件"),
+            ("as list -D", "仅显示已下载缓存的软件"),
+            ("as list --downloading", "仅显示正在下载的软件"),
+            ("as list --no-download", "仅显示未下载的软件"),
+            ("as list -f 办公", "按分类过滤（如: 办公, 开发, 浏览器）"),
+        ]),
+        ("info", "查看软件详细信息", &[
+            ("as info 7zip", "查看 7-Zip 的基本信息"),
+            ("as info 7zip --urls", "查看所有可用下载地址"),
+        ]),
+        ("uninstall", "卸载指定软件", &[
+            ("as uninstall 7zip", "静默卸载 7-Zip"),
+            ("as uninstall vscode python", "同时卸载多个软件"),
+            ("as uninstall 7zip --gui", "使用图形界面卸载向导"),
+            ("as uninstall 7zip --force", "强制删除（跳过卸载器）"),
+        ]),
+        ("cache", "查看已下载的缓存文件", &[
+            ("as cache", "查看缓存文件列表和一致性"),
+            ("as cache --clear", "清除所有缓存文件"),
+            ("as cache --open", "在资源管理器中打开缓存目录"),
+        ]),
+        ("upgrade", "升级所有已安装的软件", &[
+            ("as upgrade", "升级所有已安装的软件"),
+            ("as upgrade 7zip", "仅升级指定软件"),
+            ("as upgrade --check", "仅检查更新，不下载不安装"),
+            ("as upgrade --renew", "强制重新下载（即使版本相同）"),
+        ]),
+        ("source", "管理软件源定义", &[
+            ("as source update", "从远程仓库下载最新源定义"),
+            ("as source path", "显示源定义目录路径"),
+            ("as source path --open", "在资源管理器中打开源目录"),
+            ("as source dirs", "显示所有数据目录位置"),
+            ("as source speedtest", "对所有软件的所有源测速"),
+            ("as source speedtest 7zip", "仅对指定软件的源测速"),
+            ("as source speedtest -S", "以软件为单位统计可用性"),
+        ]),
+    ];
+
+    // 计算示例命令文本的最大显示宽度用于对齐
+    let max_usage_w = examples.iter()
+        .flat_map(|(_, _, entries)| entries.iter())
+        .map(|(usage, _)| (*usage).display_width())
+        .max()
+        .unwrap_or(44);
+
+    for (cmd, desc, entries) in examples {
+        println!("  {}  {}",
+            color::bold_green(format!("{:<12}", cmd)),
+            color::gray(desc));
+        println!();
+        for (usage, explanation) in *entries {
+            println!("    {}  {}",
+                color::cyan(pad(usage, max_usage_w)),
+                explanation);
+        }
+        println!();
     }
 }
 
@@ -349,16 +403,16 @@ fn print_clap_error(e: clap::Error) {
         .and_then(|u| u.strip_prefix("Usage:"))
         .unwrap_or("");
 
-    eprintln!("\x1b[31m错误:\x1b[0m {}", msg);
+    eprintln!("{} {}", color::red("错误:"), msg);
     if !usage_line.is_empty() {
-        eprintln!("\x1b[1;33m用法:\x1b[0m{}", usage_line);
+        eprintln!("{} {}", color::bold_yellow("用法:"), usage_line);
     }
-    eprintln!("\x1b[90m更多帮助请运行 --help\x1b[0m");
+    eprintln!("{}", color::gray("更多帮助请运行 --help"));
 }
 
 fn run<F: FnOnce() -> anyhow::Result<()>>(f: F) -> anyhow::Result<()> {
     if let Err(e) = f() {
-        eprintln!("\x1b[31m错误:\x1b[0m {}", e);
+        eprintln!("{} {}", color::red("错误:"), e);
     }
     Ok(())
 }
@@ -369,7 +423,7 @@ fn run_install(names: Vec<String>, version: String, gui: bool, renew: bool, down
     for name in &names {
         let n = name.to_lowercase();
         if let Err(e) = installer::install_software(&n, &version, gui, renew, download_only) {
-            eprintln!("  \x1b[33m跳过 {}\x1b[0m: {}", name, e);
+            eprintln!("  {} {}: {}", color::yellow("跳过"), name, e);
         }
     }
     Ok(())
@@ -397,7 +451,7 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
         let sd = match software::read_software_def(name) {
             Ok(sd) => sd,
             Err(e) => {
-                eprintln!("  \x1b[33m跳过 {}\x1b[0m: {}", name, e);
+                eprintln!("  {} {}: {}", color::yellow("跳过"), name, e);
                 failed += 1;
                 continue;
             }
@@ -424,14 +478,15 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
             .unwrap_or("");
 
         if current_ver == source_ver && !renew {
-            println!("  \x1b[90m{} {} 已是最新\x1b[0m", display, current_ver);
+            println!("  {}", color::gray(format!("{} {} 已是最新", display, current_ver)));
             up_to_date += 1;
             continue;
         }
 
         if check_only {
-            println!("  \x1b[33m{} {}\x1b[0m → \x1b[32m{}\x1b[0m 可更新",
-                display, current_ver, source_ver);
+            println!("  {} → {} 可更新",
+                color::yellow(format!("{} {}", display, current_ver)),
+                color::green(source_ver));
             updated += 1;
             continue;
         }
@@ -442,7 +497,7 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
                 updated += 1;
             }
             Err(e) => {
-                eprintln!("  \x1b[33m升级 {} 失败\x1b[0m: {}", display, e);
+                eprintln!("  {}: {}", color::yellow(format!("升级 {} 失败", display)), e);
                 failed += 1;
             }
         }
@@ -450,11 +505,13 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
 
     println!();
     if check_only {
-        println!("\x1b[90m共检查 {} 个，{} 个可更新，{} 个最新，{} 个失败\x1b[0m",
-            targets.len(), updated, up_to_date, failed);
+        println!("{}",
+            color::gray(format!("共检查 {} 个，{} 个可更新，{} 个最新，{} 个失败",
+                targets.len(), updated, up_to_date, failed)));
     } else {
-        println!("\x1b[90m共 {} 个，{} 个已升级，{} 个已最新，{} 个失败\x1b[0m",
-            targets.len(), updated, up_to_date, failed);
+        println!("{}",
+            color::gray(format!("共 {} 个，{} 个已升级，{} 个已最新，{} 个失败",
+                targets.len(), updated, up_to_date, failed)));
     }
     Ok(())
 }
@@ -463,7 +520,7 @@ fn run_uninstall(names: Vec<String>, gui: bool, force: bool) -> anyhow::Result<(
     for name in &names {
         let n = name.to_lowercase();
         if let Err(e) = installer::uninstall_software(&n, gui, force) {
-            eprintln!("  \x1b[33m跳过 {}\x1b[0m: {}", name, e);
+            eprintln!("  {} {}: {}", color::yellow("跳过"), name, e);
         }
     }
     Ok(())
@@ -517,16 +574,16 @@ fn scan_download_cache() -> std::collections::HashMap<String, (&'static str, &'s
                 continue;
             }
 
-            let (status, color) = if is_downloading {
-                ("下载中", "\x1b[33m") // 黄色
+            let (status, color_code) = if is_downloading {
+                ("下载中", color::ansi::YELLOW) // 黄色
             } else {
-                ("已下载", "\x1b[36m") // 青色
+                ("已下载", color::ansi::CYAN) // 青色
             };
 
             // 优先保留"已下载"状态（覆盖"下载中"）
-            let entry = result.entry(name_part).or_insert((status, color));
+            let entry = result.entry(name_part).or_insert((status, color_code));
             if !is_downloading {
-                *entry = (status, color);
+                *entry = (status, color_code);
             }
         }
     }
@@ -538,7 +595,7 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
     // Auto-init: if source dir is empty, suggest `as source update`
     let source = paths::source_dir();
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
-        println!("\x1b[33m  未找到源定义。首次使用请运行:\x1b[0m");
+        println!("{}", color::yellow("  未找到源定义。首次使用请运行:"));
         println!("  as source update\n");
         return Ok(());
     }
@@ -560,16 +617,16 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
         }
         let has_source = defs.iter().any(|sd| name_matches(&rn, sd));
         let src_label = if has_source { "有" } else { "无" };
-        let src_color = if has_source { "\x1b[32m" } else { "\x1b[90m" };
+        let src_color = if has_source { color::ansi::GREEN } else { color::ansi::GRAY };
         // 通过软件名查找下载状态
         let (dl_status, dl_color) = if has_source {
             if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
-                dl_cache.get(&sd.name).copied().unwrap_or(("未下载", "\x1b[90m"))
+                dl_cache.get(&sd.name).copied().unwrap_or(("未下载", color::ansi::GRAY))
             } else {
-                ("未下载", "\x1b[90m")
+                ("未下载", color::ansi::GRAY)
             }
         } else {
-            ("未下载", "\x1b[90m")
+            ("未下载", color::ansi::GRAY)
         };
         // 版本 reconciliation：installed_db (PE) > Registry DisplayVersion
         let ver = if has_source {
@@ -584,7 +641,7 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
             reg.get("version").cloned().unwrap_or_default()
         };
         rows.push((rn, ver,
-            "已安装", "\x1b[32m", dl_status, dl_color, src_label, src_color));
+            "已安装", color::ansi::GREEN, dl_status, dl_color, src_label, src_color));
     }
 
     // 2. Source definitions not in registry
@@ -599,14 +656,14 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
         }
         let (dl_status, dl_color) = dl_cache.get(name)
             .copied()
-            .unwrap_or(("未下载", "\x1b[90m"));
+            .unwrap_or(("未下载", color::ansi::GRAY));
         if let Some(rec) = installed_db.get(name) {
             rows.push((display.to_string(), rec.version.clone(),
-                "已安装", "\x1b[32m", dl_status, dl_color, "有", "\x1b[32m"));
+                "已安装", color::ansi::GREEN, dl_status, dl_color, "有", color::ansi::GREEN));
             continue;
         }
         rows.push((display.to_string(), sd.default_version.clone(),
-            "未安装", "\x1b[90m", dl_status, dl_color, "有", "\x1b[32m"));
+            "未安装", color::ansi::GRAY, dl_status, dl_color, "有", color::ansi::GREEN));
     }
 
     // 3. Filter by install/download/search
@@ -660,21 +717,23 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
         let name_d = truncate_display(name, max_name);
         let ver_d = truncate_display(ver, max_ver + 1);
         println!(
-            "{}{}{}{}{}{}{}{}{}{}\x1b[0m",
+            "{}{}{}{}{}{}{}{}{}{}{}{}",
             pad(&name_d, max_name + 2),
             pad(&ver_d, max_ver + 2),
             dl_color,
             pad(dl_status, 8),
-            "\x1b[0m ",
+            color::ansi::RESET,
+            " ",
             status_color,
             pad(_status, 8),
-            "\x1b[0m ",
+            color::ansi::RESET,
+            " ",
             src_color,
             pad(src_label, 4),
         );
     }
 
-    println!("\n\x1b[90m共 {} 项\x1b[0m", rows.len());
+    println!("\n{}", color::gray(format!("共 {} 项", rows.len())));
     Ok(())
 }
 
@@ -687,7 +746,7 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
 
     // --urls 模式：仅列出所有下载地址
     if show_urls {
-        println!("\x1b[32m{}\x1b[0m", display);
+        println!("{}", color::green(format!("{}", display)));
         let mut sorted_versions: Vec<&String> = sd.versions.keys().collect();
         sorted_versions.sort_by(|a, b| {
             let a_segs: Vec<u32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
@@ -705,7 +764,7 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
         for vk in &sorted_versions {
             let vi = &sd.versions[*vk];
             let expanded = crate::downloader::expand_github_urls(&vi.urls);
-            println!("  \x1b[36m{}\x1b[0m", vk);
+            println!("  {}", color::cyan(format!("{}", vk)));
             for url in &expanded {
                 println!("    {}", url);
             }
@@ -718,7 +777,7 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
     let homepage = &sd.homepage;
     let default_ver = &sd.default_version;
 
-    println!("\x1b[32m{}\x1b[0m", display);
+    println!("{}", color::green(format!("{}", display)));
     if !desc.is_empty() {
         println!("  {}", desc);
     }
@@ -727,18 +786,18 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
     // Identifier & aliases
     let primary_id = &sd.name;
     let aliases = &sd.aliases;
-    let mut id_line = format!("  \x1b[90m标识符:\x1b[0m   {}", primary_id);
+    let mut id_line = format!("  {}   {}", color::gray("标识符:"), primary_id);
     if !aliases.is_empty() {
         id_line.push_str(&format!("  ({})", aliases.join(", ")));
     }
     println!("{}", id_line);
-    println!("  \x1b[90m分类:\x1b[0m     {}", category);
-    println!("  \x1b[90m官网:\x1b[0m     {}", homepage);
+    println!("  {}     {}", color::gray("分类:"), category);
+    println!("  {}     {}", color::gray("官网:"), homepage);
 
     // Installation detection
     let installed_db = software::read_installed_db().unwrap_or_default();
     if let Some(rec) = installed_db.get(&sd.name) {
-        println!("\n  \x1b[32m已安装\x1b[0m (版本 {})", rec.version);
+        println!("\n  {} (版本 {})", color::green("已安装"), rec.version);
         if !rec.install_path.is_empty() {
             println!("  路径: {}", rec.install_path);
         }
@@ -746,7 +805,7 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
         let mut found = false;
         for reg in registry::scan_all_installed() {
             if name_matches(&reg.get("display_name").cloned().unwrap_or_default(), &sd) {
-                println!("\n  \x1b[32m已安装\x1b[0m");
+                println!("\n  {}", color::green("已安装"));
                 println!("  显示名称: {}", reg.get("display_name").unwrap_or(&"".to_string()));
                 println!("  版本: {}", reg.get("version").unwrap_or(&"".to_string()));
                 if let Some(p) = reg.get("install_path") {
@@ -764,12 +823,12 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
             }
         }
         if !found {
-            println!("\n  \x1b[90m未安装\x1b[0m");
+            println!("\n  {}", color::gray("未安装"));
         }
     }
 
     // Version list
-    println!("\n  \x1b[90m可用版本:\x1b[0m");
+    println!("\n  {}", color::gray("可用版本:"));
     let mut sorted_versions: Vec<&String> = sd.versions.keys().collect();
     sorted_versions.sort_by(|a, b| {
         let a_segs: Vec<u32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
@@ -790,9 +849,9 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
         let urls = &vi.urls;
         let first_url = urls.first().map(|s| s.as_str()).unwrap_or("无下载地址");
         let installer_type = if vi.installer_type.is_empty() { "(auto)" } else { &vi.installer_type };
-        println!("    \x1b[32m{}{}\x1b[0m", vk, marker);
-        println!("      \x1b[90m类型:\x1b[0m {}", installer_type);
-        println!("      \x1b[90m下载:\x1b[0m {}", first_url);
+        println!("    {}", color::green(format!("{}{}", vk, marker)));
+        println!("      {} {}", color::gray("类型:"), installer_type);
+        println!("      {} {}", color::gray("下载:"), first_url);
         // Show additional URLs
         for url in urls.iter().skip(1) {
             println!("           {}", url);
@@ -822,6 +881,9 @@ fn run_source(action: SourceCmd) -> anyhow::Result<()> {
         SourceCmd::Dirs { open } => {
             return run_dirs(open);
         }
+        SourceCmd::Speedtest { name, software } => {
+            return speedtest::speedtest(&name, software);
+        }
     }
     Ok(())
 }
@@ -840,29 +902,29 @@ fn run_dirs(open_explorer: bool) -> anyhow::Result<()> {
     }
 
     let exe = std::env::current_exe().unwrap_or_default();
-    println!("\x1b[1;36maminos 数据目录一览\x1b[0m\n");
+    println!("\n{}\n", color::bold_cyan("aminos 数据目录一览"));
 
-    println!("  \x1b[1;33m可执行文件\x1b[0m");
+    println!("  {}", color::bold_yellow("可执行文件"));
     println!("    {}", exe.display());
 
     println!();
-    println!("  \x1b[1;33m软件源定义\x1b[0m  (json)");
+    println!("  {}  (json)", color::bold_yellow("软件源定义"));
     println!("    {}", paths::source_dir().display());
 
     println!();
-    println!("  \x1b[1;33m安装包缓存\x1b[0m  (下载的 exe/msi/zip)");
+    println!("  {}  (下载的 exe/msi/zip)", color::bold_yellow("安装包缓存"));
     println!("    {}", paths::downloads_dir().display());
 
     println!();
-    println!("  \x1b[1;33m安装记录\x1b[0m  (installed.json)");
+    println!("  {}  (installed.json)", color::bold_yellow("安装记录"));
     println!("    {}", paths::installed_json().display());
 
     println!();
-    println!("  \x1b[1;33m快捷方式\x1b[0m  (as 安装的软件链接)");
+    println!("  {}  (as 安装的软件链接)", color::bold_yellow("快捷方式"));
     println!("    {}", paths::apps_dir().display());
 
     println!();
-    println!("  \x1b[1;33m数据根目录\x1b[0m");
+    println!("  {}", color::bold_yellow("数据根目录"));
     println!("    {}", root.display());
 
     Ok(())
@@ -902,8 +964,7 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
                     let _ = std::fs::remove_file(entry.path());
                 }
             }
-            println!("\x1b[32m已清除 {} 个缓存文件 ({} 空间)\x1b[0m",
-                count, format_size(total_size as f64));
+            println!("{}", color::green(format!("已清除 {} 个缓存文件 ({} 空间)", count, format_size(total_size as f64))));
         } else {
             println!("缓存目录不存在，无需清除。");
         }
@@ -942,10 +1003,10 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
                     });
                     match matched_sd {
                         Some(sd) if sd.default_version != pe_ver => {
-                            format!("\x1b[33m ⚠\x1b[0m")
+                            color::yellow(" ⚠")
                         }
                         Some(_) => {
-                            format!("\x1b[32m ✓\x1b[0m")
+                            color::green(" ✓")
                         }
                         None => String::new(),
                     }
@@ -962,7 +1023,7 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
     let max_name = entries.iter().map(|(n, _, _, _)| display_width(n)).max().unwrap_or(4).min(50);
     let max_ver = entries.iter().map(|(_, _, v, _)| display_width(v)).max().unwrap_or(4).max(4);
 
-    println!("\n\x1b[1;33m下载缓存\x1b[0m  \x1b[90m{}\x1b[0m\n", downloads.display());
+    println!("\n{}  {}\n", color::bold_yellow("下载缓存"), color::gray(format!("{}", downloads.display())));
     println!("  {}{}{}",
         pad("文件", max_name + 2),
         pad("版本", max_ver + 2),
@@ -980,12 +1041,12 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
     // 图例
     if entries.iter().any(|(_, _, _, c)| !c.is_empty()) {
         println!();
-        println!("  \x1b[32m✓\x1b[0m 版本与源定义一致  \x1b[33m⚠\x1b[0m 与源定义不一致");
+        println!("  {} 版本与源定义一致  {} 与源定义不一致", color::green("✓"), color::yellow("⚠"));
     }
 
-    println!("\n\x1b[90m共 {} 个文件，{} 空间\x1b[0m", entries.len(), format_size(total_size as f64));
-    println!("\x1b[90m  as cache --clear  清除缓存\x1b[0m");
-    println!("\x1b[90m  as cache --open   在资源管理器中打开\x1b[0m");
+    println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size as f64))));
+    println!("{}", color::gray("  as cache --clear  清除缓存"));
+    println!("{}", color::gray("  as cache --open   在资源管理器中打开"));
     Ok(())
 }
 

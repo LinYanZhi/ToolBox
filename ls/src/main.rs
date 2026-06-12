@@ -6,13 +6,14 @@ mod scanner;
 use std::path::Path;
 
 use clap::Parser;
+use color::*;
 use display::Formatter;
 use scanner::ItemInfo;
 
 #[derive(Parser)]
 #[command(
     name = "ls",
-    version = version_info(),
+    version = version_str(),
     about,
     disable_help_flag = true,
     disable_version_flag = true,
@@ -61,16 +62,22 @@ struct Cli {
     version: bool,
 }
 
-fn version_info() -> &'static str {
-    concat!(
-        "\x1b[1;36mls \x1b[32m",
-        env!("CARGO_PKG_VERSION"),
-        "\x1b[0m (\x1b[90mRust 版\x1b[0m)\n\
-         \x1b[33m一个轻量级的目录列表工具\x1b[0m\n\
-         ---\n\
-         \x1b[34mGitHub: \x1b[0m\x1b[4mhttps://github.com/LinYanZhi/ToolBox\x1b[0m"
+const fn version_str() -> &'static str {
+    concat!(env!("CARGO_PKG_VERSION"), " (Rust版)")
+}
+
+fn version_info() -> String {
+    format!(
+        "{} {} ({})
+{}
+---
+{}",
+        bold_cyan("ls"),
+        green(env!("CARGO_PKG_VERSION")),
+        gray("Rust 版"),
+        yellow("一个轻量级的目录列表工具"),
+        format!("{}: {}", blue("GitHub"), Style::new(4).paint("https://github.com/LinYanZhi/ToolBox")),
     )
-    .trim()
 }
 
 fn main() {
@@ -149,13 +156,13 @@ fn main() {
 
     // 计算最大宽度
     let max_width = if cli.right_align {
-        items.iter().map(|item| display::display_width(&item.name)).max().unwrap_or(0)
+        items.iter().map(|item| item.name.display_width()).max().unwrap_or(0)
     } else {
         0
     };
 
     let max_size_width = if cli.size {
-        items.iter().map(|item| display::format_size(item.size).len()).max().unwrap_or(0)
+        items.iter().map(|item| color::format_size(item.size).len()).max().unwrap_or(0)
     } else {
         0
     };
@@ -169,31 +176,59 @@ fn main() {
 
 /// 打印中文帮助信息
 fn print_help() {
-    println!("\x1b[1;33m用法:\x1b[0m ls \x1b[36m[-h]\x1b[0m \x1b[36m[-n]\x1b[0m \x1b[36m[-s\x1b[0m \x1b[90m{{\x1b[0m\x1b[90mdefault,name,suffix,create,update\x1b[0m\x1b[90m}}\x1b[0m\x1b[36m]\x1b[0m");
-    println!("\x1b[36m            [-e\x1b[0m \x1b[4mEXCLUDE\x1b[0m\x1b[36m [\x1b[0m\x1b[4mEXCLUDE\x1b[0m\x1b[36m ...]]\x1b[0m");
-    println!("\x1b[36m            [-i\x1b[0m \x1b[4mINCLUDE\x1b[0m\x1b[36m [\x1b[0m\x1b[4mINCLUDE\x1b[0m\x1b[36m ...]]\x1b[0m \x1b[36m[-f]\x1b[0m \x1b[36m[-d]\x1b[0m");
-    println!("\x1b[36m            [-a]\x1b[0m \x1b[36m[-r]\x1b[0m \x1b[36m[-z]\x1b[0m \x1b[36m[-t\x1b[0m \x1b[90m[\x1b[0m\x1b[4mTREE\x1b[0m\x1b[90m]\x1b[0m\x1b[36m]\x1b[0m \x1b[36m[--link\x1b[0m \x1b[4mPATH\x1b[0m\x1b[36m]\x1b[0m");
-    println!("\x1b[36m            [\x1b[0m\x1b[4mdirectory\x1b[0m\x1b[36m]\x1b[0m");
+    println!("{} ls [-h] [-n] [-s {}]",
+        bold_yellow("用法:"),
+        gray("default,name,suffix,create,update"));
+    println!("{}            [-e {} [{} ...]]",
+        cyan(""),
+        Style::new(4).paint("EXCLUDE"),
+        Style::new(4).paint("EXCLUDE"));
+    println!("{}            [-i {} [{} ...]] [-f] [-d]",
+        cyan(""),
+        Style::new(4).paint("INCLUDE"),
+        Style::new(4).paint("INCLUDE"));
+    println!("{}            [-a] [-r] [-z] [-t [{}]] [--link {}]",
+        cyan(""),
+        gray("TREE"),
+        Style::new(4).paint("PATH"));
+    println!("{}            [{}]",
+        cyan(""),
+        Style::new(4).paint("directory"));
     println!();
-    println!("\x1b[1;33m列出目录内容\x1b[0m");
+    println!("{}", bold_yellow("列出目录内容"));
     println!();
-    println!("\x1b[1;33m位置参数:\x1b[0m");
-    println!("  \x1b[4mdirectory\x1b[0m              要列出的目录路径（默认: 当前目录）");
+    println!("{}", bold_yellow("位置参数:"));
+    println!("  {}  {}", pad_left(Style::new(4).paint("directory"), 30), gray("要列出的目录路径（默认: 当前目录）"));
     println!();
-    println!("\x1b[1;33m选项:\x1b[0m");
-    println!("  \x1b[36m-h\x1b[0m, \x1b[36m--help\x1b[0m              \x1b[90m显示帮助信息\x1b[0m");
-    println!("  \x1b[36m-n\x1b[0m, \x1b[36m--no-color\x1b[0m          \x1b[90m不使用颜色输出\x1b[0m");
-    println!("  \x1b[36m-s\x1b[0m, \x1b[36m--sort\x1b[0m \x1b[90m<\x1b[0m\x1b[4m排序\x1b[0m\x1b[90m>\x1b[0m       \x1b[90m排序方式: default name suffix create update\x1b[0m");
-    println!("  \x1b[36m-e\x1b[0m, \x1b[36m--exclude\x1b[0m \x1b[90m<\x1b[0m\x1b[4m后缀\x1b[0m\x1b[90m>\x1b[0m    \x1b[90m排除指定后缀的文件，如 -e .txt .md\x1b[0m");
-    println!("  \x1b[36m-i\x1b[0m, \x1b[36m--include\x1b[0m \x1b[90m<\x1b[0m\x1b[4m后缀\x1b[0m\x1b[90m>\x1b[0m    \x1b[90m只包含指定后缀的文件，如 -i .rs .py\x1b[0m");
-    println!("  \x1b[36m-f\x1b[0m, \x1b[36m--only-files\x1b[0m         \x1b[90m只显示文件\x1b[0m");
-    println!("  \x1b[36m-d\x1b[0m, \x1b[36m--only-dirs\x1b[0m          \x1b[90m只显示目录\x1b[0m");
-    println!("  \x1b[36m-a\x1b[0m, \x1b[36m--abs-path\x1b[0m           \x1b[90m打印完整路径\x1b[0m");
-    println!("  \x1b[36m-r\x1b[0m, \x1b[36m--right-align\x1b[0m        \x1b[90m右对齐文件名\x1b[0m");
-    println!("  \x1b[36m-z\x1b[0m, \x1b[36m--size\x1b[0m               \x1b[90m显示文件大小\x1b[0m");
-    println!("  \x1b[36m-t\x1b[0m \x1b[90m[\x1b[0m\x1b[4m深度\x1b[0m\x1b[90m]\x1b[0m                 \x1b[90m树形显示目录结构，-t 3 指定深度，不带数字无限递归\x1b[0m");
-    println!("  \x1b[36m--link\x1b[0m \x1b[4mPATH\x1b[0m               \x1b[90m检查指定路径的链接信息\x1b[0m");
-    println!("  \x1b[36m-v\x1b[0m, \x1b[36m--version\x1b[0m            \x1b[90m显示版本信息\x1b[0m");
+    println!("{}", bold_yellow("选项:"));
+
+    let opts: &[(&str, &str)] = &[
+        ("-h, --help", "显示帮助信息"),
+        ("-n, --no-color", "不使用颜色输出"),
+        ("-s, --sort <排序>", "排序方式: default name suffix create update"),
+        ("-e, --exclude <后缀>", "排除指定后缀的文件，如 -e .txt .md"),
+        ("-i, --include <后缀>", "只包含指定后缀的文件，如 -i .rs .py"),
+        ("-f, --only-files", "只显示文件"),
+        ("-d, --only-dirs", "只显示目录"),
+        ("-a, --abs-path", "打印完整路径"),
+        ("-r, --right-align", "右对齐文件名"),
+        ("-z, --size", "显示文件大小"),
+        ("-t [深度]", "树形显示目录结构，-t 3 指定深度，不带数字无限递归"),
+        ("--link PATH", "检查指定路径的链接信息"),
+        ("-v, --version", "显示版本信息"),
+    ];
+
+    // 计算选项标签的最大显示宽度用于对齐
+    let max_opt_w = opts.iter()
+        .map(|(opt, _)| opt.display_width())
+        .max()
+        .unwrap_or(24);
+
+    for (opt, desc) in opts {
+        println!("  {}  {}",
+            pad_left(Style::new(4).paint(opt), max_opt_w),
+            gray(desc));
+    }
 }
 
 /// 拦截 clap 错误并输出中文提示
@@ -210,56 +245,54 @@ fn print_clap_error(err: &clap::error::Error) {
                     .or(l.strip_prefix("error: unexpected argument \"")
                         .and_then(|s| s.split('"').next()))
             }) {
-                eprintln!("错误: 未知的选项 '{}'", flag);
-                eprintln!("提示: 使用 --help 查看可用选项");
+                eprintln!("{} 未知的选项 '{}'", red("错误:"), flag);
+                eprintln!("{} 使用 --help 查看可用选项", gray("提示:"));
             } else {
-                eprintln!("错误: 未知的选项");
-                eprintln!("提示: 使用 --help 查看可用选项");
+                eprintln!("{} 未知的选项", red("错误:"));
+                eprintln!("{} 使用 --help 查看可用选项", gray("提示:"));
             }
         }
         ErrorKind::InvalidSubcommand => {
-            eprintln!("错误: 未知的子命令");
-            eprintln!("提示: 使用 --help 查看可用选项");
+            eprintln!("{} 未知的子命令", red("错误:"));
+            eprintln!("{} 使用 --help 查看可用选项", gray("提示:"));
         }
         ErrorKind::MissingRequiredArgument => {
-            eprintln!("错误: 缺少必需参数");
-            eprintln!("提示: 使用 --help 查看正确用法");
+            eprintln!("{} 缺少必需参数", red("错误:"));
+            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
         }
         ErrorKind::TooManyValues => {
-            eprintln!("错误: 参数值过多");
-            eprintln!("提示: 使用 --help 查看正确用法");
+            eprintln!("{} 参数值过多", red("错误:"));
+            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
         }
         ErrorKind::TooFewValues => {
-            eprintln!("错误: 参数值不足");
-            eprintln!("提示: 使用 --help 查看正确用法");
+            eprintln!("{} 参数值不足", red("错误:"));
+            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
         }
         ErrorKind::ValueValidation => {
             let msg = err.to_string();
-            // 提取更友好的错误信息
             if msg.contains("invalid value") {
                 if let Some(val) = msg.split('\'').nth(1) {
                     if let Some(choices) = msg.split('[').nth(1).and_then(|s| s.split(']').next()) {
-                        eprintln!("错误: 无效的值 '{}'，可选值: {}", val, choices);
+                        eprintln!("{} 无效的值 '{}'，可选值: {}", red("错误:"), val, choices);
                     } else {
-                        eprintln!("错误: 无效的值 '{}'", val);
+                        eprintln!("{} 无效的值 '{}'", red("错误:"), val);
                     }
                 } else {
-                    eprintln!("错误: 参数值无效");
+                    eprintln!("{} 参数值无效", red("错误:"));
                 }
             } else {
-                eprintln!("错误: {}", msg.lines().next().unwrap_or("参数值无效"));
+                eprintln!("{} {}", red("错误:"), msg.lines().next().unwrap_or("参数值无效"));
             }
-            eprintln!("提示: 使用 --help 查看正确用法");
+            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
         }
         _ => {
-            // 其他错误直接显示中文包装
             let msg = err.to_string();
             let first_line = msg.lines().next().unwrap_or("未知错误");
             if first_line.contains("unexpected") || first_line.contains("error:") {
-                eprintln!("错误: 参数解析失败");
-                eprintln!("提示: 使用 --help 查看正确用法");
+                eprintln!("{} 参数解析失败", red("错误:"));
+                eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
             } else {
-                eprintln!("错误: {}", first_line);
+                eprintln!("{} {}", red("错误:"), first_line);
             }
         }
     }
@@ -286,7 +319,7 @@ fn format_item_line(
         } else {
             let color = formatter.get_item_color(item);
             match color {
-                Some(c) => line.push_str(&display::colored(&abs_path, c)),
+                Some(c) => line.push_str(&display::paint_by_code(&abs_path, c)),
                 None => line.push_str(&abs_path),
             }
         }
@@ -346,11 +379,11 @@ fn format_item_line(
                 } else {
                     ver
                 };
-                line.push_str(&format_text_colored(&text, &formatter, &cli));
+                line.push_str(&format_text_colored(&text, cli));
             }
         } else if looks_like_java {
             if let Some(ver) = item.get_java_env() {
-                line.push_str(&format_text_colored(&ver, &formatter, &cli));
+                line.push_str(&format_text_colored(&ver, cli));
             }
         }
     }
@@ -359,12 +392,12 @@ fn format_item_line(
 }
 
 /// 带引号的环境版本号输出
-fn format_text_colored(text: &str, _formatter: &Formatter, cli: &Cli) -> String {
+fn format_text_colored(text: &str, cli: &Cli) -> String {
     let quoted = format!("\"{}\"", text);
     if cli.no_color {
         quoted
     } else {
-        display::colored(&quoted, "90")
+        gray(&quoted)
     }
 }
 
@@ -462,7 +495,7 @@ fn print_tree(
         } else {
             let color = formatter.get_item_color(item);
             match color {
-                Some(c) => println!("{}{}{}", prefix, connector, display::colored(&item.name, c)),
+                Some(c) => println!("{}{}{}", prefix, connector, display::paint_by_code(&item.name, c)),
                 None => println!("{}{}{}", prefix, connector, item.name),
             }
         }
@@ -479,7 +512,7 @@ fn print_tree(
 fn handle_link_check(path: &str) {
     let path = Path::new(path);
     if !path.exists() {
-        eprintln!("错误: 路径不存在: {}", path.display());
+        eprintln!("{} 路径不存在: {}", red("错误:"), path.display());
         return;
     }
 
@@ -494,11 +527,10 @@ fn handle_link_check(path: &str) {
         links::LinkType::Unknown => "未知",
     };
 
-    println!("路径: {}", path.display());
-    println!("类型: {}", type_name);
+    println!("{} {}", cyan("路径:"), path.display());
+    println!("{} {}", cyan("类型:"), type_name);
 
     if let Some(ref target) = info.target {
-        println!("目标: {}", target);
+        println!("{} {}", cyan("目标:"), target);
     }
 }
-

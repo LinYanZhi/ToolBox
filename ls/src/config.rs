@@ -40,7 +40,7 @@ pub struct ColorConfig {
 impl ColorConfig {
     /// 初始化 ANSI 支持
     pub fn init() {
-        enable_ansi();
+        color::enable_ansi();
     }
 }
 
@@ -83,7 +83,7 @@ impl Default for ColorConfig {
                 (".pdb".into(),  "90".into()),
                 (".dat".into(),  "90".into()),
                 (".ini".into(),  "90".into()),
-                (".lock".into(),  "90".into()),
+                (".lock".into(), "90".into()),
                 (".log".into(),  "90".into()),
             ],
             file_link_arrow: "->".into(),
@@ -112,30 +112,5 @@ impl ColorConfig {
             }
         }
         None
-    }
-}
-
-/// 启用 Windows 虚拟终端处理
-fn enable_ansi() {
-    #[cfg(windows)]
-    {
-        unsafe extern "system" {
-            fn GetStdHandle(nStdHandle: u32) -> isize;
-            fn GetConsoleMode(hConsoleHandle: isize, lpMode: *mut u32) -> i32;
-            fn SetConsoleMode(hConsoleHandle: isize, dwMode: u32) -> i32;
-        }
-
-        const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32;
-        const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-
-        unsafe {
-            let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-            let mut mode: u32 = 0;
-            if GetConsoleMode(handle, &mut mode) != 0 {
-                if mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0 {
-                    SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-                }
-            }
-        }
     }
 }
