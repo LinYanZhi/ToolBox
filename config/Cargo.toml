@@ -1,0 +1,12 @@
+[package]
+name = "config"
+version = "0.1.0"
+edition = "2024"
+description = "统一配置层 — 环境变量、源定义、路径解析 — ToolBox 基础设施"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "2"
+anyhow = "1"
+color = { path = "../color" }

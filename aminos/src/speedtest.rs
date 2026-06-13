@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -63,46 +64,54 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
     println!("\n{}\n", color::gray(format!("共 {} 个下载源，正在并发测速...", total)));
 
-    // Concurrent speed test — chunked to limit concurrency (match Python's max_workers=12)
+    // Concurrent speed test — thread pool with continuous work-stealing
+    let entries = Arc::new(entries);
+    let next_idx = Arc::new(AtomicUsize::new(0));
+    let done_counter = Arc::new(AtomicUsize::new(0));
     let results = Arc::new(Mutex::new(Vec::new()));
-    let counter = Arc::new(Mutex::new(0u32));
     let print_lock = Arc::new(Mutex::new(()));
 
     const MAX_WORKERS: usize = 12;
-    for chunk in entries.chunks(MAX_WORKERS) {
-        let mut handles = Vec::new();
-        for (display, version, url) in chunk {
-            let display = display.clone();
-            let version = version.clone();
-            let url = url.clone();
-            let counter = Arc::clone(&counter);
-            let results = Arc::clone(&results);
-            let print_lock = Arc::clone(&print_lock);
-            handles.push(thread::spawn(move || {
-                let speed = downloader::measure_speed(&url, 10);
+    let mut handles = Vec::new();
 
-                let mut idx = counter.lock().unwrap();
-                *idx += 1;
-                let current = *idx;
-                drop(idx);
+    for _ in 0..MAX_WORKERS {
+        let entries = Arc::clone(&entries);
+        let next_idx = Arc::clone(&next_idx);
+        let done_counter = Arc::clone(&done_counter);
+        let results = Arc::clone(&results);
+        let print_lock = Arc::clone(&print_lock);
 
-                // Print with lock for consistent ordering
+        handles.push(thread::spawn(move || {
+            loop {
+                let idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                if idx >= entries.len() {
+                    break;
+                }
+                let (display, version, url) = &entries[idx];
+
+                let speed = downloader::measure_speed(url, 10);
+
+                // Print with lock for consistent output
                 let _guard = print_lock.lock().unwrap();
+                let current = done_counter.fetch_add(1, Ordering::Relaxed) + 1; // completion order
                 let (plain, color_code) = match speed {
-                    Some(s) => (format_size(s * 1024.0) + "/s", color::GREEN),
+                    Some(s) => (format_size((s * 1024.0) as u64) + "/s", color::GREEN),
                     None => ("不可用".to_string(), color::YELLOW),
                 };
                 let marker = color_code.paint(&pad(&plain, speed_w));
 
                 let idx_str = format!("{:0>w$}", current, w = max_idx_w);
-                let prefix = format!("  [{}/{}] {}", idx_str, total, pad(&display, max_name_w + 1));
+                let prefix = format!("  [{}/{}] {}", idx_str, total, pad(display, max_name_w + 1));
                 println!("{}{}  {}", prefix, pad(&marker, speed_w), url);
 
-                results.lock().unwrap().push((display, version, url, speed));
-            }));
-        }
-        for h in handles {
-            h.join().unwrap();
+                results.lock().unwrap().push((display.clone(), version.clone(), url.clone(), speed));
+            }
+        }));
+    }
+    for h in handles {
+        if let Err(e) = h.join() {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() } else { "线程崩溃".to_string() };
+            eprintln!("  测速线程崩溃: {}", msg);
         }
     }
 
@@ -160,7 +169,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
             let name_d = downloader::truncate_display(name, name_w);
             let ver_d = downloader::truncate_display(version, ver_w);
             let speed_str = match best {
-                Some(s) => color::green(format!("{:>10}", format_size(s * 1024.0) + "/s")),
+                Some(s) => color::green(format!("{:>10}", format_size((s * 1024.0) as u64) + "/s")),
                 None => pad("-", 10),
             };
             let status = if *available {
@@ -230,7 +239,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
         for (display, version, url, speed) in &avail {
             let s = speed.unwrap();
-            let marker = color::green(format!("{:>10}", format_size(s * 1024.0) + "/s"));
+            let marker = color::green(format!("{:>10}", format_size((s * 1024.0) as u64) + "/s"));
             let name_d = downloader::truncate_display(display, name_w);
             let ver_d = downloader::truncate_display(version, ver_w);
             println!(

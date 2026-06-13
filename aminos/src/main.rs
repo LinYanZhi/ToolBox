@@ -7,9 +7,18 @@ mod software;
 mod speedtest;
 
 use clap::{CommandFactory, Parser, Subcommand};
+use clap::builder::styling::{AnsiColor, Color, Style, Styles};
 
 use color::DisplayWidth;
 use crate::downloader::{display_width, format_size, pad, truncate_display};
+
+/// 统一帮助配色方案
+const HELP_STYLES: Styles = Styles::styled()
+    .header(*Styles::styled().get_header())
+    .usage(Style::new().bold().fg_color(Some(Color::Ansi(AnsiColor::Yellow))))
+    .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))))
+    .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
+    .error(*Styles::styled().get_error());
 
 const HELP_TEMPLATE: &str = "\
 \x1b[1;36maminos\x1b[0m — \x1b[32m轻量级 Windows 软件包管理器\x1b[0m
@@ -61,6 +70,7 @@ const HELP_TEMPLATE_SUBCMDS: &str = "\
     about,
     color = clap::ColorChoice::Always,
     help_template = HELP_TEMPLATE,
+    styles = HELP_STYLES,
     disable_help_subcommand = true,
     long_about = None,
 )]
@@ -174,20 +184,24 @@ enum Command {
 #[derive(Subcommand)]
 enum SourceCmd {
     /// 从远程仓库下载最新源定义
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Update,
     /// 显示当前源目录路径
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Path {
         /// 在资源管理器中打开
         #[arg(short, long)]
         open: bool,
     },
     /// 显示所有数据目录位置
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Dirs {
         /// 在资源管理器中打开数据目录
         #[arg(short, long)]
         open: bool,
     },
     /// 测速所有下载源
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Speedtest {
         /// 可选：仅测速指定软件
         name: Vec<String>,
@@ -321,13 +335,22 @@ fn print_clap_error(e: clap::Error) {
     use clap::error::ErrorKind;
     let info = e.to_string();
 
-    // Extract error detail from clap's raw output (the line after "error: ")
-    let detail = info
-        .lines()
-        .find(|l| !l.starts_with("Usage:") && !l.starts_with("For more"))
-        .and_then(|l| l.strip_prefix("error: "))
-        .unwrap_or("")
-        .to_string();
+    // Extract error detail: merge all lines after "error: " (multi-line support)
+    let lines: Vec<&str> = info.lines().collect();
+    let error_idx = lines.iter().position(|l| l.starts_with("error: "));
+    let detail = error_idx
+        .map(|i| {
+            let first = lines[i].strip_prefix("error: ").unwrap_or("");
+            let rest: Vec<&str> = lines[i + 1..]
+                .iter()
+                .take_while(|l| !l.is_empty() && !l.starts_with("Usage:") && !l.starts_with("For more"))
+                .map(|s| s.trim())
+                .collect();
+            let mut parts = vec![first.to_string()];
+            parts.extend(rest.iter().map(|s| s.to_string()));
+            parts.join(" ")
+        })
+        .unwrap_or_default();
 
     // Extract the first quoted string from the detail (e.g. '-b', '--flag', '<ARG>')
     let quoted = detail
@@ -352,15 +375,14 @@ fn print_clap_error(e: clap::Error) {
             }
         }
         ErrorKind::MissingRequiredArgument => {
-            // clap: "the following required arguments were not provided: <NAMES>..."
-            let missing = detail
+            if let Some(missing) = detail
                 .strip_prefix("the following required arguments were not provided:")
-                .unwrap_or("")
-                .trim();
-            if !missing.is_empty() {
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
                 format!("缺少必需参数: {}", missing)
             } else {
-                detail
+                "缺少必需参数".to_string()
             }
         }
         ErrorKind::InvalidValue => {
@@ -460,21 +482,16 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
         let display = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
         let source_ver = &sd.default_version;
 
-        // 检查已安装的版本
-        let current_ver = installed_db.get(name)
+        // 先查注册表版本（存到局部变量避免 lifetime 问题）
+        let registry_ver = sd.versions.get(source_ver)
+            .and_then(|vi| vi.detection.as_ref())
+            .and_then(|d| registry::detect_installed(d))
+            .and_then(|r| r.get("DisplayVersion").cloned());
+
+        // 优先用 installed_db 记录的版本，回退到注册表
+        let current_ver: &str = installed_db.get(name)
             .map(|rec| rec.version.as_str())
-            .or_else(|| {
-                // 回退到注册表检测
-                sd.versions.get(source_ver)
-                    .and_then(|vi| vi.detection.as_ref())
-                    .and_then(|d| registry::detect_installed(d))
-                    .and_then(|r| r.get("DisplayVersion").cloned())
-                    .map(|s| {
-                        // 仅在 check_only 模式下，注册表版本不做记录
-                        let leaked: &'static str = Box::leak(s.into_boxed_str());
-                        leaked
-                    })
-            })
+            .or_else(|| registry_ver.as_deref())
             .unwrap_or("");
 
         if current_ver == source_ver && !renew {
@@ -964,7 +981,7 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
                     let _ = std::fs::remove_file(entry.path());
                 }
             }
-            println!("{}", color::green(format!("已清除 {} 个缓存文件 ({} 空间)", count, format_size(total_size as f64))));
+            println!("{}", color::green(format!("已清除 {} 个缓存文件 ({} 空间)", count, format_size(total_size))));
         } else {
             println!("缓存目录不存在，无需清除。");
         }
@@ -1033,7 +1050,7 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
         println!("  {}{}{}{}",
             pad(&truncate_display(name, max_name), max_name + 2),
             pad(&truncate_display(ver, max_ver), max_ver + 2),
-            pad(&format_size(*size as f64), 12),
+            pad(&format_size(*size), 12),
             consistency,
         );
     }
@@ -1044,7 +1061,7 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
         println!("  {} 版本与源定义一致  {} 与源定义不一致", color::green("✓"), color::yellow("⚠"));
     }
 
-    println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size as f64))));
+    println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size))));
     println!("{}", color::gray("  as cache --clear  清除缓存"));
     println!("{}", color::gray("  as cache --open   在资源管理器中打开"));
     Ok(())

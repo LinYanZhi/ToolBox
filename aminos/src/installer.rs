@@ -494,14 +494,44 @@ fn create_app_shortcut(name: &str, vi: &VersionInfo, install_path: &Option<Strin
 // ── PowerShell-backed Windows utilities ───────────────────
 
 fn ps_exec(command: &str) -> anyhow::Result<String> {
-    let output = Command::new("powershell")
+    let mut child = Command::new("powershell")
         .args(["-NoProfile", "-Command", command])
-        .output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("PowerShell 错误: {}", stderr.trim());
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("启动 PowerShell 失败")?;
+
+    // 30 秒超时，防止 PowerShell 挂死
+    const PS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    let now = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap_or_else(|_| {
+                    std::process::Output {
+                        status,
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    }
+                });
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    bail!("PowerShell 错误: {}", stderr.trim());
+                }
+                return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+            }
+            Ok(None) => {
+                if now.elapsed() > PS_TIMEOUT {
+                    let _ = child.kill();
+                    bail!("PowerShell 执行超时（{} 秒）", PS_TIMEOUT.as_secs());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                bail!("PowerShell 进程错误: {}", e);
+            }
+        }
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn get_shortcut_target(lnk_path: &str) -> Option<String> {
@@ -568,12 +598,22 @@ fn expand_env_vars(input: &str) -> String {
 }
 
 /// Sort version strings in descending order (newest first).
-/// Parses dotted numeric versions like "3.14.5" into segments for natural sort.
+///
+/// 正确处理 pre-release 标签（如 "1.0.0-beta", "1.0.0-rc1"）：
+///   1. 比较点分数字部分（如 1.0.0）
+///   2. 数字部分相同时，正式版 > 预发布版（无 `-` 后缀 > 有 `-` 后缀）
+///   3. 均为预发布版时，按标签字符串降序（rc2 > rc1, beta > alpha）
 fn sort_versions_desc(versions: &mut [&str]) {
     versions.sort_by(|a, b| {
-        let a_segs: Vec<u32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
-        let b_segs: Vec<u32> = b.split('.').filter_map(|s| s.parse().ok()).collect();
-        // Descending: compare b against a
+        // 拆分为基础版本和 pre-release 后缀
+        let a_pre = a.splitn(2, '-').collect::<Vec<_>>();
+        let b_pre = b.splitn(2, '-').collect::<Vec<_>>();
+        let a_base = a_pre[0];
+        let b_base = b_pre[0];
+
+        let a_segs: Vec<u32> = a_base.split('.').filter_map(|s| s.parse().ok()).collect();
+        let b_segs: Vec<u32> = b_base.split('.').filter_map(|s| s.parse().ok()).collect();
+
         for i in 0..a_segs.len().max(b_segs.len()) {
             let av = a_segs.get(i).copied().unwrap_or(0);
             let bv = b_segs.get(i).copied().unwrap_or(0);
@@ -582,7 +622,14 @@ fn sort_versions_desc(versions: &mut [&str]) {
                 other => return other,
             }
         }
-        // If all numeric segments equal, fall back to lexicographic (descending)
-        b.cmp(a)
+
+        // 数字部分相同 → 比较 pre-release 后缀
+        // 正式版（无后缀）> 预发布版（有后缀）
+        match (a_pre.get(1), b_pre.get(1)) {
+            (None, None) => b.cmp(a),            // 都无后缀：回退到字符串比较
+            (None, Some(_)) => std::cmp::Ordering::Greater, // a 是正式版，b 是预发布
+            (Some(_), None) => std::cmp::Ordering::Less,    // a 是预发布，b 是正式版
+            (Some(pa), Some(pb)) => pb.cmp(pa),  // 都是预发布：后缀字符串降序
+        }
     });
 }

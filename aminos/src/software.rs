@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
@@ -75,131 +73,19 @@ fn default_provenance() -> String {
 
 // ── Software definitions ─────────────────────────────────
 
-/// Primary source repository (raw.githubusercontent.com).
-const DEFAULT_SOURCE_REPO: &str = "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main";
-
-/// Fallback mirrors (tried in order when primary fails).
-/// - ghproxy: GitHub proxy, goes through raw.githubusercontent.com (always latest)
-/// - jsDelivr: GitHub CDN, slower to update but more stable
-const FALLBACK_MIRRORS: &[&str] = &[
-    "https://ghproxy.net/https://raw.githubusercontent.com/LinYanZhi/aminos-source/main",
-    "https://cdn.jsdelivr.net/gh/LinYanZhi/aminos-source@main",
-];
-
-/// Update all source definitions from the remote repository.
-/// Downloads index.json first, then each listed file.
-/// No git required — plain HTTP. Tries primary repo then fallback mirrors.
+/// 委托到 `config::source` 更新源定义。
 pub fn update_sources() -> anyhow::Result<()> {
-    let source_dir = paths::source_dir();
-    fs::create_dir_all(&source_dir)?;
+    let builtin: Vec<String> = vec![
+        "https://ghproxy.net/https://raw.githubusercontent.com/LinYanZhi/aminos-source/main",
+        "https://cdn.jsdelivr.net/gh/LinYanZhi/aminos-source@main",
+        "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main",
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect();
 
-    let custom_repo = std::env::var("AMINOS_SOURCE_REPO").ok();
-
-    // Build list of repos to try: custom > default > mirrors
-    let repos: Vec<String> = if let Some(ref r) = custom_repo {
-        vec![r.clone()]
-    } else {
-        let mut v = vec![DEFAULT_SOURCE_REPO.to_string()];
-        v.extend(FALLBACK_MIRRORS.iter().map(|s| s.to_string()));
-        v
-    };
-
-    // Cache-busting: append timestamp to bypass CDN cache
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    // 1. Download index.json — try each repo in order
-    let mut index_bytes = None;
-    let mut used_repo = "";
-    for repo in &repos {
-        let cache_bust = if repo.contains("jsdelivr") { format!("?v={}", ts) } else { String::new() };
-        let index_url = format!("{}/index.json{}", repo, cache_bust);
-        print!("  尝试: {} ... ", index_url);
-        match download_bytes(&index_url) {
-            Ok(data) => {
-                println!("OK");
-                index_bytes = Some(data);
-                used_repo = repo;
-                break;
-            }
-            Err(e) => {
-                println!("失败 ({})", e);
-            }
-        }
-    }
-
-    let index_bytes = index_bytes
-        .context("所有镜像均无法连接，请检查网络。也可将 source/ 文件夹放到 as.exe 同级目录")?;
-
-    #[derive(Deserialize)]
-    struct Index {
-        files: Vec<String>,
-    }
-    let index: Index = serde_json::from_slice(&index_bytes)
-        .context("源索引格式错误")?;
-
-    println!("  从 {} 下载，共 {} 个源文件", used_repo, index.files.len());
-
-    // 2. Download each file
-    let cache_bust = if used_repo.contains("jsdelivr") { format!("?v={}", ts) } else { String::new() };
-    for fname in &index.files {
-        let url = format!("{}/{}{}", used_repo, fname, cache_bust);
-        let dest = source_dir.join(fname);
-        print!("  {} ... ", fname);
-        match download_bytes(&url) {
-            Ok(data) => {
-                fs::write(&dest, &data)?;
-                println!("OK ({} B)", data.len());
-            }
-            Err(e) => {
-                println!("跳过 ({})", e);
-            }
-        }
-    }
-
-    println!("\n  源更新完成。共 {} 个文件。", index.files.len());
-
-    // 3. 清理本地多余文件（不在 index.json 中的旧文件）
-    let index_set: std::collections::HashSet<&str> = index.files.iter().map(|s| s.as_str()).collect();
-    if let Ok(entries) = fs::read_dir(&source_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name == "index.json" { continue; }
-                    if !index_set.contains(name) {
-                        let _ = fs::remove_file(&path);
-                        println!("  清理旧文件: {}", name);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Download raw bytes from a URL (lightweight, no progress bar).
-fn download_bytes(url_str: &str) -> anyhow::Result<Vec<u8>> {
-    let agent = ureq::AgentBuilder::new()
-        .user_agent("aminos/0.1")
-        .timeout_connect(Duration::from_secs(15))
-        .timeout_read(Duration::from_secs(30))
-        .build();
-
-    let resp = agent.get(url_str).call()
-        .with_context(|| format!("下载失败: {}", url_str))?;
-
-    if resp.status() >= 400 {
-        bail!("HTTP {}", resp.status());
-    }
-
-    let mut reader = resp.into_reader();
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf)?;
-    Ok(buf)
+    let repo = config::SourceRepo::new(builtin);
+    config::source::update_sources(&paths::source_dir(), &repo)
 }
 
 /// Read a single software definition. Supports:
@@ -295,7 +181,12 @@ pub fn write_installed_db(db: &HashMap<String, InstallRecord>) -> anyhow::Result
     let dir = paths::apps_dir();
     fs::create_dir_all(&dir)?;
     let json = serde_json::to_string_pretty(db)?;
-    fs::write(paths::installed_json(), json)?;
+
+    // 原子写入：先写临时文件，再 rename，防止崩溃导致 installed.json 截断
+    let target = paths::installed_json();
+    let tmp = target.with_extension("json.tmp");
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &target)?;
     Ok(())
 }
 

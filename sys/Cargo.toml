@@ -1,0 +1,9 @@
+[package]
+name = "sys"
+version = "0.1.0"
+edition = "2024"
+description = "系统工具检测与 Windows 注册表操作 — ToolBox 基础设施"
+
+[dependencies]
+anyhow = "1"
+winreg = "0.55"

@@ -15,12 +15,19 @@ pub fn get_pe_version(path: &Path) -> Option<String> {
         return None;
     }
 
-    // 转为宽字符串
+    // 转为以 \0 结尾的宽字符串
     let wide: Vec<u16> = OsStr::new(path)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
+    // Safety: 以下 FFI 调用均遵循 Win32 API 规范：
+    // - `wide.as_ptr()` 以 \0 结尾，符合 Win32 路径参数要求
+    // - `GetFileVersionInfoSizeW` 返回值 size 保证后续 buffer 足够
+    // - `GetFileVersionInfoW` 填充的 buffer 生命周期覆盖所有 VerQueryValueW 调用
+    // - `VerQueryValueW` 返回的指针生命周期绑定于 buffer，在 unsafe 块内有效
+    // - trans_ptr/ver_ptr/fixed_ptr 指向的内存由 VerQueryValueW 从 buffer 中派生，
+    //   不拥有所有权，不需要释放
     unsafe {
         // 1. 获取版本信息大小
         let size = GetFileVersionInfoSizeW(wide.as_ptr(), std::ptr::null_mut());
@@ -41,10 +48,13 @@ pub fn get_pe_version(path: &Path) -> Option<String> {
         let mut trans_len: u32 = 0;
         let trans_key = wstr("\\VarFileInfo\\Translation");
 
+        // Safety: ptr 指向 GetFileVersionInfoW 填充的有效 buffer，
+        // trans_key 是 \0 结尾的宽字符串
         if VerQueryValueW(ptr, trans_key.as_ptr(), &mut trans_ptr, &mut trans_len) != 0
             && trans_len >= 4
         {
-            // trans_ptr 指向一个 u32 数组，取第一个
+            // Safety: trans_len >= 4 保证 trans_ptr 至少包含一个 u32，
+            // trans_ptr 指向 buffer 内有效内存
             let lang_cp = *(trans_ptr as *const u16) as u32
                 | ((*(trans_ptr as *const u16).add(1) as u32) << 16);
 
@@ -58,9 +68,11 @@ pub fn get_pe_version(path: &Path) -> Option<String> {
 
             let mut ver_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
             let mut ver_len: u32 = 0;
+            // Safety: ver_key_wide 是 \0 结尾的宽字符串
             if VerQueryValueW(ptr, ver_key_wide.as_ptr(), &mut ver_ptr, &mut ver_len) != 0
                 && ver_len > 0
             {
+                // Safety: ver_len 是以字节为单位的长度，ver_ptr 是有效对齐的 u16 指针
                 let slice = std::slice::from_raw_parts(ver_ptr as *const u16, (ver_len / 2) as usize);
                 // 去掉末尾空字符
                 let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
@@ -78,9 +90,11 @@ pub fn get_pe_version(path: &Path) -> Option<String> {
         let mut fixed_len: u32 = 0;
         let root_key = wstr("\\");
 
+        // Safety: root_key 是 \0 结尾的宽字符串 "\\"
         if VerQueryValueW(ptr, root_key.as_ptr(), &mut fixed_ptr, &mut fixed_len) != 0
             && fixed_len >= std::mem::size_of::<VS_FIXEDFILEINFO>() as u32
         {
+            // Safety: fixed_len >= size_of<VS_FIXEDFILEINFO> 保证指针指向完整的结构体
             let info = &*(fixed_ptr as *const VS_FIXEDFILEINFO);
             let major = (info.dwFileVersionMS >> 16) & 0xFFFF;
             let minor = info.dwFileVersionMS & 0xFFFF;
@@ -118,6 +132,8 @@ struct VS_FIXEDFILEINFO {
     dwFileDateLS: u32,
 }
 
+// Safety: link("version") 链接到 Windows 的 version.dll，这些声明是标准 Win32 API，
+// 参数类型匹配 MSDN 文档定义，调用方保证传递有效的指针和长度。
 #[link(name = "version")]
 unsafe extern "system" {
     fn GetFileVersionInfoSizeW(

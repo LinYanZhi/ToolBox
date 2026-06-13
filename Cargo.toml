@@ -3,7 +3,10 @@ resolver = "2"
 members = [
     "aminos",
     "color",
+    "config",
     "ls",
+    "net",
+    "sys",
 ]
 
 [profile.release]
