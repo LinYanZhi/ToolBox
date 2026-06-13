@@ -53,6 +53,9 @@ pub struct SoftwareDef {
     pub homepage: String,
     #[serde(default)]
     pub default_version: String,
+    /// 软件类型：空/未设置 = 第三方软件, "self" = 自研工具
+    #[serde(default)]
+    pub kind: String,
     pub versions: HashMap<String, VersionInfo>,
 }
 

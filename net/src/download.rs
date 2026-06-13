@@ -166,6 +166,8 @@ pub fn download_with_fallback(
                     eprintln!("       {}", msg);
                     errors.push(msg);
                     let _ = std::fs::remove_file(target_path);
+                    let parts_dir = format!("{}.parts", target_path.display());
+                    let _ = std::fs::remove_dir_all(&parts_dir);
                     continue;
                 }
                 let file_size = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
@@ -187,6 +189,8 @@ pub fn download_with_fallback(
                 eprintln!("       ✗ {}", msg);
                 errors.push(msg);
                 let _ = std::fs::remove_file(target_path);
+                let parts_dir = format!("{}.parts", target_path.display());
+                let _ = std::fs::remove_dir_all(&parts_dir);
             }
         }
     }

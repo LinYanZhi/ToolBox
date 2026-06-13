@@ -108,13 +108,15 @@ fn main() {
         return;
     }
 
-    let target_dir = Path::new(&cli.directory);
+    // 清理路径：去除可能因 shell 转义残留的尾部引号、反斜杠、空白
+    let dir_str = sanitize_path(&cli.directory);
+    let target_dir = Path::new(&dir_str);
     if !target_dir.exists() {
-        eprintln!("错误: 目录 '{}' 不存在", cli.directory);
+        eprintln!("错误: 目录 '{}' 不存在（输入: {}）", target_dir.display(), cli.directory);
         return;
     }
     if !target_dir.is_dir() {
-        eprintln!("错误: '{}' 不是一个目录", cli.directory);
+        eprintln!("错误: '{}' 不是一个目录（输入: {}）", target_dir.display(), cli.directory);
         return;
     }
 
@@ -508,9 +510,34 @@ fn print_tree(
     }
 }
 
+/// 清理路径字符串：去除尾部引号、反斜杠、空白等 shell 转义残留。
+///
+/// 例如 `"C:\Program Files\7-Zip\"` → `C:\Program Files\7-Zip`
+/// Windows 命令行中 `\"` 会被解析为字面引号而不是结束引号，
+/// 因此可能传入 `C:\Program Files\7-Zip"`，需要剥离尾部多余的引号。
+fn sanitize_path(raw: &str) -> String {
+    let mut s = raw.to_string();
+    // 去除首尾空白
+    s = s.trim().to_string();
+    // 去除首尾成对引号（兼容完整包裹的情况）
+    while (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        s = s[1..s.len()-1].to_string();
+    }
+    // 去除尾部单个引号（Windows \" 转义残留）
+    while s.ends_with('"') || s.ends_with('\'') {
+        s.pop();
+    }
+    // 去除尾部反斜杠（但保留 `C:\` 这种根目录反斜杠）
+    while s.len() > 3 && s.ends_with('\\') {
+        s.pop();
+    }
+    s
+}
+
 /// 处理 --link 参数
 fn handle_link_check(path: &str) {
-    let path = Path::new(path);
+    let cleaned = sanitize_path(path);
+    let path = Path::new(&cleaned);
     if !path.exists() {
         eprintln!("{} 路径不存在: {}", red("错误:"), path.display());
         return;

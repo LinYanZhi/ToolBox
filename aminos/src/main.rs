@@ -5,6 +5,9 @@ mod registry;
 mod software;
 mod speedtest;
 
+use std::fs;
+
+use anyhow::{bail, Context};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap::builder::styling::{AnsiColor, Color, Style, Styles};
 
@@ -183,6 +186,18 @@ enum Command {
         #[command(subcommand)]
         action: SourceCmd,
     },
+    /// 初始化 as 环境（创建 tools/bin 并注册到 PATH）
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    Init,
+    /// 更新 as 自身到最新版本
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    SelfUpdate,
+    /// 管理自研工具（已安装的 as 工具集）
+    #[command(help_template = HELP_TEMPLATE_SUBCMDS)]
+    Tool {
+        #[command(subcommand)]
+        action: ToolCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -212,6 +227,20 @@ enum SourceCmd {
         /// 以软件为单位统计（任一源可用即为通）
         #[arg(short = 'S', long = "software")]
         software: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolCmd {
+    /// 列出已安装的自研工具
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    List,
+    /// 移除一个自研工具（同 as uninstall）
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    Remove {
+        /// 工具名称
+        #[arg(required = true)]
+        name: String,
     },
 }
 
@@ -252,6 +281,15 @@ fn main() {
         }
         Some(Command::Upgrade { names, check, renew }) => {
             let _ = run(|| run_upgrade(names, check, renew));
+        }
+        Some(Command::Init) => {
+            let _ = run(run_init);
+        }
+        Some(Command::SelfUpdate) => {
+            let _ = run(run_self_update);
+        }
+        Some(Command::Tool { action }) => {
+            let _ = run(|| run_tool(action));
         }
     }
 }
@@ -314,6 +352,16 @@ fn run_example() {
             ("as source speedtest", "对所有软件的所有源测速"),
             ("as source speedtest 7zip", "仅对指定软件的源测速"),
             ("as source speedtest -S", "以软件为单位统计可用性"),
+        ]),
+        ("init", "初始化 as 环境", &[
+            ("as init", "创建 tools/bin 并注册到用户 PATH"),
+        ]),
+        ("self-update", "更新 as 自身", &[
+            ("as self-update", "下载最新版 as 并热替换"),
+        ]),
+        ("tool", "管理自研工具", &[
+            ("as tool list", "列出已安装的自研工具"),
+            ("as tool remove ls", "移除自研工具 ls"),
         ]),
     ];
 
@@ -553,6 +601,150 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
         println!("{}",
             color::gray(format!("共 {} 个，{} 个已升级，{} 个已最新，{} 个失败",
                 targets.len(), updated, up_to_date, failed)));
+    }
+    Ok(())
+}
+
+// ── init ─────────────────────────────────────────────────
+
+/// 初始化 as 环境：创建 tools/bin 目录并注册到 PATH。
+fn run_init() -> anyhow::Result<()> {
+    let bin_dir = paths::tools_bin_dir();
+    fs::create_dir_all(&bin_dir)?;
+    println!("✓ 已创建: {}", bin_dir.display());
+
+    // 检查是否已在 PATH 中
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let bin_path = bin_dir.to_string_lossy().to_lowercase();
+    let already_in_path = path_var.split(';').any(|p| p.trim().to_lowercase() == bin_path);
+
+    if already_in_path {
+        println!("✓ tools\\bin 已在 PATH 中");
+    } else {
+        // 通过 setx 永久添加到用户 PATH
+        let new_path = format!("{};{}", bin_dir.to_string_lossy(), path_var);
+        let status = std::process::Command::new("setx")
+            .args(["PATH", &new_path])
+            .status()
+            .context("注册 PATH 失败")?;
+        if status.success() {
+            println!("✓ 已将 {} 添加到用户 PATH", bin_dir.display());
+            println!("  请重新打开终端使 PATH 生效");
+        } else {
+            bail!("setx 添加 PATH 失败");
+        }
+    }
+
+    println!("\n✓ as 环境初始化完成");
+    println!("  现在可通过 {} 安装自研工具", color::cyan("as install <工具名>"));
+    Ok(())
+}
+
+// ── self-update ───────────────────────────────────────────
+
+/// 更新 as 自身到最新版本。
+fn run_self_update() -> anyhow::Result<()> {
+    println!("正在检查 as 更新...");
+
+    // 读取 as 自身的源定义
+    let sd = software::read_software_def("as")?;
+    let ver = &sd.default_version;
+    let vi = sd.versions.get(ver)
+        .ok_or_else(|| anyhow::anyhow!("as 版本 {} 未定义", ver))?;
+
+    println!("  发现最新版本: {}", color::cyan(ver));
+
+    // 下载新版 as.zip
+    let dl = paths::downloads_dir();
+    fs::create_dir_all(&dl)?;
+
+    let zip_name = format!("as-{}.zip", ver);
+    let zip_path = dl.join(&zip_name);
+    net::download::download_with_url_fallback("as", &vi.urls, &zip_path, &net::DownloadConfig::default())?;
+
+    // 解压到临时目录
+    let temp_dir = dl.join(format!("as-update-{}", ver));
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)?;
+    }
+    installer::extract_zip_to(&zip_path, &temp_dir)?;
+
+    // 找到 as.exe
+    let new_exe = temp_dir.join("as.exe");
+    if !new_exe.is_file() {
+        bail!("更新包中未找到 as.exe");
+    }
+
+    // 获取当前 as.exe 路径
+    let current_exe = std::env::current_exe()
+        .context("无法获取当前程序路径")?;
+
+    println!("  正在更新: {}", current_exe.display());
+
+    // 通过 PowerShell 脚本热替换（Windows 下不能直接覆盖正在运行的程序）
+    let ps_script = format!(
+        r#"
+Start-Sleep -Seconds 1
+Copy-Item -Path '{}' -Destination '{}' -Force
+Remove-Item -Path '{}' -Recurse -Force
+Write-Host '✓ as 已更新到 {}'
+"#,
+        new_exe.display(),
+        current_exe.display(),
+        temp_dir.display(),
+        ver,
+    );
+
+    let ps_path = dl.join("update-as.ps1");
+    fs::write(&ps_path, ps_script)?;
+
+    // 启动 PowerShell 脚本，然后退出当前进程
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", &ps_path.to_string_lossy()])
+        .spawn()?;
+
+    println!("  ✓ 更新脚本已启动，as 将在重启后完成更新");
+    println!("  当前终端可继续使用");
+
+    Ok(())
+}
+
+// ── tool ──────────────────────────────────────────────────
+
+fn run_tool(action: ToolCmd) -> anyhow::Result<()> {
+    match action {
+        ToolCmd::List => {
+            // 读取安装记录
+            let db = software::read_installed_db().unwrap_or_default();
+            let defs = software::list_software_defs().unwrap_or_default();
+
+            let mut tools: Vec<(&str, &software::InstallRecord)> = Vec::new();
+
+            // 只展示 kind=self 的工具
+            for def in &defs {
+                if def.kind == "self" {
+                    if let Some(rec) = db.get(&def.name) {
+                        tools.push((def.display_name.as_str(), rec));
+                    }
+                }
+            }
+
+            if tools.is_empty() {
+                println!("没有已安装的自研工具");
+                println!("  使用 {} 安装自研工具", color::cyan("as install <工具名>"));
+                return Ok(());
+            }
+
+            println!("{}", color::bold_cyan("已安装的自研工具:"));
+            println!();
+            for (display, rec) in &tools {
+                let path = &rec.install_path;
+                println!("  {} {}  {}", color::green(display), color::cyan(&rec.version), color::gray(path));
+            }
+        }
+        ToolCmd::Remove { name } => {
+            installer::uninstall_software(&name, false, false)?;
+        }
     }
     Ok(())
 }

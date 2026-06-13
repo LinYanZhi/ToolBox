@@ -62,6 +62,15 @@ pub fn detect_installer_type(path: &Path) -> &'static str {
 
 // ── Install Flow ──────────────────────────────────────────
 
+/// 返回安装类型的人类可读标签。
+fn label_of_type(itype: &str) -> String {
+    match itype {
+        "portable" => "便携版".to_string(),
+        "nsis" | "inno" | "exe" | "installer" => "安装版".to_string(),
+        other => other.to_string(),
+    }
+}
+
 pub fn install_software(
     name: &str,
     version: &str,
@@ -73,22 +82,66 @@ pub fn install_software(
     let sd = software::read_software_def(name)?;
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
-    // 2. Resolve version
+    // 2. Resolve version — 如果未指定，检查是否有多种安装类型可供选择
     let ver = if version.is_empty() {
-        sd.default_version.as_str()
-    } else {
-        version
-    };
-    if ver.is_empty() {
-        bail!("{}: 未指定版本号", name);
-    }
+        // 按安装类型分组版本
+        let mut by_type: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+        for (vk, vi) in &sd.versions {
+            let itype = if vi.installer_type.is_empty() { "installer" } else { &vi.installer_type };
+            by_type.entry(itype).or_default().push(vk.as_str());
+        }
 
-    let vi = match sd.versions.get(ver) {
+        if by_type.len() >= 2 {
+            // 有多种安装类型 → 让用户选择
+            println!("{} 有多种安装方式，请选择：", display);
+            let mut options: Vec<(&str, Vec<&str>)> = by_type.into_iter().collect();
+            options.sort_by(|a, b| a.0.cmp(b.0));
+
+            for (i, (itype, vers)) in options.iter().enumerate() {
+                let label = match *itype {
+                    "portable" => "便携版（免安装，解压即用）",
+                    "nsis" | "inno" | "exe" | "installer" => "安装版（写入注册表，需管理员）",
+                    other => other,
+                };
+                let ver_str = if vers.len() == 1 {
+                    vers[0].to_string()
+                } else {
+                    format!("{}（共 {} 个版本）", vers[0], vers.len())
+                };
+                println!("  {}. {}  — {}  [{}]", i + 1, label, color::cyan(&ver_str), itype);
+            }
+            println!("  输入 1-{} 选择，或按 Enter 使用默认：", options.len());
+
+            let mut input = String::new();
+            let _ = std::io::stdin().read_line(&mut input);
+            let choice = input.trim().parse::<usize>().ok()
+                .and_then(|n| n.checked_sub(1))
+                .filter(|&i| i < options.len());
+
+            match choice {
+                Some(idx) => {
+                    // 选中了某个类型，取该类型的第一个版本
+                    let (_, vers) = &options[idx];
+                    let chosen_ver = vers[0];
+                    println!("  已选择: {} {}", color::bold_green(label_of_type(options[idx].0)), color::cyan(chosen_ver));
+                    chosen_ver.to_string()
+                }
+                None => sd.default_version.clone(), // 回车或无效输入 → 默认
+            }
+        } else {
+            // 只有一种安装类型
+            sd.default_version.clone()
+        }
+    } else {
+        version.to_string()
+    };
+
+    let vi = match sd.versions.get(&ver) {
         Some(vi) => vi,
         None => {
             // Try prefix matching
             let mut matched: Vec<&String> = sd.versions.keys()
-                .filter(|k| k.starts_with(ver))
+                .filter(|k| k.starts_with(ver.as_str()))
                 .collect();
             // Also try contains matching
             if matched.is_empty() {
@@ -118,11 +171,16 @@ pub fn install_software(
         bail!("{}: 未配置下载地址", name);
     }
 
+    // ── 自研工具（kind="self"）专用安装路径 ──
+    if sd.kind == "self" {
+        return install_self_tool(name, &sd, display, &ver, vi, renew, download_only);
+    }
+
     // 3. Check already installed (skip if download_only)
     if !download_only {
         if let Some(ref detection) = vi.detection {
             if let Some(result) = registry::detect_installed(detection) {
-                let installed_ver = result.get("DisplayVersion").map(|s| s.as_str()).unwrap_or(ver);
+                let installed_ver = result.get("DisplayVersion").map(|s| s.as_str()).unwrap_or(&ver);
                 println!("⚠ {} {} 已安装在系统中。", display, installed_ver);
                 println!("  如需重新安装，请先执行: as uninstall {}", name);
                 return Ok(());
@@ -131,7 +189,7 @@ pub fn install_software(
     }
 
     // 4. Download installer
-    let installer_path = get_installer_path(name, ver, &vi.urls, renew)?;
+    let installer_path = get_installer_path(name, &ver, &vi.urls, renew)?;
     if download_only {
         println!("✓ {} {} 下载完成", display, ver);
         return Ok(());
@@ -139,7 +197,7 @@ pub fn install_software(
 
     // 5. Install
     println!("\n▶ 安装 {} {} ...", display, ver);
-    let (installed, portable_install_path) = run_installer(name, ver, &installer_path, vi, gui)?;
+    let (installed, portable_install_path) = run_installer(name, &ver, &installer_path, vi, gui)?;
     if !installed {
         bail!("安装未完成（用户取消或安装失败）");
     }
@@ -166,7 +224,7 @@ pub fn install_software(
         &canonical_version,
         install_path.as_deref().unwrap_or_default(),
         provenance,
-        ver,
+        &ver,
     )?;
 
     println!("\n✓ {} {} 安装完成", display, canonical_version);
@@ -183,6 +241,72 @@ pub fn install_software(
     Ok(())
 }
 
+// ── 自研工具（kind="self"）安装 ─────────────────────────
+
+/// 安装自研工具：下载 ZIP → 解压到 tools/{name}/ → 硬链接到 tools/bin/{name}.exe
+fn install_self_tool(
+    name: &str,
+    _sd: &SoftwareDef,
+    display: &str,
+    ver: &str,
+    vi: &VersionInfo,
+    renew: bool,
+    download_only: bool,
+) -> anyhow::Result<()> {
+    // 1. Download
+    let installer_path = get_installer_path(name, ver, &vi.urls, renew)?;
+    if download_only {
+        println!("✓ {} {} 下载完成", display, ver);
+        return Ok(());
+    }
+
+    println!("\n▶ 安装 {} {} ...", display, ver);
+
+    // 2. 确保 tools/bin 目录存在
+    fs::create_dir_all(paths::tools_dir())?;
+    fs::create_dir_all(paths::tools_bin_dir())?;
+
+    // 3. 解压到 tools/{name}/
+    let tool_dir = paths::tools_dir().join(name);
+    if tool_dir.exists() {
+        fs::remove_dir_all(&tool_dir)?;
+    }
+    extract_zip_to(&installer_path, &tool_dir)?;
+    println!("  已解压到: {}", tool_dir.display());
+
+    // 4. 找到入口 exe
+    let entry_exe = find_entry_point_exe(
+        tool_dir.to_string_lossy().as_ref(),
+        vi,
+        name,
+    );
+    let exe_path = entry_exe.unwrap_or_else(|| {
+        // 回退：直接使用工具名
+        tool_dir.join(format!("{}.exe", name)).to_string_lossy().to_string()
+    });
+    let exe_path = Path::new(&exe_path);
+
+    if !exe_path.is_file() {
+        bail!("在 {} 中未找到可执行文件", tool_dir.display());
+    }
+
+    // 5. 在 tools/bin/ 创建硬链接（覆盖旧链接）
+    let link_path = paths::tools_bin_dir().join(format!("{}.exe", name));
+    let _ = fs::remove_file(&link_path);
+    fs::hard_link(exe_path, &link_path)
+        .with_context(|| format!("创建硬链接失败: {} → {}", link_path.display(), exe_path.display()))?;
+    println!("  硬链接: {} → {}", link_path.display(), exe_path.display());
+
+    // 6. 记录安装
+    software::record_installation(name, ver, tool_dir.to_string_lossy().as_ref(), "source", ver)?;
+
+    println!("\n✓ {} {} 安装完成", display, ver);
+    println!("  位置: {}", tool_dir.display());
+    println!("  {} 可直接在终端使用", color::cyan(&format!("{}", name)));
+
+    Ok(())
+}
+
 // ── Uninstall ─────────────────────────────────────────────
 
 pub fn uninstall_software(name: &str, gui: bool, force: bool) -> anyhow::Result<()> {
@@ -192,6 +316,11 @@ pub fn uninstall_software(name: &str, gui: bool, force: bool) -> anyhow::Result<
     // Find installed version
     let version = sd.default_version.as_str();
     let vi = sd.versions.get(version);
+
+    // ── 自研工具卸载 ──
+    if sd.kind == "self" {
+        return uninstall_self_tool(name, display);
+    }
 
     let is_portable = vi.map(|v| v.installer_type == "portable").unwrap_or(false);
     let installed_info = vi.and_then(|v| v.detection.as_ref())
@@ -235,6 +364,29 @@ pub fn uninstall_software(name: &str, gui: bool, force: bool) -> anyhow::Result<
     Ok(())
 }
 
+/// 卸载自研工具：删除 tools/{name}/ 目录和 tools/bin/{name}.exe 硬链接。
+fn uninstall_self_tool(name: &str, display: &str) -> anyhow::Result<()> {
+    // 删除工具目录
+    let tool_dir = paths::tools_dir().join(name);
+    if tool_dir.exists() {
+        fs::remove_dir_all(&tool_dir)?;
+        println!("  已删除: {}", tool_dir.display());
+    }
+
+    // 删除硬链接
+    let link_path = paths::tools_bin_dir().join(format!("{}.exe", name));
+    if link_path.exists() {
+        fs::remove_file(&link_path)?;
+        println!("  已删除硬链接: {}", link_path.display());
+    }
+
+    // 删除安装记录
+    software::remove_installation_record(name)?;
+    println!("\n✓ {} 卸载完成", display);
+
+    Ok(())
+}
+
 // ── Uninstall implementation ──────────────────────────────
 
 fn run_uninstall(_name: &str, info: &std::collections::HashMap<String, String>, gui: bool) -> anyhow::Result<bool> {
@@ -246,59 +398,123 @@ fn run_uninstall(_name: &str, info: &std::collections::HashMap<String, String>, 
         }
     };
 
-    if gui {
-        // For GUI mode, just run the uninstaller as-is
-        let args: Vec<&str> = uninstall_str.split_whitespace().collect();
-        if args.is_empty() {
-            return Ok(false);
-        }
-        let status = Command::new(args[0])
-            .args(&args[1..])
-            .status()
-            .context("运行卸载程序失败")?;
-        return Ok(status.success());
-    }
-
-    // Silent: try to add silent flags for common installer types
-    let cmd_args: Vec<&str> = uninstall_str.split_whitespace().collect();
-    if cmd_args.is_empty() {
+    // 正确解析命令行：尊重引号保护的带空格路径
+    let args = parse_cmdline(&uninstall_str);
+    if args.is_empty() {
         return Ok(false);
     }
 
-    let cmd = cmd_args[0];
-    let rest = &cmd_args[1..];
-
-    // Detect NSIS and add /S flag
-    let is_nsis = rest.iter().any(|a| a.to_uppercase().contains("UNINST"));
-    let status = if is_nsis {
-        Command::new(cmd)
-            .args(rest)
-            .arg("/S")
-            .status()
+    // 组装完整命令参数
+    let is_nsis = args[1..].iter().any(|a| a.to_uppercase().contains("UNINST"));
+    let cmd_args: Vec<String> = if gui {
+        args
+    } else if is_nsis {
+        let mut a = args;
+        a.push("/S".to_string());
+        a
     } else {
-        Command::new(cmd)
-            .args(rest)
-            .status()
+        args
     };
 
-    match status {
-        Ok(s) if s.success() => Ok(true),
-        Ok(s) => {
-            eprintln!("  卸载程序退出码: {}", s.code().unwrap_or(-1));
-            Ok(false)
+    // 先尝试直接运行
+    match try_run_uninstall(&cmd_args) {
+        Ok(result) => return Ok(result),
+        Err(e) if e.raw_os_error() == Some(740) => {
+            println!("  卸载程序需要管理员权限，正在提权运行...");
         }
         Err(e) => {
             eprintln!("  运行卸载程序失败: {}", e);
+            return Ok(false);
+        }
+    }
+
+    // ERROR_ELEVATION_REQUIRED → 通过 Start-Process -Verb RunAs 提权
+    let ps_script = if cmd_args.len() <= 1 {
+        format!(
+            "Start-Process -FilePath '{}' -Verb RunAs -Wait -ErrorAction SilentlyContinue",
+            cmd_args[0].replace('\'', "''"),
+        )
+    } else {
+        format!(
+            "Start-Process -FilePath '{}' -ArgumentList '{}' -Verb RunAs -Wait -ErrorAction SilentlyContinue",
+            cmd_args[0].replace('\'', "''"),
+            cmd_args[1..].join(" ").replace('\'', "''"),
+        )
+    };
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_script])
+        .status();
+
+    match status {
+        Ok(_) => {
+            // Start-Process -Verb RunAs 成功与否只能通过 $? 判断，
+            // 但即使 UAC 被取消也返回 0，所以这里假定提权后用户手动操作完成
+            Ok(true)
+        }
+        Err(e) => {
+            eprintln!("  提权运行卸载程序失败: {}", e);
             Ok(false)
         }
     }
 }
 
+/// 尝试运行卸载程序，不处理提权（让调用者处理）。
+fn try_run_uninstall(args: &[String]) -> std::io::Result<bool> {
+    let status = Command::new(&args[0]).args(&args[1..]).status()?;
+    Ok(status.success())
+}
+
+/// 解析 Windows 命令行字符串，正确处理引号保护的参数。
+///
+/// 例如 `"C:\Program Files\7-Zip\Uninstall.exe" /S` → ["C:\Program Files\7-Zip\Uninstall.exe", "/S"]
+fn parse_cmdline(cmd: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+
+    for c in cmd.chars() {
+        match c {
+            '"' => in_quote = !in_quote,
+            ' ' if !in_quote => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
+}
+
 // ── Download helpers ──────────────────────────────────────
+
+/// 扫描目录，删除所有以 `.parts` 结尾的残留目录（RustRange 分片下载中断遗留）。
+fn cleanup_stale_parts(dir: &Path) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map_or(false, |n| n.ends_with(".parts"))
+            {
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
+    }
+}
 
 fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool) -> anyhow::Result<PathBuf> {
     let dl = paths::downloads_dir();
     fs::create_dir_all(&dl)?;
+
+    // 清理遗留的 .parts 临时目录（上次中断的 RustRange 分片下载残留）
+    cleanup_stale_parts(&dl);
 
     // 1) 从 URL 探测真实文件名（HEAD 请求，或 URL 路径推测）
     //    成功则扩展名已正确，无需魔数修正
@@ -450,6 +666,86 @@ fn run_installer(name: &str, version: &str, installer_path: &Path, vi: &VersionI
     }
 }
 
+/// 将压缩包解压到指定目录（自研工具用）。
+/// 如果压缩包内只有一个根目录，则提取该目录的内容；否则直接解压到目标目录。
+pub fn extract_zip_to(archive_path: &Path, target_dir: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(target_dir)?;
+
+    let ext = archive_path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let staging = target_dir.with_extension("staging");
+    if staging.exists() {
+        fs::remove_dir_all(&staging)?;
+    }
+    fs::create_dir_all(&staging)?;
+
+    match ext.as_str() {
+        "zip" => {
+            let status = Command::new("powershell")
+                .args([
+                    "-NoProfile", "-Command",
+                    &format!(
+                        "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                        archive_path.display(), staging.display()
+                    ),
+                ])
+                .status()?;
+            if !status.success() {
+                bail!("解压 zip 失败");
+            }
+        }
+        _ => {
+            let candidates = [
+                paths::builds_dir().join("7zr").join("7zr.exe"),
+                paths::builds_dir().join("7zr.exe"),
+                PathBuf::from("C:\\Program Files\\7-Zip\\7z.exe"),
+                PathBuf::from("C:\\Program Files (x86)\\7-Zip\\7z.exe"),
+            ];
+            let seven_z = candidates.iter().find(|p| p.exists());
+            let status = if let Some(exe) = seven_z {
+                Command::new(exe)
+                    .args(["x", &archive_path.to_string_lossy(), &format!("-o{}", staging.display()), "-y"])
+                    .status()?
+            } else {
+                bail!("不支持的压缩格式 '{}'（未找到解压工具）", ext);
+            };
+            if !status.success() {
+                bail!("解压失败");
+            }
+        }
+    }
+
+    // 检查 staging 是否只有一个根目录
+    let entries: Vec<_> = fs::read_dir(&staging)?
+        .filter_map(|e| e.ok())
+        .collect();
+
+    if entries.len() == 1 && entries[0].file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        // 单根目录 → 把内容移出来
+        let inner = entries[0].path();
+        for entry in fs::read_dir(&inner)? {
+            let entry = entry?;
+            let target = target_dir.join(entry.file_name());
+            let _ = fs::remove_dir_all(&target);
+            fs::rename(entry.path(), &target)?;
+        }
+    } else {
+        // 平铺文件 → 直接移入
+        for entry in entries {
+            let target = target_dir.join(entry.file_name());
+            let _ = fs::remove_dir_all(&target);
+            fs::rename(entry.path(), &target)?;
+        }
+    }
+
+    let _ = fs::remove_dir_all(&staging);
+    Ok(())
+}
+
+/// 安装便携版（第三方）。
 fn install_portable(name: &str, version: &str, archive_path: &Path) -> anyhow::Result<PathBuf> {
     let dir_name = format!("{}-{}", name, version);
     let target = paths::apps_dir().join(&dir_name);
