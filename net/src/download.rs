@@ -9,6 +9,9 @@ use crate::verify::verify_downloaded_file;
 
 const CHUNK: usize = 64 * 1024;
 
+/// 每个下载策略的最大等待时间。超时则直接进入下一个策略。
+const STRATEGY_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// 下载策略。
 #[derive(Debug, Clone)]
 pub enum DownloadStrategy {
@@ -100,8 +103,8 @@ pub struct DownloadReport {
 
 /// 使用多策略回退链下载文件。
 ///
-/// 按 `config.strategies` 中的策略顺序尝试，第一个成功的策略返回。
-/// 所有策略都失败则返回最后一个错误。
+/// 按 `config.strategies` 中的策略顺序尝试，每个策略最多等待 `STRATEGY_TIMEOUT`（15s）。
+/// 第一个成功的策略返回。所有策略都失败则返回最后一个错误。
 pub fn download_with_fallback(
     url: &str,
     target_path: &Path,
@@ -123,39 +126,74 @@ pub fn download_with_fallback(
             _ => {}
         }
 
-        let result = match strategy {
-            DownloadStrategy::RustRange { threads } => {
-                download_with_range(url, target_path, *threads, config.resume)
-                    .map(|_| name)
+        let url_owned = url.to_string();
+        let target_owned = target_path.to_owned();
+        let resume = config.resume;
+        let strategy = strategy.clone();
+
+        // 在后台线程执行下载，主线程等待超时（15s）
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = match &strategy {
+                DownloadStrategy::RustRange { threads } => {
+                    download_with_range(&url_owned, &target_owned, *threads, resume)
+                        .map(|_| name)
+                }
+                DownloadStrategy::Aria2c => {
+                    crate::aria2c::try_aria2c_download(&url_owned, &target_owned)
+                        .map(|_| name)
+                }
+                DownloadStrategy::Curl => {
+                    crate::curl::try_curl_download(&url_owned, &target_owned)
+                        .map(|_| name)
+                }
+                DownloadStrategy::PowerShell => {
+                    crate::powershell::try_powershell_download(&url_owned, &target_owned)
+                        .map(|_| "powershell")
+                }
+                DownloadStrategy::PowerShellInvoke => {
+                    crate::powershell::try_powershell_invoke(&url_owned, &target_owned)
+                        .map(|_| "powershell-invoke")
+                }
+                DownloadStrategy::BitsTransfer => {
+                    crate::powershell::try_bits_transfer(&url_owned, &target_owned)
+                        .map(|_| "bits")
+                }
+                DownloadStrategy::Ureq { fingerprint, insecure } => {
+                    let agent_config = AgentConfig {
+                        fingerprint: *fingerprint,
+                        insecure: *insecure,
+                        connect_timeout: 15,
+                        read_timeout: 600,
+                    };
+                    download_with_ureq(&url_owned, &target_owned, &agent_config).map(|_| {
+                        if *insecure { "ureq(insecure)" } else { "ureq" }
+                    })
+                }
+            };
+            let _ = tx.send(result);
+        });
+
+        let result = match rx.recv_timeout(STRATEGY_TIMEOUT) {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(e)) => Err(e),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                eprintln!("       ✗ 策略超时（{} 秒）", STRATEGY_TIMEOUT.as_secs());
+                let msg = format!("{}: 超时", name);
+                errors.push(msg);
+                let _ = std::fs::remove_file(target_path);
+                let parts_dir = format!("{}.parts", target_path.display());
+                let _ = std::fs::remove_dir_all(&parts_dir);
+                continue;
             }
-            DownloadStrategy::Aria2c => {
-                crate::aria2c::try_aria2c_download(url, target_path).map(|_| name)
-            }
-            DownloadStrategy::Curl => {
-                crate::curl::try_curl_download(url, target_path).map(|_| name)
-            }
-            DownloadStrategy::PowerShell => {
-                crate::powershell::try_powershell_download(url, target_path)
-                    .map(|_| "powershell")
-            }
-            DownloadStrategy::PowerShellInvoke => {
-                crate::powershell::try_powershell_invoke(url, target_path)
-                    .map(|_| "powershell-invoke")
-            }
-            DownloadStrategy::BitsTransfer => {
-                crate::powershell::try_bits_transfer(url, target_path)
-                    .map(|_| "bits")
-            }
-            DownloadStrategy::Ureq { fingerprint, insecure } => {
-                let agent_config = AgentConfig {
-                    fingerprint: *fingerprint,
-                    insecure: *insecure,
-                    connect_timeout: 30,
-                    read_timeout: 600,
-                };
-                download_with_ureq(url, target_path, &agent_config).map(|_| {
-                    if *insecure { "ureq(insecure)" } else { "ureq" }
-                })
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                eprintln!("       ✗ 策略异常退出");
+                let msg = format!("{}: 异常退出", name);
+                errors.push(msg);
+                let _ = std::fs::remove_file(target_path);
+                let parts_dir = format!("{}.parts", target_path.display());
+                let _ = std::fs::remove_dir_all(&parts_dir);
+                continue;
             }
         };
 
@@ -342,16 +380,123 @@ fn download_with_ureq(url: &str, target_path: &Path, agent_cfg: &AgentConfig) ->
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("ureq 下载失败")))
 }
 
-/// 对 GitHub 地址自动追加 ghproxy 镜像。
+/// 对 GitHub 地址自动追加 ghproxy 镜像，ghproxy 排在原链前面。
 pub fn expand_github_urls(urls: &[String]) -> Vec<String> {
     let mut out = Vec::with_capacity(urls.len() * 2);
     for url in urls {
-        out.push(url.clone());
-        if url.contains("github.com") && !url.contains("ghproxy") && !url.contains("gh-proxy") {
+        let is_github = url.contains("github.com") || url.contains("raw.githubusercontent.com");
+        if is_github && !url.contains("ghproxy") && !url.contains("gh-proxy") {
+            // ghproxy 优先于原链
             out.push(format!("https://ghproxy.net/{}", url));
+            out.push(url.clone());
+        } else {
+            out.push(url.clone());
         }
     }
     out
+}
+
+/// 并行探测多个 URL，返回最快可用的一个。
+///
+/// 对每个 URL 发送 HEAD 请求，检查是否可达且返回非 HTML 内容。
+/// 所有探测并发执行，第一个成功的返回。8s 无结果则返回 None。
+fn parallel_probe(urls: &[String]) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let probe_timeout = Duration::from_secs(8);
+
+    for url in urls {
+        let tx = tx.clone();
+        let url = url.clone();
+        std::thread::spawn(move || {
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_secs(5))
+                .timeout_read(Duration::from_secs(5))
+                .user_agent("aminos/0.1")
+                .build();
+
+            match agent.head(&url).call() {
+                Ok(resp) if resp.status() < 400 => {
+                    let ct = resp.header("Content-Type").unwrap_or("");
+                    // HEAD 成功且不是 HTML → 可用的下载地址
+                    if !ct.contains("text/html") {
+                        let _ = tx.send(url);
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
+
+    // 等待第一个成功的响应，或超时
+    drop(tx);
+    match rx.recv_timeout(probe_timeout) {
+        Ok(url) => Some(url),
+        Err(_) => None,
+    }
+}
+
+/// 从多个 URL 中下载（智能并发探测 + 回退）。
+///
+/// 第一阶段：并行探测所有 URL，最快可用的胜出。
+/// 第二阶段：用胜出 URL 运行全策略链下载。
+/// 探测阶段无结果则降级为顺序全策略尝试。
+pub fn download_with_url_fallback(
+    name: &str,
+    urls: &[String],
+    target_path: &Path,
+    config: &DownloadConfig,
+) -> anyhow::Result<DownloadReport> {
+    let expanded = expand_github_urls(urls);
+
+    // ── Phase 1: 并行探测 ──
+    let total = expanded.len();
+    eprintln!("    ⚡ 并行探测 {} 个地址（8s 封顶）", total);
+    for (i, url) in expanded.iter().enumerate() {
+        eprintln!("      [{}/{}] {}", i + 1, total, url);
+    }
+
+    let winner = parallel_probe(&expanded);
+
+    // ── Phase 2: 正式下载 ──
+    if let Some(ref url) = winner {
+        eprintln!("    ✓ 最快可用: {}", url);
+        let start = Instant::now();
+        match download_with_fallback(url, target_path, config) {
+            Ok(report) => return Ok(report),
+            Err(e) => {
+                let elapsed = start.elapsed();
+                let _ = std::fs::remove_file(target_path);
+                let parts_dir = format!("{}.parts", target_path.display());
+                let _ = std::fs::remove_dir_all(&parts_dir);
+                eprintln!("    ✗ 胜出地址下载失败（{}s）: {}", elapsed.as_secs(), e);
+            }
+        }
+    } else {
+        eprintln!("    ⚠ 全部探测无响应（8s 超时），降级为顺序回退");
+    }
+
+    // ── Phase 2 降级：顺序全策略尝试 ──
+    let mut last_err = None;
+    for (i, url) in expanded.iter().enumerate() {
+        eprintln!("    [{}/{}] 顺序回退: {}", i + 1, expanded.len(), url);
+        let mut cfg = config.clone();
+        if i > 0 {
+            cfg.renew = false;
+        }
+        match download_with_fallback(url, target_path, &cfg) {
+            Ok(report) => return Ok(report),
+            Err(e) => {
+                eprintln!("    ✗ 失败");
+                last_err = Some(e);
+                let _ = std::fs::remove_file(target_path);
+                let parts_dir = format!("{}.parts", target_path.display());
+                let _ = std::fs::remove_dir_all(&parts_dir);
+            }
+        }
+    }
+
+    let err = last_err.unwrap_or_else(|| anyhow::anyhow!("无可用下载地址"));
+    bail!("{}: {}", name, err);
 }
 
 /// 通过 HEAD 请求探测下载 URL 的真实文件名。
@@ -403,35 +548,4 @@ pub fn probe_filename(url: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-/// 从多个 URL 中下载（顺序回退）。
-pub fn download_with_url_fallback(
-    name: &str,
-    urls: &[String],
-    target_path: &Path,
-    config: &DownloadConfig,
-) -> anyhow::Result<DownloadReport> {
-    let expanded = expand_github_urls(urls);
-    let mut last_err = None;
-
-    for (i, url) in expanded.iter().enumerate() {
-        eprintln!("    URL[{}]: {}", i + 1, url);
-        let mut cfg = config.clone();
-        // 只有第一个 URL 的首次尝试才启用 renew（避免重复下载）
-        if i > 0 {
-            cfg.renew = false;
-        }
-        match download_with_fallback(url, target_path, &cfg) {
-            Ok(report) => return Ok(report),
-            Err(e) => {
-                eprintln!("    \u{2717} 该地址失败");
-                last_err = Some(e);
-                let _ = std::fs::remove_file(target_path);
-            }
-        }
-    }
-
-    let err = last_err.unwrap_or_else(|| anyhow::anyhow!("无可用下载地址"));
-    bail!("{}: {}", name, err);
 }

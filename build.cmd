@@ -5,7 +5,9 @@ call cargo build -p ls --release
 call cargo build -p as --release
 
 copy target\release\as.exe as.exe
+copy target\release\as.exe %USERPROFILE%\Desktop
 copy target\release\ls.exe ls.exe
+copy target\release\ls.exe %USERPROFILE%\Desktop
 
 set TOOLS_DIR=aminos-source\tools
 

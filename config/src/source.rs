@@ -119,19 +119,24 @@ pub fn update_sources(source_dir: &Path, repo: &SourceRepo) -> Result<()> {
         String::new()
     };
 
-    let (ok_count, fail_count) = if needs_update.is_empty() {
-        (0, 0)
+    let (changed, unchanged_count, failed) = if needs_update.is_empty() {
+        (0, 0, 0)
     } else {
         concurrent_download_files(&needs_update, source_dir, &repos, &cache_bust, max_name_w)?
     };
 
-    let up_to_date = index.files.len() - needs_update.len();
+    let up_to_date = index.files.len() - needs_update.len() + unchanged_count;
     println!();
-    if fail_count > 0 {
-        println!("  源更新完成。{} 个成功，{} 个已最新，{} 个失败", ok_count, up_to_date, fail_count);
-    } else {
-        println!("  源更新完成。{} 个更新，{} 个已最新", ok_count, up_to_date);
-    }
+    let parts = Vec::from([
+        (changed, "个更新"),
+        (up_to_date, "个已最新"),
+        (failed, "个失败"),
+    ]);
+    let summary: String = parts.iter()
+        .filter_map(|(n, label)| if *n > 0 { Some(format!("{} {}", n, label)) } else { None })
+        .collect::<Vec<_>>()
+        .join("，");
+    println!("  源更新完成。{}", summary);
 
     // 4. 清理本地多余文件
     let all_files: Vec<String> = index.files.into_keys().collect();
@@ -165,22 +170,23 @@ fn download_index(repos: &[&str], ts: u64) -> Result<(Vec<u8>, String)> {
 
 /// 并发下载文件（12 路线程池），失败时自动尝试下一个镜像。
 ///
-/// 返回 (成功数, 失败数)。
+/// 返回 (变更数, 未变数, 失败数)。
 fn concurrent_download_files(
     files: &[String],
     source_dir: &Path,
     repos: &[&str],
     cache_bust: &str,
     max_name_w: usize,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, usize)> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
 
     let files = Arc::new(files.to_owned());
     let next_idx = Arc::new(AtomicUsize::new(0));
-    let ok_count = Arc::new(AtomicUsize::new(0));
-    let fail_count = Arc::new(AtomicUsize::new(0));
+    let changed = Arc::new(AtomicUsize::new(0));
+    let unchanged = Arc::new(AtomicUsize::new(0));
+    let failed = Arc::new(AtomicUsize::new(0));
     let source_dir = Arc::new(source_dir.to_path_buf());
     let repos: Arc<Vec<String>> = Arc::new(repos.iter().map(|s| s.to_string()).collect());
     let cache_bust = Arc::new(cache_bust.to_string());
@@ -190,8 +196,9 @@ fn concurrent_download_files(
     for _ in 0..12 {
         let files = Arc::clone(&files);
         let next_idx = Arc::clone(&next_idx);
-        let ok_count = Arc::clone(&ok_count);
-        let fail_count = Arc::clone(&fail_count);
+        let changed = Arc::clone(&changed);
+        let unchanged = Arc::clone(&unchanged);
+        let failed = Arc::clone(&failed);
         let source_dir = Arc::clone(&source_dir);
         let repos = Arc::clone(&repos);
         let cache_bust = Arc::clone(&cache_bust);
@@ -213,30 +220,34 @@ fn concurrent_download_files(
                 let url = format!("{}/{}{}", repo, fname, cache_bust);
                 match download_bytes(&url) {
                     Ok(data) => {
+                        // 先读旧内容（必须在写入之前）
+                        let old_content = fs::read(&dest).ok();
+
                         // 写入文件
                         if let Err(e) = fs::write(&dest, &data) {
                             let _g = print_lock.lock().unwrap();
                             eprintln!("  {}    写入失败: {}", padded_name, e);
                             last_err = e.to_string();
-                            break; // 写入失败不重试其他镜像
+                            break;
                         }
 
                         // 判断状态
-                        let old_content = fs::read(&dest).ok();
                         let is_new = old_content.is_none();
                         let is_changed = !is_new && old_content.as_deref() != Some(&data);
                         let status = if is_new {
+                            changed.fetch_add(1, Ordering::Relaxed);
                             color::green("新增")
                         } else if is_changed {
+                            changed.fetch_add(1, Ordering::Relaxed);
                             color::cyan("更新")
                         } else {
+                            unchanged.fetch_add(1, Ordering::Relaxed);
                             color::gray("未变")
                         };
 
                         let _g = print_lock.lock().unwrap();
                         println!("  {}    {}  ({} B)", padded_name, status, data.len());
 
-                        ok_count.fetch_add(1, Ordering::Relaxed);
                         success = true;
                         break;
                     }
@@ -249,7 +260,7 @@ fn concurrent_download_files(
             if !success {
                 let _g = print_lock.lock().unwrap();
                 println!("  {}    {}", padded_name, color::yellow(format!("失败 ({})", last_err)));
-                fail_count.fetch_add(1, Ordering::Relaxed);
+                failed.fetch_add(1, Ordering::Relaxed);
             }
         }));
     }
@@ -258,7 +269,11 @@ fn concurrent_download_files(
         let _ = h.join();
     }
 
-    Ok((ok_count.load(Ordering::Relaxed), fail_count.load(Ordering::Relaxed)))
+    Ok((
+        changed.load(Ordering::Relaxed),
+        unchanged.load(Ordering::Relaxed),
+        failed.load(Ordering::Relaxed),
+    ))
 }
 
 /// 删除 index 中不存在的本地文件。
