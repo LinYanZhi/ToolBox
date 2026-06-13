@@ -21,7 +21,7 @@ impl PathResolver {
     }
 
     /// 应用数据根目录：`%LOCALAPPDATA%\{app_name}\`
-    fn appdata_root(&self) -> PathBuf {
+    pub fn appdata_root(&self) -> PathBuf {
         let local = std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("."));

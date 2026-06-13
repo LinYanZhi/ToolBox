@@ -7,7 +7,7 @@ pub fn source_dir() -> PathBuf {
 }
 
 pub fn builds_dir() -> PathBuf {
-    RESOLVER.downloads_dir()
+    RESOLVER.appdata_root().join("builds")
 }
 
 pub fn downloads_dir() -> PathBuf {

@@ -66,9 +66,16 @@ pub fn update_sources(source_dir: &Path, repo: &SourceRepo) -> Result<()> {
         .as_secs();
 
     // 1. 下载 index.json
-    let (index_bytes, used_repo) = download_index(&repos, ts)?;
+    let (raw_index_bytes, used_repo) = download_index(&repos, ts)?;
 
-    let index: Index = serde_json::from_slice(&index_bytes)
+    // 去除 BOM（U+FEFF），PowerShell 的 UTF-8 输出可能带 BOM
+    let index_bytes = if raw_index_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &raw_index_bytes[3..]
+    } else {
+        &raw_index_bytes[..]
+    };
+
+    let index: Index = serde_json::from_slice(index_bytes)
         .context("源索引格式错误")?;
 
     // 2. 对比哈希，筛选出需要更新的文件

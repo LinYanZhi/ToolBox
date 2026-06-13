@@ -139,13 +139,17 @@ pub fn install_software(
 
     // 5. Install
     println!("\n▶ 安装 {} {} ...", display, ver);
-    let installed = run_installer(name, &installer_path, vi, gui)?;
+    let (installed, portable_install_path) = run_installer(name, ver, &installer_path, vi, gui)?;
     if !installed {
         bail!("安装未完成（用户取消或安装失败）");
     }
 
-    // 6. Find install location
-    let install_path = find_install_path(name, vi, &sd);
+    // 6. Find install location — 便携版已有返回路径，标准安装查注册表
+    let install_path = if let Some(path) = portable_install_path {
+        Some(path.to_string_lossy().to_string())
+    } else {
+        find_install_path(name, vi, &sd)
+    };
 
     // 7. Create shortcut in apps/
     let shortcut_key = create_app_shortcut(name, vi, &install_path);
@@ -189,20 +193,31 @@ pub fn uninstall_software(name: &str, gui: bool, force: bool) -> anyhow::Result<
     let version = sd.default_version.as_str();
     let vi = sd.versions.get(version);
 
+    let is_portable = vi.map(|v| v.installer_type == "portable").unwrap_or(false);
     let installed_info = vi.and_then(|v| v.detection.as_ref())
         .and_then(|d| registry::detect_installed(d));
 
-    if installed_info.is_none() && !force {
+    if installed_info.is_none() && !force && !is_portable {
         println!("{} 未在系统中检测到安装记录。", display);
         println!("如需清理安装记录，请使用 --force 参数。");
         return Ok(());
     }
 
-    // Run uninstall
-    if let Some(ref info) = installed_info {
-        let ok = run_uninstall(name, info, gui)?;
-        if !ok {
-            return Ok(());
+    if is_portable {
+        // 便携版：直接删除 apps/{name}-{version}/ 目录
+        let dir_name = format!("{}-{}", name, version);
+        let portable_dir = paths::apps_dir().join(&dir_name);
+        if portable_dir.exists() {
+            fs::remove_dir_all(&portable_dir)?;
+            println!("  已删除便携版目录: {}", portable_dir.display());
+        }
+    } else {
+        // 标准安装：运行卸载程序
+        if let Some(ref info) = installed_info {
+            let ok = run_uninstall(name, info, gui)?;
+            if !ok {
+                return Ok(());
+            }
         }
     }
 
@@ -285,25 +300,80 @@ fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool) -
     let dl = paths::downloads_dir();
     fs::create_dir_all(&dl)?;
 
-    let filename = safe_installer_name(name, version, urls);
+    // 1) 从 URL 探测真实文件名（HEAD 请求，或 URL 路径推测）
+    //    成功则扩展名已正确，无需魔数修正
+    let (filename, needs_magic_fix) = match urls.first().and_then(|u| net::probe_filename(u)) {
+        Some(fname) => (fname, false),
+        None => (safe_installer_name(name, version, urls), true),
+    };
     let target = dl.join(&filename);
 
+    // 2) 精确匹配缓存
     if target.exists() && !renew {
         println!("  使用缓存: {}", target.display());
         return Ok(target);
     }
 
+    // 前缀匹配：扫描 {name}-{version}.xxxxx（应对魔数修正或 probe 返回不同文件名）
+    if !renew {
+        let base = format!("{}-{}.",
+            name.to_lowercase().replace(' ', "-"),
+            version.to_lowercase().replace(' ', "-"));
+        if let Ok(entries) = std::fs::read_dir(&dl) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.starts_with(&base) && fname != filename {
+                    let p = entry.path();
+                    if p.is_file() {
+                        println!("  使用缓存: {}", p.display());
+                        return Ok(p);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3) 下载到临时文件
     let tmp = dl.join(format!("{}.downloading", filename));
     net::download::download_with_url_fallback(name, urls, &tmp, &net::DownloadConfig::default().renew(renew))?;
-    fs::rename(&tmp, &target)?;
 
-    // 最终验证：rename 后的文件必须通过签名检查
-    if !net::verify_downloaded_file(&target) {
-        let _ = std::fs::remove_file(&target);
+    // 4) 魔数修正扩展名（仅当 URL 探测失败、用猜测文件名时）
+    let corrected = if needs_magic_fix {
+        match net::detect_format(&tmp) {
+            Some(fmt) => {
+                let ext = fmt.extension();
+                if !filename.ends_with(ext) {
+                    let corrected = format!("{}-{}{}",
+                        name.to_lowercase().replace(' ', "-"),
+                        version.to_lowercase().replace(' ', "-"), ext);
+                    let p = dl.join(&corrected);
+                    fs::rename(&tmp, &p)?;
+                    p
+                } else {
+                    let p = dl.join(&filename);
+                    fs::rename(&tmp, &p)?;
+                    p
+                }
+            }
+            None => {
+                let p = dl.join(&filename);
+                fs::rename(&tmp, &p)?;
+                p
+            }
+        }
+    } else {
+        let p = dl.join(&filename);
+        fs::rename(&tmp, &p)?;
+        p
+    };
+
+    // 5) 最终验证
+    if !net::verify_downloaded_file(&corrected) {
+        let _ = std::fs::remove_file(&corrected);
         bail!("{}: 下载后验证失败（文件损坏或反盗链页面）", name);
     }
 
-    Ok(target)
+    Ok(corrected)
 }
 
 /// 构造安全的安装包文件名。
@@ -331,7 +401,7 @@ fn safe_installer_name(name: &str, version: &str, urls: &[String]) -> String {
 
 // ── Installer execution ───────────────────────────────────
 
-fn run_installer(name: &str, installer_path: &Path, vi: &VersionInfo, gui: bool) -> anyhow::Result<bool> {
+fn run_installer(name: &str, version: &str, installer_path: &Path, vi: &VersionInfo, gui: bool) -> anyhow::Result<(bool, Option<PathBuf>)> {
     let itype = if vi.installer_type.is_empty() {
         detect_installer_type(installer_path)
     } else {
@@ -340,7 +410,8 @@ fn run_installer(name: &str, installer_path: &Path, vi: &VersionInfo, gui: bool)
 
     // Portable mode: extract archive
     if itype == "portable" {
-        return install_portable(name, installer_path);
+        let path = install_portable(name, version, installer_path)?;
+        return Ok((true, Some(path)));
     }
 
     // Build command
@@ -361,7 +432,7 @@ fn run_installer(name: &str, installer_path: &Path, vi: &VersionInfo, gui: bool)
     let status = cmd.status();
 
     match status {
-        Ok(s) if s.success() => Ok(true),
+        Ok(s) if s.success() => Ok((true, None)),
         Ok(s) => {
             let code = s.code().unwrap_or(-1);
             // Check for UAC required errors
@@ -370,37 +441,43 @@ fn run_installer(name: &str, installer_path: &Path, vi: &VersionInfo, gui: bool)
                 return try_elevate(installer_path, &vi.install_args);
             }
             eprintln!("  安装程序返回错误码 {}", code);
-            Ok(false)
+            Ok((false, None))
         }
         Err(e) => {
             eprintln!("  运行安装程序失败: {}", e);
-            Ok(false)
+            Ok((false, None))
         }
     }
 }
 
-fn install_portable(name: &str, archive_path: &Path) -> anyhow::Result<bool> {
-    let target = paths::builds_dir().join(name);
+fn install_portable(name: &str, version: &str, archive_path: &Path) -> anyhow::Result<PathBuf> {
+    let dir_name = format!("{}-{}", name, version);
+    let target = paths::apps_dir().join(&dir_name);
     if target.exists() {
         bail!("便携版目录已存在: {}", target.display());
     }
-    fs::create_dir_all(&target)?;
+
+    // 使用 staging 目录解压，检查目录结构后再整理
+    let staging = target.with_extension("staging");
+    if staging.exists() {
+        fs::remove_dir_all(&staging)?;
+    }
+    fs::create_dir_all(&staging)?;
 
     let ext = archive_path.extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
 
-    println!("  解压到 {} ...", target.display());
+    println!("  解压中 ...");
 
     match ext.to_lowercase().as_str() {
         "zip" => {
-            // Use PowerShell for zip extraction
             let status = Command::new("powershell")
                 .args([
                     "-NoProfile", "-Command",
                     &format!(
                         "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-                        archive_path.display(), target.display()
+                        archive_path.display(), staging.display()
                     ),
                 ])
                 .status()?;
@@ -409,14 +486,21 @@ fn install_portable(name: &str, archive_path: &Path) -> anyhow::Result<bool> {
             }
         }
         _ => {
-            // Try 7zr.exe from builds directory
-            let seven_z = paths::builds_dir().join("7zr").join("7zr.exe");
-            let status = if seven_z.exists() {
-                Command::new(&seven_z)
-                    .args(["x", &archive_path.to_string_lossy(), &format!("-o{}", target.display()), "-y"])
+            // 尝试多种可能的 7z 解压工具路径
+            let candidates = [
+                paths::builds_dir().join("7zr").join("7zr.exe"),
+                paths::builds_dir().join("7zr.exe"),
+                PathBuf::from("C:\\Program Files\\7-Zip\\7z.exe"),
+                PathBuf::from("C:\\Program Files (x86)\\7-Zip\\7z.exe"),
+            ];
+            let seven_z = candidates.iter().find(|p| p.exists());
+            let status = if let Some(exe) = seven_z {
+                Command::new(exe)
+                    .args(["x", &archive_path.to_string_lossy(), &format!("-o{}", staging.display()), "-y"])
                     .status()?
             } else {
-                bail!("不支持的压缩格式 '{}'（未找到 7zr.exe 解压工具）", ext)
+                bail!("不支持的压缩格式 '{}'（未找到解压工具）。\n  提示：请安装 7-Zip 或将 7zr.exe 放入 {}",
+                    ext, paths::builds_dir().display())
             };
             if !status.success() {
                 bail!("解压失败");
@@ -424,10 +508,43 @@ fn install_portable(name: &str, archive_path: &Path) -> anyhow::Result<bool> {
         }
     }
 
-    Ok(true)
+    // 检查 staging 目录的内容
+    let entries: Vec<_> = fs::read_dir(&staging)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            // 跳过系统隐藏文件（如 Thumbs.db, .DS_Store, __MACOSX 等）
+            let name = e.file_name().to_string_lossy().to_string();
+            !name.starts_with('.') && !name.starts_with("__MACOSX")
+        })
+        .collect();
+
+    if entries.is_empty() {
+        fs::remove_dir(&staging)?;
+        bail!("压缩包为空或仅包含系统文件");
+    }
+
+    // 如果解压后只有一个根目录，直接用它
+    // 否则创建目标目录，把文件移进去
+    if entries.len() == 1 && entries[0].file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        let single_dir = entries[0].path();
+        fs::rename(&single_dir, &target)?;
+    } else {
+        fs::create_dir(&target)?;
+        for entry in &entries {
+            let src = entry.path();
+            let dest = target.join(entry.file_name());
+            fs::rename(&src, &dest)?;
+        }
+    }
+
+    // 清理 staging
+    let _ = fs::remove_dir(&staging);
+
+    println!("  ✓ 已解压到 {}", target.display());
+    Ok(target)
 }
 
-fn try_elevate(installer_path: &Path, args: &[String]) -> anyhow::Result<bool> {
+fn try_elevate(installer_path: &Path, args: &[String]) -> anyhow::Result<(bool, Option<PathBuf>)> {
     // Use PowerShell Start-Process -Verb RunAs for elevation
     let mut ps_args = format!(
         "Start-Process -FilePath '{}'",
@@ -449,7 +566,7 @@ fn try_elevate(installer_path: &Path, args: &[String]) -> anyhow::Result<bool> {
     if !status.success() {
         eprintln!("  UAC 提权被取消或失败");
     }
-    Ok(status.success())
+    Ok((status.success(), None))
 }
 
 // ── Post-install helpers ──────────────────────────────────
@@ -491,13 +608,25 @@ fn find_install_path(_name: &str, vi: &VersionInfo, _sd: &SoftwareDef) -> Option
 }
 
 fn create_app_shortcut(name: &str, vi: &VersionInfo, install_path: &Option<String>) -> Option<String> {
-    // Try shortcut_candidates first
+    // Try shortcut_candidates first（桌面已有的快捷方式）
     for lnk in &vi.shortcut_candidates {
         let expanded = expand_env_vars(lnk);
         if Path::new(&expanded).exists() {
             if get_shortcut_target(&expanded).is_some() {
                 let target = paths::apps_dir().join(format!("{}.lnk", name));
                 let _ = create_shortcut_file(&expanded, &target);
+                return Some(target.to_string_lossy().into());
+            }
+        }
+    }
+
+    // 便携版：创建指向入口 exe 的快捷方式
+    if vi.installer_type == "portable" {
+        if let Some(ip) = install_path {
+            let exe_path = find_entry_point_exe(ip, vi, name);
+            if let Some(exe) = exe_path {
+                let target = paths::apps_dir().join(format!("{}.lnk", name));
+                let _ = create_shortcut_exe(&exe, &target);
                 return Some(target.to_string_lossy().into());
             }
         }
@@ -511,6 +640,73 @@ fn create_app_shortcut(name: &str, vi: &VersionInfo, install_path: &Option<Strin
     }
 
     None
+}
+
+/// 在便携版安装目录中找到入口可执行文件。
+///
+/// 优先级：
+/// 1. vi.entry_point 指定的文件名
+/// 2. 目录中的第一个 .exe
+fn find_entry_point_exe(install_dir: &str, vi: &VersionInfo, fallback_name: &str) -> Option<String> {
+    let dir = Path::new(install_dir);
+
+    // 1. entry_point 精确匹配
+    if let Some(ref ep) = vi.entry_point {
+        let p = dir.join(ep);
+        if p.is_file() {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+
+    // 2. 扫描 .exe
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.extension().map_or(false, |e| e == "exe") && p.is_file() {
+                candidates.push(p);
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    // 3. 优先匹配软件名
+    let lower_name = fallback_name.to_lowercase();
+    for p in &candidates {
+        let fname = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        if fname == lower_name || fname.contains(&lower_name) {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+
+    // 4. 回退：第一个 exe
+    Some(candidates[0].to_string_lossy().to_string())
+}
+
+/// 创建指向可执行文件的快捷方式（含工作目录）。
+fn create_shortcut_exe(target_exe: &str, output_lnk: &Path) -> anyhow::Result<()> {
+    let out_dir = output_lnk.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(out_dir)?;
+
+    let work_dir = Path::new(target_exe).parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let cmd = format!(
+        "$ws = New-Object -ComObject WScript.Shell; \
+         $sc = $ws.CreateShortcut('{}'); \
+         $sc.TargetPath = '{}'; \
+         $sc.WorkingDirectory = '{}'; \
+         $sc.Save()",
+        output_lnk.to_string_lossy().replace('\'', "''"),
+        target_exe.replace('\'', "''"),
+        work_dir.replace('\'', "''"),
+    );
+    ps_exec(&cmd)?;
+    Ok(())
 }
 
 // ── PowerShell-backed Windows utilities ───────────────────

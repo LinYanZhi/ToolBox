@@ -350,6 +350,57 @@ pub fn expand_github_urls(urls: &[String]) -> Vec<String> {
     out
 }
 
+/// 通过 HEAD 请求探测下载 URL 的真实文件名。
+///
+/// 跟随重定向到最终 URL，依次检查：
+/// 1. `Content-Disposition` 响应头中的 `filename` 字段
+/// 2. 最终 URL 路径的最后一段（如 `/download/snipaste-2.11.3.zip` → `snipaste-2.11.3.zip`）
+///
+/// 如果 URL 路径本身已有明确的文件扩展名，直接返回路径末尾的文件名，不发 HEAD 请求。
+/// 可用于下载前确定正确文件名，避免依赖魔数修正。
+pub fn probe_filename(url: &str) -> Option<String> {
+    // 先检查 URL 路径：如果已有已知扩展名，直接取路径末尾文件名
+    let path = url.split('?').next().unwrap_or(url);
+    let seg = path.rsplit('/').next().filter(|s| !s.is_empty())?;
+    if let Some(dot) = seg.rfind('.') {
+        let ext = &seg[dot..];
+        if [
+            ".exe", ".msi", ".zip", ".7z", ".rar", ".tar", ".gz", ".xz", ".bz2", ".iso",
+            ".appx", ".dmg", ".cab", ".run",
+        ]
+        .contains(&ext.to_lowercase().as_str())
+        {
+            return Some(seg.to_string());
+        }
+    }
+
+    // URL 无扩展名 → 发 HEAD 探测（Content-Disposition 或重定向后路径）
+    let agent = crate::agent::AgentConfig::normal(15, 15).build_agent().ok()?;
+    let resp = agent.head(url).call().ok()?;
+
+    // 1. Content-Disposition header
+    if let Some(cd) = resp.header("Content-Disposition") {
+        for part in cd.split(';') {
+            let part = part.trim();
+            if let Some(val) = part.strip_prefix("filename=") {
+                let name = val.trim_matches('"').trim_matches('\'').trim();
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+
+    // 2. 最终 URL 路径（跟随重定向后）
+    let final_url = resp.get_url();
+    let seg = final_url.rsplit('/').next().filter(|s| !s.is_empty())?;
+    if seg.contains('.') {
+        Some(seg.to_string())
+    } else {
+        None
+    }
+}
+
 /// 从多个 URL 中下载（顺序回退）。
 pub fn download_with_url_fallback(
     name: &str,

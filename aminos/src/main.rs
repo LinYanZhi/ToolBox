@@ -114,7 +114,7 @@ enum Command {
         /// 仅显示未安装
         #[arg(long = "missing", short = 'm')]
         missing: bool,
-        /// 搜索软件名
+        /// 搜索软件名、别名或描述
         #[arg(long = "search", short = 'S')]
         search: Option<String>,
         /// 仅显示已下载
@@ -126,6 +126,12 @@ enum Command {
         /// 仅显示未下载
         #[arg(long = "no-download")]
         no_download: bool,
+        /// 按分类分组显示
+        #[arg(short = 'g', long)]
+        group: bool,
+        /// 显示所有分类概览
+        #[arg(long)]
+        categories: bool,
     },
     /// 查看软件详细信息
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
@@ -232,8 +238,8 @@ fn main() {
         Some(Command::Uninstall { names, gui, force }) => {
             let _ = run(|| run_uninstall(names, gui, force));
         }
-        Some(Command::List { filter, install_only, missing, search, downloaded, downloading, no_download }) => {
-            let _ = run(|| run_list(filter, install_only, missing, search, downloaded, downloading, no_download));
+        Some(Command::List { filter, install_only, missing, search, downloaded, downloading, no_download, group, categories }) => {
+            let _ = run(|| run_list(filter, install_only, missing, search, downloaded, downloading, no_download, group, categories));
         }
         Some(Command::Info { name, urls }) => {
             let _ = run(|| run_info(&name, urls));
@@ -268,13 +274,16 @@ fn run_example() {
         ]),
         ("list", "列出可用软件及安装状态", &[
             ("as list", "列出所有软件"),
+            ("as list -g", "按分类分组显示"),
+            ("as list --categories", "查看分类概览"),
             ("as list -i", "仅显示已安装的软件"),
             ("as list -m", "仅显示未安装的软件"),
+            ("as list -f 开发工具", "按分类过滤（如: 工具, 开发, 办公, 浏览器）"),
+            ("as list -S 压缩", "搜索名称、别名或描述"),
             ("as list -S python", "搜索名称包含 python 的软件"),
             ("as list -D", "仅显示已下载缓存的软件"),
             ("as list --downloading", "仅显示正在下载的软件"),
             ("as list --no-download", "仅显示未下载的软件"),
-            ("as list -f 办公", "按分类过滤（如: 办公, 开发, 浏览器）"),
         ]),
         ("info", "查看软件详细信息", &[
             ("as info 7zip", "查看 7-Zip 的基本信息"),
@@ -480,19 +489,36 @@ fn run_upgrade(names: Vec<String>, check_only: bool, renew: bool) -> anyhow::Res
         let display = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
         let source_ver = &sd.default_version;
 
-        // 先查注册表版本（存到局部变量避免 lifetime 问题）
-        let registry_ver = sd.versions.get(source_ver)
-            .and_then(|vi| vi.detection.as_ref())
-            .and_then(|d| registry::detect_installed(d))
-            .and_then(|r| r.get("DisplayVersion").cloned());
+        // 判断是否为便携版
+        let is_portable = sd.versions.get(source_ver)
+            .map(|vi| vi.installer_type == "portable")
+            .unwrap_or(false);
 
-        // 优先用 installed_db 记录的版本，回退到注册表
-        let current_ver: &str = installed_db.get(name)
-            .map(|rec| rec.version.as_str())
-            .or_else(|| registry_ver.as_deref())
-            .unwrap_or("");
+        // 便携版：检查 apps/{name}-{version} 目录是否存在
+        // 标准版：从注册表获取版本
+        let portable_dir = paths::apps_dir().join(format!("{}-{}", name, source_ver));
+        let current_ver: String = if is_portable {
+            if portable_dir.is_dir() {
+                installed_db.get(name)
+                    .map(|rec| rec.version.clone())
+                    .unwrap_or_else(|| source_ver.to_string())
+            } else {
+                // 目录已被手动删除
+                String::new()
+            }
+        } else {
+            // 标准安装：从注册表获取版本
+            let registry_ver = sd.versions.get(source_ver)
+                .and_then(|vi| vi.detection.as_ref())
+                .and_then(|d| registry::detect_installed(d))
+                .and_then(|r| r.get("DisplayVersion").cloned());
+            installed_db.get(name)
+                .map(|rec| rec.version.clone())
+                .or(registry_ver)
+                .unwrap_or_default()
+        };
 
-        if current_ver == source_ver && !renew {
+        if current_ver == *source_ver && !renew {
             println!("  {}", color::gray(format!("{} {} 已是最新", display, current_ver)));
             up_to_date += 1;
             continue;
@@ -606,7 +632,11 @@ fn scan_download_cache() -> std::collections::HashMap<String, (&'static str, &'s
     result
 }
 
-fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: Option<String>, downloaded: bool, downloading: bool, no_download: bool) -> anyhow::Result<()> {
+fn run_list(
+    filter: Option<String>, install_only: bool, missing: bool,
+    search: Option<String>, downloaded: bool, downloading: bool, no_download: bool,
+    group: bool, categories: bool,
+) -> anyhow::Result<()> {
     // Auto-init: if source dir is empty, suggest `as source update`
     let source = paths::source_dir();
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
@@ -620,119 +650,213 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
     let defs = software::list_software_defs()?;
     let dl_cache = scan_download_cache();
 
-    // Rows: (名称, 版本, 安装状态, 安装颜色, 下载状态, 下载颜色, 源标签, 源颜色)
-    let mut rows: Vec<(String, String, &str, &str, &str, &str, &str, &str)> = Vec::new();
+    // ── 类别概览模式 ──
+    if categories {
+        let mut cat_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for sd in &defs {
+            let c = if sd.category.is_empty() { "未分类" } else { &sd.category };
+            *cat_count.entry(c).or_insert(0) += 1;
+        }
+        let mut sorted: Vec<(&&str, &usize)> = cat_count.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+
+        let max_cat_w = sorted.iter().map(|(c, _)| c.display_width()).max().unwrap_or(4).max(4).min(20);
+        let max_num = sorted.iter().map(|(_, n)| n.to_string().len()).max().unwrap_or(2);
+        let bar_max: usize = 30;
+        let total: usize = defs.len();
+
+        println!("\n{}", color::bold_yellow("类别概览"));
+        println!("{}", color::gray("─".repeat(50)));
+        for &(cat, count) in &sorted {
+            let bar_w = (*count as f64 / total as f64 * bar_max as f64).round() as usize;
+            let bar = "█".repeat(bar_w.max(1));
+            println!("  {}  {:>w$}  {}",
+                pad(cat, max_cat_w + 2),
+                count,
+                color::cyan(bar),
+                w = max_num,
+            );
+        }
+        println!("{}", color::gray("─".repeat(50)));
+        println!("  共计 {} 个软件", total);
+        return Ok(());
+    }
+
+    // ── 构建行数据 ──
+    fn installer_marker(t: &str) -> &'static str {
+        match t.to_lowercase().as_str() {
+            "nsis" | "inno" | "exe" | "installer" => "EXE",
+            "msi" | "appx" => "MSI",
+            "portable" | "zip" | "7z" | "rar" | "tar" | "gz" | "bz2" => "便携",
+            _ => "EXE",
+        }
+    }
+
+    // Rows: (名称, 版本, 安装状态, 安装颜色, 下载状态, 下载颜色,
+    //        源标签, 源颜色, 分类, 安装标记)
+    let mut rows: Vec<(String, String, &str, &str, &str, &str, &str, &str, String, &str)> = Vec::new();
     let mut seen_registry: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // 1. Registry entries — 版本：installed_db (PE) > Registry
+    // 1. Registry entries
     for reg in &reg_installed {
         let rn = reg.get("display_name").cloned().unwrap_or_default();
         if rn.is_empty() || !seen_registry.insert(rn.clone()) {
             continue;
         }
+        let (category, installer) = if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
+            let cat = if sd.category.is_empty() { "未分类".to_string() } else { sd.category.clone() };
+            let ins = sd.versions.get(&sd.default_version)
+                .map(|vi| installer_marker(&vi.installer_type))
+                .unwrap_or("EXE");
+            (cat, ins)
+        } else {
+            ("其他".to_string(), "")
+        };
         let has_source = defs.iter().any(|sd| name_matches(&rn, sd));
         let src_label = if has_source { "有" } else { "无" };
         let src_color = if has_source { color::ansi::GREEN } else { color::ansi::GRAY };
-        // 通过软件名查找下载状态
-        let (dl_status, dl_color) = if has_source {
-            if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
-                dl_cache.get(&sd.name).copied().unwrap_or(("未下载", color::ansi::GRAY))
-            } else {
-                ("未下载", color::ansi::GRAY)
-            }
+        let (dl_status, dl_color) = if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
+            dl_cache.get(&sd.name).copied().unwrap_or(("未下载", color::ansi::GRAY))
         } else {
             ("未下载", color::ansi::GRAY)
         };
-        // 版本 reconciliation：installed_db (PE) > Registry DisplayVersion
-        let ver = if has_source {
-            if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
-                installed_db.get(&sd.name)
-                    .map(|rec| rec.version.clone())
-                    .unwrap_or_else(|| reg.get("version").cloned().unwrap_or_default())
-            } else {
-                reg.get("version").cloned().unwrap_or_default()
-            }
+        let ver = if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
+            installed_db.get(&sd.name)
+                .map(|rec| rec.version.clone())
+                .unwrap_or_else(|| reg.get("version").cloned().unwrap_or_default())
         } else {
             reg.get("version").cloned().unwrap_or_default()
         };
-        rows.push((rn, ver,
-            "已安装", color::ansi::GREEN, dl_status, dl_color, src_label, src_color));
+        rows.push((rn, ver, "已安装", color::ansi::GREEN, dl_status, dl_color, src_label, src_color, category, installer));
     }
 
     // 2. Source definitions not in registry
     for sd in &defs {
         let name = &sd.name;
         let display = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+        let category = if sd.category.is_empty() { "未分类".to_string() } else { sd.category.clone() };
+        let installer = sd.versions.get(&sd.default_version)
+            .map(|vi| installer_marker(&vi.installer_type))
+            .unwrap_or("EXE");
         let already = reg_installed.iter().any(|r| {
             name_matches(&r.get("display_name").cloned().unwrap_or_default(), sd)
         });
-        if already {
-            continue;
-        }
+        if already { continue; }
         let (dl_status, dl_color) = dl_cache.get(name)
             .copied()
             .unwrap_or(("未下载", color::ansi::GRAY));
         if let Some(rec) = installed_db.get(name) {
             rows.push((display.to_string(), rec.version.clone(),
-                "已安装", color::ansi::GREEN, dl_status, dl_color, "有", color::ansi::GREEN));
+                "已安装", color::ansi::GREEN, dl_status, dl_color, "有", color::ansi::GREEN, category, installer));
             continue;
         }
         rows.push((display.to_string(), sd.default_version.clone(),
-            "未安装", color::ansi::GRAY, dl_status, dl_color, "有", color::ansi::GREEN));
+            "未安装", color::ansi::GRAY, dl_status, dl_color, "有", color::ansi::GREEN, category, installer));
     }
 
-    // 3. Filter by install/download/search
-    if install_only {
-        rows.retain(|r| r.2 == "已安装");
-    }
-    if missing {
-        rows.retain(|r| r.2 == "未安装");
-    }
-    if downloaded {
-        rows.retain(|r| r.4 == "已下载");
-    }
-    if downloading {
-        rows.retain(|r| r.4 == "下载中");
-    }
-    if no_download {
-        rows.retain(|r| r.4 == "未下载");
-    }
+    // ── 筛选 ──
+    if install_only { rows.retain(|r| r.2 == "已安装"); }
+    if missing      { rows.retain(|r| r.2 == "未安装"); }
+    if downloaded   { rows.retain(|r| r.4 == "已下载"); }
+    if downloading  { rows.retain(|r| r.4 == "下载中"); }
+    if no_download  { rows.retain(|r| r.4 == "未下载"); }
+
+    // 搜索增强：同时匹配名称、别名、描述
     if let Some(ref kw) = search {
         let kw_lower = kw.to_lowercase();
-        rows.retain(|r| r.0.to_lowercase().contains(&kw_lower));
-    }
-    if let Some(ref f) = filter {
-        let f_lower = f.to_lowercase();
-        rows.retain(|r| r.0.to_lowercase().contains(&f_lower));
+        rows.retain(|r| {
+            if r.0.to_lowercase().contains(&kw_lower) {
+                return true;
+            }
+            for sd in &defs {
+                if sd.display_name == r.0 || sd.name == r.0.to_lowercase() {
+                    if sd.aliases.iter().any(|a| a.to_lowercase().contains(&kw_lower)) {
+                        return true;
+                    }
+                    if sd.description.to_lowercase().contains(&kw_lower) {
+                        return true;
+                    }
+                }
+            }
+            false
+        });
     }
 
-    // Sort by name case-insensitive
-    rows.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    // 分类过滤：修复为按 category 字段过滤
+    if let Some(ref f) = filter {
+        let f_lower = f.to_lowercase();
+        rows.retain(|r| r.8.to_lowercase().contains(&f_lower));
+    }
 
     if rows.is_empty() {
         println!("没有匹配的软件。");
         return Ok(());
     }
 
-    // Calculate column widths
+    // Sort by name case-insensitive
+    rows.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+
     let max_name = rows.iter().map(|r| r.0.display_width()).max().unwrap_or(4).max(4).min(40);
     let max_ver = rows.iter().map(|r| r.1.display_width()).max().unwrap_or(4).max(4);
 
+    // ── 分组显示 ──
+    if group {
+        let mut by_cat: std::collections::BTreeMap<String, Vec<&(String, String, &str, &str, &str, &str, &str, &str, String, &str)>> = std::collections::BTreeMap::new();
+        for r in &rows {
+            by_cat.entry(r.8.clone()).or_default().push(r);
+        }
+        for (cat, entries) in &by_cat {
+            println!("\n{}  {}", color::bold_yellow(format!("{}", cat)), color::gray(format!("({})", entries.len())));
+            // 子表头
+            println!("  {}{}{}{}",
+                pad("名称", max_name + 2),
+                pad("版本", max_ver + 2),
+                pad("安装", 8),
+                pad("方式", 6));
+            for (name, ver, _status, status_color, _dl_status, _dl_color, _src_label, _src_color, _cat, installer) in entries {
+                let name_d = truncate(name, max_name);
+                let ver_d = truncate(ver, max_ver + 1);
+                let ins_color = match *installer {
+                    "便携" => color::ansi::CYAN,
+                    _ => color::ansi::RESET,
+                };
+                println!("  {}{}{}{}{}{}{}{}",
+                    pad(&name_d, max_name + 2),
+                    pad(&ver_d, max_ver + 2),
+                    status_color,
+                    pad(_status, 8),
+                    color::ansi::RESET,
+                    ins_color,
+                    pad(installer, 6),
+                    color::ansi::RESET,
+                );
+            }
+        }
+        println!("\n{}", color::gray(format!("共 {} 项", rows.len())));
+        return Ok(());
+    }
+
+    // ── 平铺显示（默认） ──
     println!();
-    let header = format!("{}{}{}{}{}",
+    let header = format!("{}{}{}{}{}{}",
         pad("名称", max_name + 2),
         pad("版本", max_ver + 2),
-        pad("下载", 8 + 1), // 空格
-        pad("状态", 8 + 1), // 空格
-        pad("源", 4));
+        pad("下载", 8 + 1),
+        pad("状态", 8 + 1),
+        pad("源", 4),
+        pad("方式", 6));
     println!("{}", header);
     println!("{}", "-".repeat(header.display_width()));
 
-    for (name, ver, _status, status_color, dl_status, dl_color, src_label, src_color) in &rows {
+    for (name, ver, _status, status_color, dl_status, dl_color, src_label, src_color, _cat, installer) in &rows {
         let name_d = truncate(name, max_name);
         let ver_d = truncate(ver, max_ver + 1);
+        let ins_color = match *installer {
+            "便携" => color::ansi::CYAN,
+            _ => color::ansi::RESET,
+        };
         println!(
-            "{}{}{}{}{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
             pad(&name_d, max_name + 2),
             pad(&ver_d, max_ver + 2),
             dl_color,
@@ -745,6 +869,9 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
             " ",
             src_color,
             pad(src_label, 4),
+            ins_color,
+            pad(installer, 6),
+            color::ansi::RESET,
         );
     }
 

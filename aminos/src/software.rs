@@ -9,13 +9,13 @@ use crate::paths;
 
 // ── JSON Schema ──────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Detection {
     pub display_name: Option<String>,
     pub publisher: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VersionInfo {
     pub urls: Vec<String>,
     #[serde(default)]
@@ -32,9 +32,13 @@ pub struct VersionInfo {
     pub shortcut_candidates: Vec<String>,
     #[serde(default)]
     pub install_dir_candidates: Vec<String>,
+    /// 便携版的入口可执行文件名（如 "Snipaste.exe", "7zFM.exe"）。
+    /// 未设置时自动扫描目录中的 exe。
+    #[serde(default)]
+    pub entry_point: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SoftwareDef {
     pub name: String,
     #[serde(default)]
@@ -52,7 +56,7 @@ pub struct SoftwareDef {
     pub versions: HashMap<String, VersionInfo>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct InstallRecord {
     pub version: String,
     pub install_path: String,
@@ -85,7 +89,10 @@ pub fn update_sources() -> anyhow::Result<()> {
     .collect();
 
     let repo = config::SourceRepo::new(builtin);
-    config::source::update_sources(&paths::source_dir(), &repo)
+    let result = config::source::update_sources(&paths::source_dir(), &repo);
+    // 更新后清除缓存，下次 list 重新解析
+    clear_defs_cache();
+    result
 }
 
 /// Read a single software definition. Supports:
@@ -144,8 +151,26 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
     bail!("未找到软件 '{}' 的定义", name)
 }
 
+/// 缓存, 避免多次重复解析所有 JSON 文件。
+/// 在 `update_sources()` 中自动失效。
+static DEFS_CACHE: std::sync::Mutex<Option<Vec<SoftwareDef>>> = std::sync::Mutex::new(None);
+
+/// 清除源定义缓存（由 source update 时调用）。
+pub fn clear_defs_cache() {
+    if let Ok(mut cache) = DEFS_CACHE.lock() {
+        *cache = None;
+    }
+}
+
 /// List all available software definitions.
 pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
+    // 命中缓存则直接返回
+    if let Ok(cache) = DEFS_CACHE.lock() {
+        if let Some(ref defs) = *cache {
+            return Ok((*defs).clone());
+        }
+    }
+
     let source = paths::source_dir();
     if !source.is_dir() {
         return Ok(Vec::new());
@@ -168,6 +193,12 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
             defs.push(sd);
         }
     }
+
+    // 写入缓存
+    if let Ok(mut cache) = DEFS_CACHE.lock() {
+        *cache = Some(defs.clone());
+    }
+
     Ok(defs)
 }
 
