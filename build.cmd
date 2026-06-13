@@ -13,10 +13,10 @@ if not exist "%TOOLS_DIR%\ls" mkdir "%TOOLS_DIR%\ls"
 if not exist "%TOOLS_DIR%\as" mkdir "%TOOLS_DIR%\as"
 
 powershell -Command "Compress-Archive -Path target\release\ls.exe -DestinationPath '%TOOLS_DIR%\ls\ls.zip' -Force"
-echo ✓ ls.zip
+echo [OK] ls.zip
 
 powershell -Command "Compress-Archive -Path target\release\as.exe -DestinationPath '%TOOLS_DIR%\as\as.zip' -Force"
-echo ✓ as.zip
+echo [OK] as.zip
 
 echo.
 echo ok!
