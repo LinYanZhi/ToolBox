@@ -119,13 +119,19 @@ pub fn update_sources(source_dir: &Path, repo: &SourceRepo) -> Result<()> {
         String::new()
     };
 
-    let updated = if needs_update.is_empty() {
-        0
+    let (ok_count, fail_count) = if needs_update.is_empty() {
+        (0, 0)
     } else {
-        concurrent_download_files(&needs_update, source_dir, &used_repo, &cache_bust, max_name_w)?
+        concurrent_download_files(&needs_update, source_dir, &repos, &cache_bust, max_name_w)?
     };
 
-    println!("\n  源更新完成。{} 个更新，{} 个跳过", updated, index.files.len() - needs_update.len());
+    let up_to_date = index.files.len() - needs_update.len();
+    println!();
+    if fail_count > 0 {
+        println!("  源更新完成。{} 个成功，{} 个已最新，{} 个失败", ok_count, up_to_date, fail_count);
+    } else {
+        println!("  源更新完成。{} 个更新，{} 个已最新", ok_count, up_to_date);
+    }
 
     // 4. 清理本地多余文件
     let all_files: Vec<String> = index.files.into_keys().collect();
@@ -157,14 +163,16 @@ fn download_index(repos: &[&str], ts: u64) -> Result<(Vec<u8>, String)> {
     anyhow::bail!("所有镜像均无法连接，请检查网络。首次使用请运行: as source update");
 }
 
-/// 并发下载文件（12 路线程池）。
+/// 并发下载文件（12 路线程池），失败时自动尝试下一个镜像。
+///
+/// 返回 (成功数, 失败数)。
 fn concurrent_download_files(
     files: &[String],
     source_dir: &Path,
-    repo: &str,
+    repos: &[&str],
     cache_bust: &str,
     max_name_w: usize,
-) -> Result<usize> {
+) -> Result<(usize, usize)> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -172,8 +180,9 @@ fn concurrent_download_files(
     let files = Arc::new(files.to_owned());
     let next_idx = Arc::new(AtomicUsize::new(0));
     let ok_count = Arc::new(AtomicUsize::new(0));
+    let fail_count = Arc::new(AtomicUsize::new(0));
     let source_dir = Arc::new(source_dir.to_path_buf());
-    let repo = Arc::new(repo.to_string());
+    let repos: Arc<Vec<String>> = Arc::new(repos.iter().map(|s| s.to_string()).collect());
     let cache_bust = Arc::new(cache_bust.to_string());
     let print_lock = Arc::new(Mutex::new(()));
 
@@ -182,8 +191,9 @@ fn concurrent_download_files(
         let files = Arc::clone(&files);
         let next_idx = Arc::clone(&next_idx);
         let ok_count = Arc::clone(&ok_count);
+        let fail_count = Arc::clone(&fail_count);
         let source_dir = Arc::clone(&source_dir);
-        let repo = Arc::clone(&repo);
+        let repos = Arc::clone(&repos);
         let cache_bust = Arc::clone(&cache_bust);
         let print_lock = Arc::clone(&print_lock);
 
@@ -193,39 +203,53 @@ fn concurrent_download_files(
                 break;
             }
             let fname = &files[idx];
-            let url = format!("{}/{}{}", repo, fname, cache_bust);
             let dest = source_dir.join(fname);
-
-            let old_content = fs::read(&dest).ok();
             let padded_name = pad_left(fname, max_name_w);
 
-            match download_bytes(&url) {
-                Ok(data) => {
-                    match fs::write(&dest, &data) {
-                        Err(e) => {
+            // 依次尝试所有镜像
+            let mut last_err = String::new();
+            let mut success = false;
+            for repo in repos.iter() {
+                let url = format!("{}/{}{}", repo, fname, cache_bust);
+                match download_bytes(&url) {
+                    Ok(data) => {
+                        // 写入文件
+                        if let Err(e) = fs::write(&dest, &data) {
                             let _g = print_lock.lock().unwrap();
-                            eprintln!("  {}    写入失败 ({})", padded_name, e);
+                            eprintln!("  {}    写入失败: {}", padded_name, e);
+                            last_err = e.to_string();
+                            break; // 写入失败不重试其他镜像
                         }
-                        Ok(()) => {
-                            let _g = print_lock.lock().unwrap();
-                            let is_new = old_content.is_none();
-                            let is_changed = !is_new && old_content.as_deref() != Some(&data);
-                            let status = if is_new {
-                                color::green("新增")
-                            } else if is_changed {
-                                color::cyan("更新")
-                            } else {
-                                color::gray("未变")
-                            };
-                            println!("  {}    {}  ({} B)", padded_name, status, data.len());
-                            ok_count.fetch_add(1, Ordering::Relaxed);
-                        }
+
+                        // 判断状态
+                        let old_content = fs::read(&dest).ok();
+                        let is_new = old_content.is_none();
+                        let is_changed = !is_new && old_content.as_deref() != Some(&data);
+                        let status = if is_new {
+                            color::green("新增")
+                        } else if is_changed {
+                            color::cyan("更新")
+                        } else {
+                            color::gray("未变")
+                        };
+
+                        let _g = print_lock.lock().unwrap();
+                        println!("  {}    {}  ({} B)", padded_name, status, data.len());
+
+                        ok_count.fetch_add(1, Ordering::Relaxed);
+                        success = true;
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = e.to_string();
                     }
                 }
-                Err(e) => {
-                    let _g = print_lock.lock().unwrap();
-                    println!("  {}    {}", padded_name, color::yellow(format!("跳过 ({})", e)));
-                }
+            }
+
+            if !success {
+                let _g = print_lock.lock().unwrap();
+                println!("  {}    {}", padded_name, color::yellow(format!("失败 ({})", last_err)));
+                fail_count.fetch_add(1, Ordering::Relaxed);
             }
         }));
     }
@@ -234,7 +258,7 @@ fn concurrent_download_files(
         let _ = h.join();
     }
 
-    Ok(ok_count.load(Ordering::Relaxed))
+    Ok((ok_count.load(Ordering::Relaxed), fail_count.load(Ordering::Relaxed)))
 }
 
 /// 删除 index 中不存在的本地文件。

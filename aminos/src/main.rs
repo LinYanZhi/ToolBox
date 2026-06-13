@@ -613,26 +613,47 @@ fn run_init() -> anyhow::Result<()> {
     fs::create_dir_all(&bin_dir)?;
     println!("✓ 已创建: {}", bin_dir.display());
 
-    // 检查是否已在 PATH 中
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    let bin_path = bin_dir.to_string_lossy().to_lowercase();
-    let already_in_path = path_var.split(';').any(|p| p.trim().to_lowercase() == bin_path);
+    let bin_path = bin_dir.to_string_lossy().to_string();
+
+    // 通过 PowerShell 读取注册表中的用户 PATH（不包含当前会话的临时修改）
+    let ps_get_path = format!(
+        "[Environment]::GetEnvironmentVariable('PATH', 'User')"
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_get_path])
+        .output()
+        .context("读取注册表 PATH 失败")?;
+    let user_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    let already_in_path = user_path.split(';')
+        .any(|p| p.trim().to_lowercase() == bin_path.to_lowercase());
 
     if already_in_path {
-        println!("✓ tools\\bin 已在 PATH 中");
+        println!("✓ {} 已在用户 PATH 中", bin_dir.display());
+        return Ok(());
+    }
+
+    // 将新路径追加到用户 PATH（不携带当前会话临时修改）
+    let new_path = if user_path.is_empty() {
+        bin_path.clone()
     } else {
-        // 通过 setx 永久添加到用户 PATH
-        let new_path = format!("{};{}", bin_dir.to_string_lossy(), path_var);
-        let status = std::process::Command::new("setx")
-            .args(["PATH", &new_path])
-            .status()
-            .context("注册 PATH 失败")?;
-        if status.success() {
-            println!("✓ 已将 {} 添加到用户 PATH", bin_dir.display());
-            println!("  请重新打开终端使 PATH 生效");
-        } else {
-            bail!("setx 添加 PATH 失败");
-        }
+        format!("{};{}", user_path, bin_path)
+    };
+
+    let ps_set_path = format!(
+        "[Environment]::SetEnvironmentVariable('PATH', '{}', 'User')",
+        new_path.replace('\'', "''")
+    );
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_set_path])
+        .status()
+        .context("注册 PATH 失败")?;
+
+    if status.success() {
+        println!("✓ 已将 {} 添加到用户 PATH", bin_dir.display());
+        println!("  请重新打开终端使 PATH 生效");
+    } else {
+        bail!("添加 PATH 失败");
     }
 
     println!("\n✓ as 环境初始化完成");
@@ -714,32 +735,45 @@ Write-Host '✓ as 已更新到 {}'
 fn run_tool(action: ToolCmd) -> anyhow::Result<()> {
     match action {
         ToolCmd::List => {
-            // 读取安装记录
-            let db = software::read_installed_db().unwrap_or_default();
             let defs = software::list_software_defs().unwrap_or_default();
+            let db = software::read_installed_db().unwrap_or_default();
 
-            let mut tools: Vec<(&str, &software::InstallRecord)> = Vec::new();
+            // 筛选所有自研工具（kind=self）
+            let self_tools: Vec<&software::SoftwareDef> = defs.iter()
+                .filter(|d| d.kind == "self")
+                .collect();
 
-            // 只展示 kind=self 的工具
-            for def in &defs {
-                if def.kind == "self" {
-                    if let Some(rec) = db.get(&def.name) {
-                        tools.push((def.display_name.as_str(), rec));
-                    }
-                }
-            }
-
-            if tools.is_empty() {
-                println!("没有已安装的自研工具");
-                println!("  使用 {} 安装自研工具", color::cyan("as install <工具名>"));
+            if self_tools.is_empty() {
+                println!("没有可用的自研工具。");
                 return Ok(());
             }
 
-            println!("{}", color::bold_cyan("已安装的自研工具:"));
+            println!("{}", color::bold_cyan("可用自研工具:"));
             println!();
-            for (display, rec) in &tools {
-                let path = &rec.install_path;
-                println!("  {} {}  {}", color::green(display), color::cyan(&rec.version), color::gray(path));
+
+            let max_name_w = self_tools.iter()
+                .map(|d| d.display_name.as_str())
+                .max_by_key(|n| {
+                    use color::DisplayWidth;
+                    n.display_width()
+                })
+                .map(|n| {
+                    use color::DisplayWidth;
+                    n.display_width()
+                })
+                .unwrap_or(10)
+                .max(10);
+
+            for def in &self_tools {
+                let name = if def.display_name.is_empty() { &def.name } else { &def.display_name };
+                let ver = &def.default_version;
+                let installed = db.contains_key(&def.name);
+                let status = if installed {
+                    color::green(format!("{}  {}", color::bold_green("已安装"), color::cyan(ver)))
+                } else {
+                    color::gray("未安装".to_string())
+                };
+                println!("  {}  {}  {}", color::cyan(pad(name, max_name_w)), status, color::gray(&def.description));
             }
         }
         ToolCmd::Remove { name } => {

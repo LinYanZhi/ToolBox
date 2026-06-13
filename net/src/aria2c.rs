@@ -99,11 +99,11 @@ pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> 
 ///
 /// 优先级：
 ///   1. 环境变量 `AMINOS_ARIA2C_PATH`
-///   2. executable 同级目录
+///   2. `%LOCALAPPDATA%\aminos\tools\aria2c\aria2c.exe`（as 工具包管理）
 ///   3. `%USERPROFILE%\Desktop`
 ///   4. PATH 环境变量
 fn find_aria2c() -> Option<std::path::PathBuf> {
-    // 环境变量
+    // 1. 环境变量
     if let Ok(path) = std::env::var("AMINOS_ARIA2C_PATH") {
         let p = std::path::PathBuf::from(path);
         if p.is_file() {
@@ -111,15 +111,19 @@ fn find_aria2c() -> Option<std::path::PathBuf> {
         }
     }
 
-    // executable 同级
-    if let Some(parent) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
-        let candidate = parent.join("aria2c.exe");
+    // 2. as 工具包目录：%LOCALAPPDATA%\aminos\tools\aria2c\aria2c.exe
+    if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+        let candidate = std::path::PathBuf::from(localappdata)
+            .join("aminos")
+            .join("tools")
+            .join("aria2c")
+            .join("aria2c.exe");
         if candidate.is_file() {
             return Some(candidate);
         }
     }
 
-    // 桌面
+    // 3. 桌面
     if let Some(desktop) = std::env::var_os("USERPROFILE")
         .map(|p| std::path::PathBuf::from(p).join("Desktop").join("aria2c.exe"))
     {
@@ -128,7 +132,7 @@ fn find_aria2c() -> Option<std::path::PathBuf> {
         }
     }
 
-    // PATH
+    // 4. PATH
     std::env::var_os("PATH").and_then(|paths| {
         for dir in std::env::split_paths(&paths) {
             let candidate = dir.join("aria2c.exe");
