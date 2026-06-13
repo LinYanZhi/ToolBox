@@ -173,6 +173,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "color",
+ "ring",
  "serde",
  "serde_json",
  "ureq",

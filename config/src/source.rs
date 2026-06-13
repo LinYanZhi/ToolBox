@@ -1,8 +1,11 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
+use ring::digest::{Context, SHA256};
 
 /// 源仓库配置，管理内置镜像列表和用户自定义覆盖。
 pub struct SourceRepo {
@@ -34,19 +37,26 @@ impl SourceRepo {
     }
 }
 
-/// 远程源定义索引。
+/// 远程源定义索引（v2 格式）。
 #[derive(serde::Deserialize)]
 struct Index {
-    files: Vec<String>,
+    #[allow(dead_code)]
+    version: u32,
+    files: HashMap<String, FileEntry>,
 }
 
-/// 从远程仓库更新源定义文件到本地目录。
+#[derive(serde::Deserialize)]
+struct FileEntry {
+    sha256: String,
+}
+
+/// 从远程仓库增量更新源定义文件到本地目录。
 ///
 /// 下载流程：
 ///   1. 依次尝试每个镜像，下载 `index.json`
-///   2. 并发下载 index 中列出的所有文件（12 路并发）
+///   2. 对比本地文件的 sha256，只下载新增/有变化的文件
 ///   3. 清理本地多余的文件
-pub fn update_sources(source_dir: &std::path::Path, repo: &SourceRepo) -> Result<()> {
+pub fn update_sources(source_dir: &Path, repo: &SourceRepo) -> Result<()> {
     fs::create_dir_all(source_dir)?;
 
     let repos = repo.resolve();
@@ -61,12 +71,24 @@ pub fn update_sources(source_dir: &std::path::Path, repo: &SourceRepo) -> Result
     let index: Index = serde_json::from_slice(&index_bytes)
         .context("源索引格式错误")?;
 
-    println!("  从 {} 下载，共 {} 个源文件", used_repo, index.files.len());
+    // 2. 对比哈希，筛选出需要更新的文件
+    let needs_update: Vec<String> = index
+        .files
+        .iter()
+        .filter_map(|(fname, entry)| {
+            let local_path = source_dir.join(fname);
+            if sha256_file(&local_path).as_deref() == Some(&entry.sha256) {
+                None // 哈希一致，跳过
+            } else {
+                Some(fname.clone()) // 新增或变更，需要下载
+            }
+        })
+        .collect();
 
     // Pre-compute CJK-aware display width
     let max_name_w = index
         .files
-        .iter()
+        .keys()
         .map(|s| {
             use color::DisplayWidth;
             s.display_width()
@@ -75,25 +97,32 @@ pub fn update_sources(source_dir: &std::path::Path, repo: &SourceRepo) -> Result
         .unwrap_or(16)
         .max(16);
 
-    // 2. 并发下载每个源定义文件
+    println!(
+        "  从 {} 下载，共 {} 个源文件（{} 个需更新，{} 个已是最新）",
+        used_repo,
+        index.files.len(),
+        needs_update.len(),
+        index.files.len() - needs_update.len()
+    );
+
+    // 3. 并发下载需要更新的文件
     let cache_bust = if used_repo.contains("jsdelivr") {
         format!("?v={}", ts)
     } else {
         String::new()
     };
 
-    let ok_count = concurrent_download_files(
-        &index.files,
-        source_dir,
-        &used_repo,
-        &cache_bust,
-        max_name_w,
-    )?;
+    let updated = if needs_update.is_empty() {
+        0
+    } else {
+        concurrent_download_files(&needs_update, source_dir, &used_repo, &cache_bust, max_name_w)?
+    };
 
-    println!("\n  源更新完成。{} 个成功", ok_count);
+    println!("\n  源更新完成。{} 个更新，{} 个跳过", updated, index.files.len() - needs_update.len());
 
-    // 3. 清理本地多余文件
-    cleanup_orphans(source_dir, &index.files, max_name_w);
+    // 4. 清理本地多余文件
+    let all_files: Vec<String> = index.files.into_keys().collect();
+    cleanup_orphans(source_dir, &all_files, max_name_w);
 
     Ok(())
 }
@@ -118,13 +147,13 @@ fn download_index(repos: &[&str], ts: u64) -> Result<(Vec<u8>, String)> {
             }
         }
     }
-    anyhow::bail!("所有镜像均无法连接，请检查网络。也可将 source/ 文件夹放到 as.exe 同级目录");
+    anyhow::bail!("所有镜像均无法连接，请检查网络。首次使用请运行: as source update");
 }
 
 /// 并发下载文件（12 路线程池）。
 fn concurrent_download_files(
     files: &[String],
-    source_dir: &std::path::Path,
+    source_dir: &Path,
     repo: &str,
     cache_bust: &str,
     max_name_w: usize,
@@ -202,8 +231,8 @@ fn concurrent_download_files(
 }
 
 /// 删除 index 中不存在的本地文件。
-fn cleanup_orphans(source_dir: &std::path::Path, files: &[String], max_name_w: usize) {
-    let index_set: std::collections::HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
+fn cleanup_orphans(source_dir: &Path, files: &[String], max_name_w: usize) {
+    let index_set: HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
     if let Ok(entries) = fs::read_dir(source_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -220,6 +249,30 @@ fn cleanup_orphans(source_dir: &std::path::Path, files: &[String], max_name_w: u
             }
         }
     }
+}
+
+/// 计算文件的 SHA-256 哈希（十六进制小写）。
+fn sha256_file(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut ctx = Context::new(&SHA256);
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        ctx.update(&buf[..n]);
+    }
+    Some(hex_encode(ctx.finish().as_ref()))
+}
+
+/// 将字节切片编码为小写十六进制字符串。
+fn hex_encode(data: &[u8]) -> String {
+    let mut s = String::with_capacity(data.len() * 2);
+    for b in data {
+        s.push_str(&format!("{:02x}", b));
+    }
+    s
 }
 
 /// 从 URL 下载字节内容（轻量，无进度条）。

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use color::{self, DisplayWidth, format_size, pad_left, truncate};
+use color::{self, DisplayWidth, format_size, pad_left as pad, truncate};
 use net::download::expand_github_urls;
 use net::speedtest;
 
@@ -55,7 +55,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
     // Pre-calculate max widths
     let max_name_w = entries.iter()
-        .map(|(d, _, _)| d_width(d)d)dd
+        .map(|(d, _, _)| d.display_width())
         .max()
         .unwrap_or(6)
         .max(6);
@@ -99,7 +99,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
                     Some(s) => (format_size((s * 1024.0) as u64) + "/s", color::GREEN),
                     None => ("不可用".to_string(), color::YELLOW),
                 };
-                let marker = color_code.paint(&pad_left(&plain, speed_w));
+                let marker = color_code.paint(&pad(&plain, speed_w));
 
                 let idx_str = format!("{:0>w$}", current, w = max_idx_w);
                 let prefix = format!("  [{}/{}] {}", idx_str, total, pad(display, max_name_w + 1));
@@ -167,8 +167,8 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
         let mut avail_count = 0;
         for (name, version, available, best) in &summary {
-            let name_d = downloader::truncate_display(name, name_w);
-            let ver_d = downloader::truncate_display(version, ver_w);
+            let name_d = truncate(name, name_w);
+            let ver_d = truncate(version, ver_w);
             let speed_str = match best {
                 Some(s) => color::green(format!("{:>10}", format_size((s * 1024.0) as u64) + "/s")),
                 None => pad("-", 10),

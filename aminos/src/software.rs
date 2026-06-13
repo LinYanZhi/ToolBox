@@ -97,6 +97,11 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
     let source = paths::source_dir();
     let lower = name.to_lowercase();
 
+    // 空源检查
+    if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
+        anyhow::bail!("未找到源定义。请先运行: as source update");
+    }
+
     // 1. Exact match
     let exact = source.join(format!("{}.json", lower));
     if exact.exists() {
@@ -151,7 +156,7 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
     if let Ok(entries) = fs::read_dir(&source) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.extension().map_or(false, |e| e == "json") {
+            if p.extension().map_or(false, |e| e == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                 paths.push(p);
             }
         }

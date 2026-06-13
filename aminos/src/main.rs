@@ -715,8 +715,8 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
     }
 
     // Calculate column widths
-    let max_name = rows.iter().map(|r| display_width(&r.0)).max().unwrap_or(4).max(4).min(40);
-    let max_ver = rows.iter().map(|r| display_width(&r.1)).max().unwrap_or(4).max(4);
+    let max_name = rows.iter().map(|r| r.0.display_width()).max().unwrap_or(4).max(4).min(40);
+    let max_ver = rows.iter().map(|r| r.1.display_width()).max().unwrap_or(4).max(4);
 
     println!();
     let header = format!("{}{}{}{}{}",
@@ -726,11 +726,11 @@ fn run_list(filter: Option<String>, install_only: bool, missing: bool, search: O
         pad("状态", 8 + 1), // 空格
         pad("源", 4));
     println!("{}", header);
-    println!("{}", "-".repeat(display_width(&header)));
+    println!("{}", "-".repeat(header.display_width()));
 
     for (name, ver, _status, status_color, dl_status, dl_color, src_label, src_color) in &rows {
-        let name_d = truncate_display(name, max_name);
-        let ver_d = truncate_display(ver, max_ver + 1);
+        let name_d = truncate(name, max_name);
+        let ver_d = truncate(ver, max_ver + 1);
         println!(
             "{}{}{}{}{}{}{}{}{}{}{}{}",
             pad(&name_d, max_name + 2),
