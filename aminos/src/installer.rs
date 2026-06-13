@@ -302,7 +302,21 @@ fn install_self_tool(
 
     println!("\n✓ {} {} 安装完成", display, ver);
     println!("  位置: {}", tool_dir.display());
-    println!("  {} 可直接在终端使用", color::cyan(&format!("{}", name)));
+
+    // 检查 PATH 是否已包含 tools/bin
+    let bin_dir = paths::tools_bin_dir();
+    let in_path = std::env::var("PATH").ok()
+        .map(|p| {
+            let bin = bin_dir.to_string_lossy().to_lowercase();
+            p.split(';').any(|s| s.trim().to_lowercase() == bin)
+        })
+        .unwrap_or(false);
+
+    if in_path {
+        println!("  {} 可直接在终端使用", color::cyan(&format!("{}", name)));
+    } else {
+        println!("  {} 请先运行 {} 将 tools/bin 加入 PATH", name, color::cyan("as init"));
+    }
 
     Ok(())
 }

@@ -19,14 +19,22 @@ use crate::agent::AgentConfig;
 /// - `target_path`: 目标文件路径
 /// - `num_threads`: 线程数（推荐 8-16）
 /// - `_resume`: 是否启用断点续传（当前始终尝试）
+/// - `cancel`: 取消令牌，用于优雅终止
+/// - `pb`: 外部进度条（可选），如果提供则使用它而不是创建新进度条
 pub fn parallel_download(
     url: &str,
     target_path: &Path,
     num_threads: usize,
     _resume: bool,
+    cancel: &crate::download::Cancel,
+    pb: Option<indicatif::ProgressBar>,
 ) -> anyhow::Result<()> {
     let parent = target_path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
+
+    if cancel.is_cancelled() {
+        return Err(anyhow::anyhow!("已取消"));
+    }
 
     let agent_cfg = AgentConfig::normal(15, 15);
 
@@ -44,7 +52,11 @@ pub fn parallel_download(
 
     // 小文件用单线程
     if total_size < 10 * 1024 * 1024 {
-        return single_thread_fallback(url, target_path, total_size);
+        return single_thread_fallback(url, target_path, total_size, cancel, pb);
+    }
+
+    if cancel.is_cancelled() {
+        return Err(anyhow::anyhow!("已取消"));
     }
 
     // Step 2: 检测 Range 支持
@@ -58,7 +70,7 @@ pub fn parallel_download(
         .unwrap_or(false);
 
     if !range_ok {
-        return single_thread_fallback(url, target_path, total_size);
+        return single_thread_fallback(url, target_path, total_size, cancel, pb);
     }
 
     // Step 3: 分片计算
@@ -69,7 +81,9 @@ pub fn parallel_download(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let temp_dir = parent.join(format!("{}.parts", &filename));
+    // 加入 PID 防止多终端并发冲突
+    let pid = std::process::id();
+    let temp_dir = parent.join(format!("{}.parts.{}", &filename, pid));
 
     // 清理残留的临时目录
     let _ = fs::remove_dir_all(&temp_dir);
@@ -79,8 +93,11 @@ pub fn parallel_download(
     let progress = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(Mutex::new(Vec::new()));
 
-    // 全局进度条
-    let pb = indicatif::ProgressBar::new(total_size);
+    // 全局进度条（通过共享 MultiProgress 管理，避免多进度条打架）
+    let pb = pb.unwrap_or_else(|| crate::download::progress().add(indicatif::ProgressBar::new(total_size)));
+    if pb.length().map(|l| l == 0).unwrap_or(true) {
+        pb.set_length(total_size);
+    }
     pb.set_style(
         indicatif::ProgressStyle::default_bar()
             .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
@@ -91,10 +108,15 @@ pub fn parallel_download(
 
     // 进度监控线程
     let pb_progress = Arc::clone(&progress);
+    let pb_cancel = cancel.clone();
     let pb_handle = {
         let pb = pb.clone();
         thread::spawn(move || {
             loop {
+                if pb_cancel.is_cancelled() {
+                    pb.finish_and_clear();
+                    return;
+                }
                 let cur = pb_progress.load(Ordering::Relaxed);
                 pb.set_position(cur);
                 if cur >= total_size {
@@ -117,6 +139,7 @@ pub fn parallel_download(
         let url = url.to_string();
         let progress = Arc::clone(&progress);
         let errors = Arc::clone(&errors);
+        let cancel = cancel.clone();
 
         handles.push(thread::spawn(move || {
             let agent_cfg = AgentConfig::normal(30, 600);
@@ -157,6 +180,7 @@ pub fn parallel_download(
                             errors.lock().unwrap().push(format!("分片 {} 写入失败", i));
                             return;
                         }
+                        cancel.mark_progress();
                         progress.fetch_add(n as u64, Ordering::Relaxed);
                     }
                     Err(_) => {
@@ -170,6 +194,12 @@ pub fn parallel_download(
 
     // 等待所有分片线程完成
     for h in handles {
+        // 如果已取消，不再等待后续线程
+        if cancel.is_cancelled() {
+            let _ = fs::remove_dir_all(&temp_dir);
+            pb.finish_and_clear();
+            return Err(anyhow::anyhow!("已取消"));
+        }
         match h.join() {
             Ok(()) => {}
             Err(e) => {
@@ -224,7 +254,11 @@ pub fn parallel_download(
 }
 
 /// 单线程回退下载（含进度条）。
-fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64) -> anyhow::Result<()> {
+fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel: &crate::download::Cancel, pb: Option<indicatif::ProgressBar>) -> anyhow::Result<()> {
+    if cancel.is_cancelled() {
+        return Err(anyhow::anyhow!("已取消"));
+    }
+
     let agent_cfg = AgentConfig::normal(30, 600);
     let agent = agent_cfg.build_agent()?;
     let mut req = agent.get(url);
@@ -238,8 +272,12 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64) -> any
     let parent = target_path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
 
-    let pb = if total_size > 0 {
-        let bar = indicatif::ProgressBar::new(total_size);
+    let pb = if let Some(bar) = pb {
+        bar.set_length(total_size);
+        bar.set_message("单线程下载");
+        Some(bar)
+    } else if total_size > 0 {
+        let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
                 .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
@@ -256,11 +294,19 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64) -> any
     let mut file = fs::File::create(target_path)?;
     let mut buf = [0u8; 65536];
     loop {
+        if cancel.is_cancelled() {
+            if let Some(ref pb) = pb {
+                pb.finish_and_clear();
+            }
+            let _ = fs::remove_file(target_path);
+            return Err(anyhow::anyhow!("已取消"));
+        }
         let n = reader.read(&mut buf)?;
         if n == 0 {
             break;
         }
         file.write_all(&buf[..n])?;
+        cancel.mark_progress();
         if let Some(ref pb) = pb {
             pb.inc(n as u64);
         }

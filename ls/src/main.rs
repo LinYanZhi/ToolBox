@@ -100,6 +100,7 @@ fn main() {
     }
 
     // 加载配置
+    config::ColorConfig::init();
     let color_config = config::ColorConfig::default();
     let formatter = Formatter::new(color_config, cli.no_color);
 

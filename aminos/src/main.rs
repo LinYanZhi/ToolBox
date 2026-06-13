@@ -651,7 +651,13 @@ fn run_init() -> anyhow::Result<()> {
 
     if status.success() {
         println!("✓ 已将 {} 添加到用户 PATH", bin_dir.display());
-        println!("  请重新打开终端使 PATH 生效");
+
+        // 同时更新当前进程的 PATH，立即生效（无需重启终端）
+        if let Ok(current_path) = std::env::var("PATH") {
+            // SAFETY: 单线程环境，无其他线程并发读取 PATH
+            unsafe { std::env::set_var("PATH", format!("{};{}", bin_path, current_path)); }
+            println!("✓ 当前终端已生效，可直接使用工具");
+        }
     } else {
         bail!("添加 PATH 失败");
     }

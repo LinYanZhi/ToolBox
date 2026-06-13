@@ -1,16 +1,61 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
+use indicatif::MultiProgress;
 
 use crate::agent::{AgentConfig, Fingerprint};
 use crate::verify::verify_downloaded_file;
 
 const CHUNK: usize = 64 * 1024;
 
-/// 每个下载策略的最大等待时间。超时则直接进入下一个策略。
-const STRATEGY_TIMEOUT: Duration = Duration::from_secs(15);
+/// 全局进度条管理器，确保同一时间多个进度条不会在终端打架。
+pub(crate) fn progress() -> &'static MultiProgress {
+    static MP: OnceLock<MultiProgress> = OnceLock::new();
+    MP.get_or_init(MultiProgress::new)
+}
+
+/// 取消令牌，用于优雅终止后台下载线程。
+#[derive(Clone)]
+pub struct Cancel(Arc<CancelInner>);
+
+pub(crate) struct CancelInner {
+    cancelled: AtomicBool,
+    /// Unix 毫秒时间戳，0 表示从未有过进度
+    last_progress: AtomicU64,
+}
+
+impl Cancel {
+    pub fn new() -> Self {
+        Self(Arc::new(CancelInner {
+            cancelled: AtomicBool::new(false),
+            last_progress: AtomicU64::new(0),
+        }))
+    }
+    /// 请求取消
+    pub fn cancel(&self) { self.0.cancelled.store(true, Ordering::Relaxed); }
+    /// 是否已被取消
+    pub fn is_cancelled(&self) -> bool { self.0.cancelled.load(Ordering::Relaxed) }
+    /// 标记已收到数据
+    pub fn mark_progress(&self) {
+        self.0.last_progress.store(unix_ms(), Ordering::Relaxed);
+    }
+    /// 上次收到数据的时间戳（unix ms），0 表示从未
+    pub fn last_progress_ms(&self) -> u64 {
+        self.0.last_progress.load(Ordering::Relaxed)
+    }
+}
+
+/// 当前 Unix 毫秒时间戳。
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// 下载策略。
 #[derive(Debug, Clone)]
@@ -90,7 +135,7 @@ impl DownloadConfig {
 #[derive(Debug, Clone)]
 pub struct DownloadReport {
     /// 最终成功使用的策略名称。
-    pub strategy_used: &'static str,
+    pub strategy_used: String,
     /// 下载的总字节数。
     pub total_bytes: u64,
     /// 耗时。
@@ -101,62 +146,159 @@ pub struct DownloadReport {
     pub target_path: PathBuf,
 }
 
-/// 使用多策略回退链下载文件。
+/// 清理所有策略留下的临时文件（`{target}.strategy_*.tmp`、`*.parts.*` 目录等）。
+fn cleanup_strategy_temp(target_path: &Path) {
+    let parent = target_path.parent().unwrap_or(Path::new("."));
+    let stem = target_path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    if stem.is_empty() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            // 匹配 {target}.strategy_N.tmp 或 {target}.strategy_N.tmp.parts/ 或 {target}.parts.NNNN/
+            if name.starts_with(&stem) && (name.contains(".strategy_") || name.contains(".parts.")) {
+                let _ = if path.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else {
+                    std::fs::remove_file(&path)
+                };
+            }
+        }
+    }
+}
+
+/// 从 URL 中提取简短标签（用于进度条显示）。
+fn url_label(url: &str) -> &str {
+    // 尝试提取有意义的短标签
+    if url.contains("ghproxy.net") { return "ghproxy"; }
+    if url.contains("cdn.jsdelivr.net") { return "jsdelivr"; }
+    if url.contains("raw.githubusercontent.com") { return "raw"; }
+    if url.contains("github.com") { return "github"; }
+    // 取 hostname
+    let cleaned = url.trim_start_matches("https://").trim_start_matches("http://");
+    if let Some(pos) = cleaned.find('/') {
+        let host = &cleaned[..pos];
+        if let Some(dot) = host.rfind('.') {
+            let prev_dot = host[..dot].rfind('.');
+            let start = prev_dot.map(|p| p + 1).unwrap_or(0);
+            return &host[start..dot];
+        }
+        return host;
+    }
+    "?source"
+}
+
+/// 并行下载：多个 URL × 多个策略同时跑，谁先成功用谁。
 ///
-/// 按 `config.strategies` 中的策略顺序尝试，每个策略最多等待 `STRATEGY_TIMEOUT`（15s）。
-/// 第一个成功的策略返回。所有策略都失败则返回最后一个错误。
+/// 每个 (URL, 策略) 组合有独立的临时文件 `{target}.s{src_idx}_{strat_idx}.tmp`
+/// 和一个独立的进度条。第一个成功的策略胜出，其余被取消。
 pub fn download_with_fallback(
-    url: &str,
+    urls: &[String],
     target_path: &Path,
     config: &DownloadConfig,
 ) -> anyhow::Result<DownloadReport> {
     let start = Instant::now();
-    let mut errors: Vec<String> = Vec::new();
-    let total = config.strategies.len();
+    let total_combos = urls.len() * config.strategies.len();
 
-    for (idx, strategy) in config.strategies.iter().enumerate() {
-        let name = strategy_name(strategy);
-        eprintln!("  [{}/{}] 尝试 {} ...", idx + 1, total, name);
+    if urls.is_empty() {
+        bail!("没有可用的下载地址");
+    }
 
-        // 对各别策略加简短提示
-        match strategy {
-            DownloadStrategy::Ureq { insecure: true, .. } => {
-                eprintln!("       ⚠ 跳过证书验证（不安全）");
+    // ── 1. 构建组合列表 ──
+    struct Combo {
+        url: String,
+        strategy: DownloadStrategy,
+        src_idx: usize,
+        strat_idx: usize,
+        label: String,
+    }
+
+    let combos: Vec<Combo> = urls.iter().enumerate().flat_map(|(si, url)| {
+        let src_label = url_label(url);
+        config.strategies.iter().enumerate().map(move |(ti, strategy)| {
+            let sname = strategy_name(strategy);
+            Combo {
+                url: url.clone(),
+                strategy: strategy.clone(),
+                src_idx: si,
+                strat_idx: ti,
+                label: format!("[{}] {}", src_label, sname),
             }
-            _ => {}
-        }
+        })
+    }).collect();
 
-        let url_owned = url.to_string();
-        let target_owned = target_path.to_owned();
+    eprintln!("    ⚡ 并行尝试 {} 种组合...", total_combos);
+
+    // ── 2. 创建所有组合的进度条 ──
+    let progress_style = indicatif::ProgressStyle::default_bar()
+        .template("{msg:.bold} [{bar:20}] {bytes}/{total_bytes} ({bytes_per_sec})")
+        .unwrap()
+        .progress_chars("=> ");
+
+    let combo_bars: Vec<indicatif::ProgressBar> = combos.iter().map(|c| {
+        let bar = crate::download::progress().add(indicatif::ProgressBar::new(1));
+        bar.set_style(progress_style.clone());
+        bar.set_message(format!("{} 等待中...", c.label));
+        bar.set_length(1);
+        bar.set_position(0);
+        bar
+    }).collect();
+
+    // ── 3. 并行启动所有组合 ──
+    // 共享状态：赢家标记、取消句柄
+    let someone_won = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel::<(String, String, u64)>(); // (strategy_name, url, file_size)
+    let mut cancel_handles: Vec<crate::download::Cancel> = Vec::with_capacity(combos.len());
+
+    for (idx, combo) in combos.into_iter().enumerate() {
+        let tmp_path = target_path.with_extension(format!("s{}_{}.tmp", combo.src_idx, combo.strat_idx));
+        let cancel = Cancel::new();
+        cancel_handles.push(cancel.clone());
+
+        let combo_url = combo.url.clone();
+        let combo_strategy = combo.strategy;
+        let combo_label = combo.label.clone();
+        let bar = combo_bars[idx].clone();
+        let tx = tx.clone();
+        let someone_won = Arc::clone(&someone_won);
         let resume = config.resume;
-        let strategy = strategy.clone();
 
-        // 在后台线程执行下载，主线程等待超时（15s）
-        let (tx, rx) = std::sync::mpsc::channel();
+        // 更新进度条为"运行中"
+        bar.set_message(format!("{} 运行中...", combo_label));
+
         std::thread::spawn(move || {
-            let result = match &strategy {
+            // 如果已经有胜出者，直接退出
+            if someone_won.load(Ordering::Relaxed) {
+                bar.finish_and_clear();
+                let _ = std::fs::remove_file(&tmp_path);
+                return;
+            }
+
+            let result = match &combo_strategy {
                 DownloadStrategy::RustRange { threads } => {
-                    download_with_range(&url_owned, &target_owned, *threads, resume)
-                        .map(|_| name)
+                    download_with_range(&combo_url, &tmp_path, *threads, resume, &cancel, Some(bar.clone()))
+                        .map(|_| "RustRange")
                 }
                 DownloadStrategy::Aria2c => {
-                    crate::aria2c::try_aria2c_download(&url_owned, &target_owned)
-                        .map(|_| name)
+                    crate::aria2c::try_aria2c_download(&combo_url, &tmp_path)
+                        .map(|_| "aria2c")
                 }
                 DownloadStrategy::Curl => {
-                    crate::curl::try_curl_download(&url_owned, &target_owned)
-                        .map(|_| name)
+                    crate::curl::try_curl_download(&combo_url, &tmp_path)
+                        .map(|_| "curl")
                 }
                 DownloadStrategy::PowerShell => {
-                    crate::powershell::try_powershell_download(&url_owned, &target_owned)
+                    crate::powershell::try_powershell_download(&combo_url, &tmp_path)
                         .map(|_| "powershell")
                 }
                 DownloadStrategy::PowerShellInvoke => {
-                    crate::powershell::try_powershell_invoke(&url_owned, &target_owned)
+                    crate::powershell::try_powershell_invoke(&combo_url, &tmp_path)
                         .map(|_| "powershell-invoke")
                 }
                 DownloadStrategy::BitsTransfer => {
-                    crate::powershell::try_bits_transfer(&url_owned, &target_owned)
+                    crate::powershell::try_bits_transfer(&combo_url, &tmp_path)
                         .map(|_| "bits")
                 }
                 DownloadStrategy::Ureq { fingerprint, insecure } => {
@@ -166,79 +308,133 @@ pub fn download_with_fallback(
                         connect_timeout: 15,
                         read_timeout: 600,
                     };
-                    download_with_ureq(&url_owned, &target_owned, &agent_config).map(|_| {
-                        if *insecure { "ureq(insecure)" } else { "ureq" }
-                    })
+                    download_with_ureq(&combo_url, &tmp_path, &agent_config, &cancel, Some(bar.clone()))
+                        .map(|_| {
+                            if *insecure { "ureq(insecure)" } else { "ureq" }
+                        })
                 }
             };
-            let _ = tx.send(result);
-        });
 
-        let result = match rx.recv_timeout(STRATEGY_TIMEOUT) {
-            Ok(Ok(r)) => Ok(r),
-            Ok(Err(e)) => Err(e),
+            match result {
+                Ok(strategy_name) => {
+                    // 标记胜出
+                    if someone_won.swap(true, Ordering::Relaxed) {
+                        // 已经有胜出者了，清理退出
+                        bar.finish_and_clear();
+                        let _ = std::fs::remove_file(&tmp_path);
+                        return;
+                    }
+
+                    // 胜出！发送报告
+                    let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
+                    bar.finish_with_message(format!("✓ {} (done)", combo_label));
+                    let _ = tx.send((strategy_name.to_string(), combo_url, file_size));
+                }
+                Err(e) => {
+                    if someone_won.load(Ordering::Relaxed) {
+                        bar.finish_and_clear();
+                    } else {
+                        bar.finish_with_message(format!("✗ {} ({})", combo_label, e));
+                    }
+                    let _ = std::fs::remove_file(&tmp_path);
+                }
+            }
+        });
+    }
+
+    // ── 4. 等待第一个成功，或全部失败 ──
+    const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(15);
+    const STALL_TIMEOUT: Duration = Duration::from_secs(20);
+
+    let result = loop {
+        match rx.recv_timeout(FIRST_BYTE_TIMEOUT) {
+            Ok((strategy_name, url, file_size)) => {
+                break Ok((strategy_name, url, file_size));
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                eprintln!("       ✗ 策略超时（{} 秒）", STRATEGY_TIMEOUT.as_secs());
-                let msg = format!("{}: 超时", name);
-                errors.push(msg);
-                let _ = std::fs::remove_file(target_path);
-                let parts_dir = format!("{}.parts", target_path.display());
-                let _ = std::fs::remove_dir_all(&parts_dir);
-                continue;
+                // 检查是否有任何组合有进度
+                let now = unix_ms();
+                let any_alive = cancel_handles.iter().any(|c| {
+                    let last = c.last_progress_ms();
+                    last > 0 && now.saturating_sub(last) < STALL_TIMEOUT.as_millis() as u64
+                });
+
+                if !any_alive {
+                    break Err(anyhow::anyhow!("所有下载组合均无响应"));
+                }
+                // 还有组合在跑，继续等
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                eprintln!("       ✗ 策略异常退出");
-                let msg = format!("{}: 异常退出", name);
-                errors.push(msg);
-                let _ = std::fs::remove_file(target_path);
-                let parts_dir = format!("{}.parts", target_path.display());
-                let _ = std::fs::remove_dir_all(&parts_dir);
-                continue;
-            }
-        };
-
-        match result {
-            Ok(strategy_name) => {
-                if config.verify && !verify_downloaded_file(target_path) {
-                    let msg = format!("{}: 下载内容签名不匹配（文件损坏或反盗链页面）", strategy_name);
-                    eprintln!("       {}", msg);
-                    errors.push(msg);
-                    let _ = std::fs::remove_file(target_path);
-                    let parts_dir = format!("{}.parts", target_path.display());
-                    let _ = std::fs::remove_dir_all(&parts_dir);
-                    continue;
-                }
-                let file_size = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
-                let elapsed = start.elapsed();
-                eprintln!("       ✓ 成功 ({}, {} KB/s)",
-                    color::format_size(file_size),
-                    if elapsed.as_secs() > 0 { file_size / 1024 / elapsed.as_secs() as u64 } else { 0 }
-                );
-                return Ok(DownloadReport {
-                    strategy_used: strategy_name,
-                    total_bytes: file_size,
-                    elapsed,
-                    url: url.to_string(),
-                    target_path: target_path.to_path_buf(),
-                });
-            }
-            Err(e) => {
-                let msg = format!("{}: {}", name, e);
-                eprintln!("       ✗ {}", msg);
-                errors.push(msg);
-                let _ = std::fs::remove_file(target_path);
-                let parts_dir = format!("{}.parts", target_path.display());
-                let _ = std::fs::remove_dir_all(&parts_dir);
+                break Err(anyhow::anyhow!("所有下载组合均失败"));
             }
         }
+    };
+
+    // ── 5. 取消所有仍在运行的组合 ──
+    for c in &cancel_handles {
+        c.cancel();
     }
 
-    eprintln!("  ────────────────────────────────────");
-    eprintln!("  所有 {} 种下载策略均失败", total);
-    for err in &errors {
-        eprintln!("    {}", err);
+    // ── 6. 处理结果 ──
+    match result {
+        Ok((strategy_name, url, _file_size)) => {
+            // 扫描找到胜出的临时文件并 rename
+            let parent = target_path.parent().unwrap_or(Path::new("."));
+            if let Ok(entries) = std::fs::read_dir(parent) {
+                let stem = target_path.file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let name = path.file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if name.starts_with(&stem) && name.ends_with(".tmp") {
+                        let _ = std::fs::remove_file(target_path);
+                        if std::fs::rename(&path, target_path).is_ok() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !target_path.is_file() {
+                cleanup_strategy_temp(target_path);
+                bail!("胜出组合的临时文件不存在");
+            }
+
+            // 校验
+            if config.verify && !verify_downloaded_file(target_path) {
+                let _ = std::fs::remove_file(target_path);
+                cleanup_strategy_temp(target_path);
+                bail!("{}: 下载内容签名不匹配", strategy_name);
+            }
+
+            // 清理临时文件
+            cleanup_strategy_temp(target_path);
+
+            // 报告
+            let file_size = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
+            let elapsed = start.elapsed();
+            eprintln!("    ✓ 成功: {} ({}, {} KB/s)",
+                strategy_name,
+                color::format_size(file_size),
+                if elapsed.as_secs() > 0 { file_size / 1024 / elapsed.as_secs() as u64 } else { 0 }
+            );
+
+            Ok(DownloadReport {
+                strategy_used: strategy_name.clone(),
+                total_bytes: file_size,
+                elapsed,
+                url,
+                target_path: target_path.to_path_buf(),
+            })
+        }
+        Err(e) => {
+            cleanup_strategy_temp(target_path);
+            bail!("下载失败: {}", e);
+        }
     }
-    bail!("下载失败：{}", errors.last().unwrap_or(&"未知错误".to_string()));
 }
 
 fn strategy_name(s: &DownloadStrategy) -> &'static str {
@@ -255,12 +451,18 @@ fn strategy_name(s: &DownloadStrategy) -> &'static str {
 }
 
 /// Rust Range 分片下载。
-fn download_with_range(url: &str, target_path: &Path, threads: u8, resume: bool) -> anyhow::Result<()> {
-    crate::range::parallel_download(url, target_path, threads as usize, resume)
+fn download_with_range(url: &str, target_path: &Path, threads: u8, resume: bool, cancel: &Cancel, pb: Option<indicatif::ProgressBar>) -> anyhow::Result<()> {
+    crate::range::parallel_download(url, target_path, threads as usize, resume, cancel, pb)
 }
 
 /// 使用 ureq Agent 单线程下载到文件（含进度条 + cookie 挑战回退）。
-fn download_with_ureq(url: &str, target_path: &Path, agent_cfg: &AgentConfig) -> anyhow::Result<()> {
+fn download_with_ureq(
+    url: &str,
+    target_path: &Path,
+    agent_cfg: &AgentConfig,
+    cancel: &Cancel,
+    external_pb: Option<indicatif::ProgressBar>,
+) -> anyhow::Result<()> {
     let agent = agent_cfg.build_agent()?;
 
     // 最多尝试 3 次（正常 → cookie 回退 → URL 清理）
@@ -269,6 +471,11 @@ fn download_with_ureq(url: &str, target_path: &Path, agent_cfg: &AgentConfig) ->
     let mut current_url = url.to_string();
 
     for attempt in 0..3 {
+        // 检查取消令牌
+        if cancel.is_cancelled() {
+            return Err(anyhow::anyhow!("已取消"));
+        }
+
         let mut req = agent.get(&current_url);
         req = agent_cfg.apply_headers(req, &current_url);
         if let Some(ref c) = cookie {
@@ -345,8 +552,14 @@ fn download_with_ureq(url: &str, target_path: &Path, agent_cfg: &AgentConfig) ->
         let mut file = std::fs::File::create(target_path)?;
         let mut buf = vec![0u8; CHUNK];
 
-        let pb = if total > 0 {
-            let bar = indicatif::ProgressBar::new(total);
+        let pb: Option<indicatif::ProgressBar> = if let Some(bar) = external_pb {
+            if total > 0 {
+                bar.set_length(total);
+            }
+            bar.set_message("下载中");
+            Some(bar)
+        } else if total > 0 {
+            let bar = progress().add(indicatif::ProgressBar::new(total));
             bar.set_style(
                 indicatif::ProgressStyle::default_bar()
                     .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})")
@@ -360,11 +573,20 @@ fn download_with_ureq(url: &str, target_path: &Path, agent_cfg: &AgentConfig) ->
         };
 
         loop {
+            if cancel.is_cancelled() {
+                // 清理进度条和临时文件
+                if let Some(ref pb) = pb {
+                    pb.finish_and_clear();
+                }
+                let _ = std::fs::remove_file(target_path);
+                return Err(anyhow::anyhow!("已取消"));
+            }
             let n = reader.read(&mut buf)?;
             if n == 0 {
                 break;
             }
             file.write_all(&buf[..n])?;
+            cancel.mark_progress();
             if let Some(ref pb) = pb {
                 pb.inc(n as u64);
             }
@@ -396,12 +618,16 @@ pub fn expand_github_urls(urls: &[String]) -> Vec<String> {
     out
 }
 
-/// 并行探测多个 URL，返回最快可用的一个。
+/// 并发探测多个 URL，返回 8s 内确认可用的地址列表。
 ///
-/// 对每个 URL 发送 HEAD 请求，检查是否可达且返回非 HTML 内容。
-/// 所有探测并发执行，第一个成功的返回。8s 无结果则返回 None。
-fn parallel_probe(urls: &[String]) -> Option<String> {
-    let (tx, rx) = std::sync::mpsc::channel();
+/// 快速过滤死链，避免无效组合浪费带宽。
+fn probe_alive_urls(urls: &[String]) -> Vec<String> {
+    let total = urls.len();
+    if total == 0 { return vec![]; }
+
+    eprintln!("    ⚡ 并行探测 {} 个地址（8s 封顶）", total);
+
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
     let probe_timeout = Duration::from_secs(8);
 
     for url in urls {
@@ -417,7 +643,6 @@ fn parallel_probe(urls: &[String]) -> Option<String> {
             match agent.head(&url).call() {
                 Ok(resp) if resp.status() < 400 => {
                     let ct = resp.header("Content-Type").unwrap_or("");
-                    // HEAD 成功且不是 HTML → 可用的下载地址
                     if !ct.contains("text/html") {
                         let _ = tx.send(url);
                     }
@@ -427,76 +652,47 @@ fn parallel_probe(urls: &[String]) -> Option<String> {
         });
     }
 
-    // 等待第一个成功的响应，或超时
     drop(tx);
-    match rx.recv_timeout(probe_timeout) {
-        Ok(url) => Some(url),
-        Err(_) => None,
+    let mut alive = Vec::new();
+    let deadline = Instant::now() + probe_timeout;
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(url) => alive.push(url),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if alive.is_empty() { continue; }
+                // 已有探测结果，可以继续等满时间收集更多
+                continue;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
     }
+
+    alive
 }
 
-/// 从多个 URL 中下载（智能并发探测 + 回退）。
+/// 从多个 URL 中下载（智能并发探测 + 并行多策略）。
 ///
-/// 第一阶段：并行探测所有 URL，最快可用的胜出。
-/// 第二阶段：用胜出 URL 运行全策略链下载。
-/// 探测阶段无结果则降级为顺序全策略尝试。
+/// 第一阶段：并行探测所有 URL，收集可达地址。
+/// 第二阶段：所有可达地址 × 所有策略并行下载，谁先完成用谁。
 pub fn download_with_url_fallback(
-    name: &str,
+    _name: &str,
     urls: &[String],
     target_path: &Path,
     config: &DownloadConfig,
 ) -> anyhow::Result<DownloadReport> {
     let expanded = expand_github_urls(urls);
 
-    // ── Phase 1: 并行探测 ──
-    let total = expanded.len();
-    eprintln!("    ⚡ 并行探测 {} 个地址（8s 封顶）", total);
-    for (i, url) in expanded.iter().enumerate() {
-        eprintln!("      [{}/{}] {}", i + 1, total, url);
-    }
-
-    let winner = parallel_probe(&expanded);
-
-    // ── Phase 2: 正式下载 ──
-    if let Some(ref url) = winner {
-        eprintln!("    ✓ 最快可用: {}", url);
-        let start = Instant::now();
-        match download_with_fallback(url, target_path, config) {
-            Ok(report) => return Ok(report),
-            Err(e) => {
-                let elapsed = start.elapsed();
-                let _ = std::fs::remove_file(target_path);
-                let parts_dir = format!("{}.parts", target_path.display());
-                let _ = std::fs::remove_dir_all(&parts_dir);
-                eprintln!("    ✗ 胜出地址下载失败（{}s）: {}", elapsed.as_secs(), e);
-            }
-        }
+    // ── Phase 1: 并行探测，收集可达地址 ──
+    let alive = probe_alive_urls(&expanded);
+    let alive = if alive.is_empty() {
+        eprintln!("    ⚠ 全部探测无响应（8s 超时），降级为全部地址参与");
+        expanded
     } else {
-        eprintln!("    ⚠ 全部探测无响应（8s 超时），降级为顺序回退");
-    }
+        alive
+    };
 
-    // ── Phase 2 降级：顺序全策略尝试 ──
-    let mut last_err = None;
-    for (i, url) in expanded.iter().enumerate() {
-        eprintln!("    [{}/{}] 顺序回退: {}", i + 1, expanded.len(), url);
-        let mut cfg = config.clone();
-        if i > 0 {
-            cfg.renew = false;
-        }
-        match download_with_fallback(url, target_path, &cfg) {
-            Ok(report) => return Ok(report),
-            Err(e) => {
-                eprintln!("    ✗ 失败");
-                last_err = Some(e);
-                let _ = std::fs::remove_file(target_path);
-                let parts_dir = format!("{}.parts", target_path.display());
-                let _ = std::fs::remove_dir_all(&parts_dir);
-            }
-        }
-    }
-
-    let err = last_err.unwrap_or_else(|| anyhow::anyhow!("无可用下载地址"));
-    bail!("{}: {}", name, err);
+    // ── Phase 2: 并行下载（所有可达地址 × 全部策略） ──
+    download_with_fallback(&alive, target_path, config)
 }
 
 /// 通过 HEAD 请求探测下载 URL 的真实文件名。
