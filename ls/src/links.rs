@@ -218,9 +218,27 @@ pub fn get_lnk_target(path: &Path) -> Option<String> {
     None
 }
 
+/// 读取 ANSI/Locale 编码字符串。
+///
+/// 先尝试 UTF-8 解码；失败时尝试 GBK（中文 Windows 默认 ANSI 代码页 936）。
+/// `.lnk` 文件中的 ANSI 字符串使用系统本地编码，不是 UTF-8。
 fn read_ansi_string(data: &[u8], offset: usize) -> Option<String> {
     let end = data[offset..].iter().position(|&b| b == 0)?;
     let bytes = &data[offset..offset + end];
+
+    // 先尝试 UTF-8（纯 ASCII 路径走此路径）
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return Some(s.to_string());
+    }
+
+    // 回退：用 GBK 解码（中文 Windows 的 ANSI 代码页）
+    let (decoded, _encoding, _had_errors) = encoding_rs::GBK.decode(bytes);
+    let s = decoded.trim_end_matches('\0').to_string();
+    if !s.is_empty() {
+        return Some(s);
+    }
+
+    // 最终回退：lossy 解码
     Some(String::from_utf8_lossy(bytes).to_string())
 }
 

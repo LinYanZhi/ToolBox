@@ -3,7 +3,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
-use crate::agent::AgentConfig;
+use crate::agent::Fingerprint;
 
 /// 使用系统 aria2c 多线程下载。
 ///
@@ -49,12 +49,23 @@ pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> 
         &filename,
     ]);
 
-    // 传入完整浏览器请求头（防盗链关键）
-    let agent_cfg = AgentConfig::default();
-    let headers = agent_cfg.flat_headers(url);
-    for h in &headers {
+    // 传入浏览器模拟请求头（防盗链关键）
+    // 使用保守的请求头，不发送 Sec-Fetch-* 等浏览器专属头（防反爬误判）
+    cmd.arg("--header");
+    cmd.arg(format!("User-Agent: {}", Fingerprint::Chrome120.user_agent()));
+    cmd.arg("--header");
+    cmd.arg("Accept: */*");
+    cmd.arg("--header");
+    cmd.arg("Accept-Language: zh-CN,zh;q=0.9,en;q=0.8");
+
+    let hostname = url
+        .split("://")
+        .nth(1)
+        .and_then(|s| s.split('/').next())
+        .unwrap_or("");
+    if !hostname.is_empty() {
         cmd.arg("--header");
-        cmd.arg(h);
+        cmd.arg(format!("Referer: https://{}/", hostname));
     }
 
     cmd.arg(url);

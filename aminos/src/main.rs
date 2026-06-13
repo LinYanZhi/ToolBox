@@ -1,4 +1,3 @@
-mod downloader;
 mod installer;
 mod paths;
 mod pe_version;
@@ -9,8 +8,7 @@ mod speedtest;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap::builder::styling::{AnsiColor, Color, Style, Styles};
 
-use color::DisplayWidth;
-use crate::downloader::{display_width, format_size, pad, truncate_display};
+use color::{DisplayWidth, format_size, pad_left as pad, truncate};
 
 /// 统一帮助配色方案
 const HELP_STYLES: Styles = Styles::styled()
@@ -780,7 +778,7 @@ fn run_info(name: &str, show_urls: bool) -> anyhow::Result<()> {
         });
         for vk in &sorted_versions {
             let vi = &sd.versions[*vk];
-            let expanded = crate::downloader::expand_github_urls(&vi.urls);
+            let expanded = net::download::expand_github_urls(&vi.urls);
             println!("  {}", color::cyan(format!("{}", vk)));
             for url in &expanded {
                 println!("    {}", url);
@@ -1037,8 +1035,8 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
     entries.sort_by(|a, b| b.1.cmp(&a.1));
 
     let total_size: u64 = entries.iter().map(|(_, s, _, _)| s).sum();
-    let max_name = entries.iter().map(|(n, _, _, _)| display_width(n)).max().unwrap_or(4).min(50);
-    let max_ver = entries.iter().map(|(_, _, v, _)| display_width(v)).max().unwrap_or(4).max(4);
+    let max_name = entries.iter().map(|(n, _, _, _)| n.display_width()).max().unwrap_or(4).min(50);
+    let max_ver = entries.iter().map(|(_, _, v, _)| v.display_width()).max().unwrap_or(4).max(4);
 
     println!("\n{}  {}\n", color::bold_yellow("下载缓存"), color::gray(format!("{}", downloads.display())));
     println!("  {}{}{}",
@@ -1048,8 +1046,8 @@ fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
 
     for (name, size, ver, consistency) in &entries {
         println!("  {}{}{}{}",
-            pad(&truncate_display(name, max_name), max_name + 2),
-            pad(&truncate_display(ver, max_ver), max_ver + 2),
+            pad(&truncate(name, max_name), max_name + 2),
+            pad(&truncate(ver, max_ver), max_ver + 2),
             pad(&format_size(*size), 12),
             consistency,
         );

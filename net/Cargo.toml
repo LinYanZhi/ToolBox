@@ -8,4 +8,5 @@ description = "通用网络层 — 多指纹 HTTP 客户端、多策略下载引
 anyhow = "1"
 ureq = { version = "2", features = ["native-tls"] }
 native-tls = "0.2"
+indicatif = "0.17"
 color = { path = "../color" }

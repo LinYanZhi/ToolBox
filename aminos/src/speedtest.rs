@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use crate::downloader::{self, display_width, format_size, pad, expand_github_urls};
+use color::{self, DisplayWidth, format_size, pad_left, truncate};
+use net::download::expand_github_urls;
+use net::speedtest;
 
 use crate::software::{self, SoftwareDef};
-use color;
 
 pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
     let start = Instant::now();
@@ -54,7 +55,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
     // Pre-calculate max widths
     let max_name_w = entries.iter()
-        .map(|(d, _, _)| display_width(d))
+        .map(|(d, _, _)| d_width(d)d)dd
         .max()
         .unwrap_or(6)
         .max(6);
@@ -89,7 +90,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
                 }
                 let (display, version, url) = &entries[idx];
 
-                let speed = downloader::measure_speed(url, 10);
+                let speed = speedtest::measure_speed(url, 10);
 
                 // Print with lock for consistent output
                 let _guard = print_lock.lock().unwrap();
@@ -98,7 +99,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
                     Some(s) => (format_size((s * 1024.0) as u64) + "/s", color::GREEN),
                     None => ("不可用".to_string(), color::YELLOW),
                 };
-                let marker = color_code.paint(&pad(&plain, speed_w));
+                let marker = color_code.paint(&pad_left(&plain, speed_w));
 
                 let idx_str = format!("{:0>w$}", current, w = max_idx_w);
                 let prefix = format!("  [{}/{}] {}", idx_str, total, pad(display, max_name_w + 1));
@@ -152,8 +153,8 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
 
         summary.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let name_w = summary.iter().map(|(n, _, _, _)| display_width(n)).max().unwrap_or(4).max(4).min(20);
-        let ver_w = summary.iter().map(|(_, v, _, _)| display_width(v)).max().unwrap_or(4).max(4).min(20);
+        let name_w = summary.iter().map(|(n, _, _, _)| n.display_width()).max().unwrap_or(4).max(4).min(20);
+        let ver_w = summary.iter().map(|(_, v, _, _)| v.display_width()).max().unwrap_or(4).max(4).min(20);
 
         let header = format!(
             "{}{}{}",
@@ -162,7 +163,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
             pad("最佳速度", 12),
         );
         println!("{}  状态", header);
-        println!("{}", "-".repeat(display_width(&header) + 20));
+        println!("{}", "-".repeat(header.display_width() + 20));
 
         let mut avail_count = 0;
         for (name, version, available, best) in &summary {
@@ -215,14 +216,14 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
         avail.sort_by(|a, b| a.3.unwrap().partial_cmp(&b.3.unwrap()).unwrap_or(std::cmp::Ordering::Equal));
 
         let name_w = avail.iter()
-            .map(|(d, _, _, _)| display_width(d))
+            .map(|(d, _, _, _)| d.display_width())
             .max()
             .unwrap_or(4)
             .max(4)
             .min(20);
 
         let ver_w = avail.iter()
-            .map(|(_, v, _, _)| display_width(v))
+            .map(|(_, v, _, _)| v.display_width())
             .max()
             .unwrap_or(4)
             .max(4)
@@ -235,13 +236,13 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
             pad("速度", 12),
         );
         println!("{}", header);
-        println!("{}", "-".repeat(display_width(&header) + 30));
+        println!("{}", "-".repeat(header.display_width() + 30));
 
         for (display, version, url, speed) in &avail {
             let s = speed.unwrap();
             let marker = color::green(format!("{:>10}", format_size((s * 1024.0) as u64) + "/s"));
-            let name_d = downloader::truncate_display(display, name_w);
-            let ver_d = downloader::truncate_display(version, ver_w);
+            let name_d = truncate(display, name_w);
+            let ver_d = truncate(version, ver_w);
             println!(
                 "  {}{}{}  {}",
                 pad(&name_d, name_w + 2),

@@ -79,6 +79,32 @@ pub fn parallel_download(
     let progress = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(Mutex::new(Vec::new()));
 
+    // 全局进度条
+    let pb = indicatif::ProgressBar::new(total_size);
+    pb.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("=> "),
+    );
+    pb.set_message("分片下载");
+
+    // 进度监控线程
+    let pb_progress = Arc::clone(&progress);
+    let pb_handle = {
+        let pb = pb.clone();
+        thread::spawn(move || {
+            loop {
+                let cur = pb_progress.load(Ordering::Relaxed);
+                pb.set_position(cur);
+                if cur >= total_size {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(200));
+            }
+        })
+    };
+
     let mut handles = Vec::with_capacity(actual);
     for i in 0..actual {
         let start = i as u64 * chunk_size;
@@ -159,16 +185,22 @@ pub fn parallel_download(
         }
     }
 
+    // 停止进度监控并刷新到 100%
+    let _ = pb_handle.join();
+    pb.set_position(total_size);
+
     // Step 5: 检查错误
     {
         let errs = errors.lock().unwrap();
         if !errs.is_empty() {
+            pb.abandon_with_message("下载失败");
             let _ = fs::remove_dir_all(&temp_dir);
             bail!("多线程下载失败: {}", errs.join("; "));
         }
     }
 
     // Step 6: 合并分片
+    pb.set_message("合并分片");
     let mut output = fs::File::create(target_path)?;
     for i in 0..actual {
         let chunk_path = temp_dir.join(format!("{:04}", i));
@@ -186,12 +218,13 @@ pub fn parallel_download(
 
     // Step 7: 清理
     let _ = fs::remove_dir_all(&temp_dir);
+    pb.finish_with_message("下载完成");
 
     Ok(())
 }
 
-/// 单线程回退下载（无进度条）。
-fn single_thread_fallback(url: &str, target_path: &Path, _total_size: u64) -> anyhow::Result<()> {
+/// 单线程回退下载（含进度条）。
+fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64) -> anyhow::Result<()> {
     let agent_cfg = AgentConfig::normal(30, 600);
     let agent = agent_cfg.build_agent()?;
     let mut req = agent.get(url);
@@ -205,6 +238,20 @@ fn single_thread_fallback(url: &str, target_path: &Path, _total_size: u64) -> an
     let parent = target_path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
 
+    let pb = if total_size > 0 {
+        let bar = indicatif::ProgressBar::new(total_size);
+        bar.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+                .unwrap()
+                .progress_chars("=> "),
+        );
+        bar.set_message("单线程下载");
+        Some(bar)
+    } else {
+        None
+    };
+
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(target_path)?;
     let mut buf = [0u8; 65536];
@@ -214,6 +261,13 @@ fn single_thread_fallback(url: &str, target_path: &Path, _total_size: u64) -> an
             break;
         }
         file.write_all(&buf[..n])?;
+        if let Some(ref pb) = pb {
+            pb.inc(n as u64);
+        }
+    }
+
+    if let Some(pb) = pb {
+        pb.finish_with_message("下载完成");
     }
 
     Ok(())

@@ -5,7 +5,6 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
-use crate::downloader;
 use crate::paths;
 use crate::pe_version;
 use crate::registry;
@@ -286,7 +285,7 @@ fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool) -
     let dl = paths::downloads_dir();
     fs::create_dir_all(&dl)?;
 
-    let filename = downloader::safe_installer_name(name, version, urls);
+    let filename = safe_installer_name(name, version, urls);
     let target = dl.join(&filename);
 
     if target.exists() && !renew {
@@ -295,16 +294,39 @@ fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool) -
     }
 
     let tmp = dl.join(format!("{}.downloading", filename));
-    downloader::download_with_fallback(name, urls, &tmp, renew)?;
+    net::download::download_with_url_fallback(name, urls, &tmp, &net::DownloadConfig::default().renew(renew))?;
     fs::rename(&tmp, &target)?;
 
     // 最终验证：rename 后的文件必须通过签名检查
-    if !downloader::verify_downloaded_file(&target) {
+    if !net::verify_downloaded_file(&target) {
         let _ = std::fs::remove_file(&target);
         bail!("{}: 下载后验证失败（文件损坏或反盗链页面）", name);
     }
 
     Ok(target)
+}
+
+/// 构造安全的安装包文件名。
+fn safe_installer_name(name: &str, version: &str, urls: &[String]) -> String {
+    let safe_name = name.to_lowercase().replace(' ', "-");
+    let safe_ver = version.to_lowercase().replace(' ', "-");
+
+    if let Some(first_url) = urls.first() {
+        let path = first_url.split('?').next().unwrap_or(first_url);
+        let seg = path.rsplit('/').next().unwrap_or("");
+        if let Some(dot) = seg.rfind('.') {
+            let e = &seg[dot..];
+            if [
+                ".exe", ".msi", ".zip", ".7z", ".rar", ".tar", ".gz", ".xz", ".bz2", ".iso",
+                ".appx", ".dmg",
+            ]
+            .contains(&e.to_lowercase().as_str())
+            {
+                return format!("{}-{}{}", safe_name, safe_ver, e);
+            }
+        }
+    }
+    format!("{}-{}.exe", safe_name, safe_ver)
 }
 
 // ── Installer execution ───────────────────────────────────

@@ -1,8 +1,8 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context};
+use anyhow::bail;
 
 use crate::agent::{AgentConfig, Fingerprint};
 use crate::verify::verify_downloaded_file;
@@ -18,6 +18,12 @@ pub enum DownloadStrategy {
     Aria2c,
     /// 使用系统 curl。
     Curl,
+    /// 使用 Windows PowerShell (WebClient) — 不同 TLS 指纹。
+    PowerShell,
+    /// 使用 Windows PowerShell (Invoke-WebRequest) — 更完整的请求。
+    PowerShellInvoke,
+    /// 使用 Windows BITS 传输。
+    BitsTransfer,
     /// 使用 ureq 单线程。
     Ureq { fingerprint: Fingerprint, insecure: bool },
 }
@@ -43,6 +49,9 @@ impl Default for DownloadConfig {
                 DownloadStrategy::Aria2c,
                 DownloadStrategy::Ureq { fingerprint: Fingerprint::Chrome120, insecure: false },
                 DownloadStrategy::Ureq { fingerprint: Fingerprint::Chrome120, insecure: true },
+                DownloadStrategy::PowerShell,
+                DownloadStrategy::PowerShellInvoke,
+                DownloadStrategy::BitsTransfer,
                 DownloadStrategy::Curl,
             ],
             verify: true,
@@ -100,9 +109,20 @@ pub fn download_with_fallback(
 ) -> anyhow::Result<DownloadReport> {
     let start = Instant::now();
     let mut errors: Vec<String> = Vec::new();
+    let total = config.strategies.len();
 
-    for strategy in &config.strategies {
+    for (idx, strategy) in config.strategies.iter().enumerate() {
         let name = strategy_name(strategy);
+        eprintln!("  [{}/{}] 尝试 {} ...", idx + 1, total, name);
+
+        // 对各别策略加简短提示
+        match strategy {
+            DownloadStrategy::Ureq { insecure: true, .. } => {
+                eprintln!("       ⚠ 跳过证书验证（不安全）");
+            }
+            _ => {}
+        }
+
         let result = match strategy {
             DownloadStrategy::RustRange { threads } => {
                 download_with_range(url, target_path, *threads, config.resume)
@@ -114,6 +134,18 @@ pub fn download_with_fallback(
             DownloadStrategy::Curl => {
                 crate::curl::try_curl_download(url, target_path).map(|_| name)
             }
+            DownloadStrategy::PowerShell => {
+                crate::powershell::try_powershell_download(url, target_path)
+                    .map(|_| "powershell")
+            }
+            DownloadStrategy::PowerShellInvoke => {
+                crate::powershell::try_powershell_invoke(url, target_path)
+                    .map(|_| "powershell-invoke")
+            }
+            DownloadStrategy::BitsTransfer => {
+                crate::powershell::try_bits_transfer(url, target_path)
+                    .map(|_| "bits")
+            }
             DownloadStrategy::Ureq { fingerprint, insecure } => {
                 let agent_config = AgentConfig {
                     fingerprint: *fingerprint,
@@ -121,9 +153,6 @@ pub fn download_with_fallback(
                     connect_timeout: 30,
                     read_timeout: 600,
                 };
-                if *insecure {
-                    eprintln!("  ⚠ 正常 TLS 失败，尝试跳过证书验证（不安全）...");
-                }
                 download_with_ureq(url, target_path, &agent_config).map(|_| {
                     if *insecure { "ureq(insecure)" } else { "ureq" }
                 })
@@ -133,29 +162,41 @@ pub fn download_with_fallback(
         match result {
             Ok(strategy_name) => {
                 if config.verify && !verify_downloaded_file(target_path) {
-                    let msg = format!("{}: 下载内容签名不匹配", strategy_name);
+                    let msg = format!("{}: 下载内容签名不匹配（文件损坏或反盗链页面）", strategy_name);
+                    eprintln!("       {}", msg);
                     errors.push(msg);
                     let _ = std::fs::remove_file(target_path);
                     continue;
                 }
+                let file_size = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
                 let elapsed = start.elapsed();
-                let total_bytes = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
+                eprintln!("       ✓ 成功 ({}, {} KB/s)",
+                    color::format_size(file_size),
+                    if elapsed.as_secs() > 0 { file_size / 1024 / elapsed.as_secs() as u64 } else { 0 }
+                );
                 return Ok(DownloadReport {
                     strategy_used: strategy_name,
-                    total_bytes,
+                    total_bytes: file_size,
                     elapsed,
                     url: url.to_string(),
                     target_path: target_path.to_path_buf(),
                 });
             }
             Err(e) => {
-                errors.push(format!("{}: {}", name, e));
+                let msg = format!("{}: {}", name, e);
+                eprintln!("       ✗ {}", msg);
+                errors.push(msg);
                 let _ = std::fs::remove_file(target_path);
             }
         }
     }
 
-    bail!("所有下载策略均失败: {}", errors.join("; "))
+    eprintln!("  ────────────────────────────────────");
+    eprintln!("  所有 {} 种下载策略均失败", total);
+    for err in &errors {
+        eprintln!("    {}", err);
+    }
+    bail!("下载失败：{}", errors.last().unwrap_or(&"未知错误".to_string()));
 }
 
 fn strategy_name(s: &DownloadStrategy) -> &'static str {
@@ -163,6 +204,9 @@ fn strategy_name(s: &DownloadStrategy) -> &'static str {
         DownloadStrategy::RustRange { .. } => "RustRange",
         DownloadStrategy::Aria2c => "aria2c",
         DownloadStrategy::Curl => "curl",
+        DownloadStrategy::PowerShell => "powershell",
+        DownloadStrategy::PowerShellInvoke => "powershell-invoke",
+        DownloadStrategy::BitsTransfer => "bits",
         DownloadStrategy::Ureq { insecure: true, .. } => "ureq(insecure)",
         DownloadStrategy::Ureq { .. } => "ureq",
     }
@@ -173,54 +217,125 @@ fn download_with_range(url: &str, target_path: &Path, threads: u8, resume: bool)
     crate::range::parallel_download(url, target_path, threads as usize, resume)
 }
 
-/// 使用 ureq Agent 单线程下载到文件。
+/// 使用 ureq Agent 单线程下载到文件（含进度条 + cookie 挑战回退）。
 fn download_with_ureq(url: &str, target_path: &Path, agent_cfg: &AgentConfig) -> anyhow::Result<()> {
-    use std::io::Read;
-
     let agent = agent_cfg.build_agent()?;
-    let mut req = agent.get(url);
-    req = agent_cfg.apply_headers(req, url);
 
-    let resp = req.call().context("ureq 请求失败")?;
+    // 最多尝试 3 次（正常 → cookie 回退 → URL 清理）
+    let mut last_err = None;
+    let mut cookie: Option<String> = None;
+    let mut current_url = url.to_string();
 
-    let status = resp.status();
-    let ct = resp.header("Content-Type").unwrap_or("").to_string();
-
-    // 非 2xx 状态码
-    if status >= 400 {
-        bail!("HTTP {} (Content-Type: {})", status, ct);
-    }
-
-    // 防盗链检测 — 给出更详细的诊断
-    if crate::agent::is_html_response(&resp) {
-        let ct_short = if ct.len() > 40 { format!("{}...", &ct[..40]) } else { ct.clone() };
-        bail!(
-            "服务器返回了 HTML 页面（可能反盗链），HTTP={} Content-Type={}",
-            status, ct_short
-        );
-    }
-
-    let _total_size: u64 = resp
-        .header("Content-Length")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-
-    let parent = target_path.parent().unwrap_or(Path::new("."));
-    std::fs::create_dir_all(parent)?;
-
-    let mut reader = resp.into_reader();
-    let mut file = std::fs::File::create(target_path)?;
-    let mut buf = [0u8; CHUNK];
-
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
+    for attempt in 0..3 {
+        let mut req = agent.get(&current_url);
+        req = agent_cfg.apply_headers(req, &current_url);
+        if let Some(ref c) = cookie {
+            req = req.set("Cookie", c);
         }
-        file.write_all(&buf[..n])?;
+
+        let resp = match req.call() {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = Some(anyhow::anyhow!("ureq 请求失败: {}", e));
+                continue;
+            }
+        };
+
+        let status = resp.status();
+        let ct = resp.header("Content-Type").unwrap_or("").to_string();
+
+        // 非 2xx 状态码
+        if status >= 400 {
+            last_err = Some(anyhow::anyhow!("HTTP {} (Content-Type: {})", status, ct));
+            continue;
+        }
+
+        // 防盗链检测
+        let is_html = crate::agent::is_html_response(&resp);
+
+        if is_html {
+            // 尝试提取 Set-Cookie
+            let set_cookie = resp.header("set-cookie").map(|s| s.to_string());
+            let had_cookie = cookie.is_some();
+
+            if attempt == 0 && set_cookie.is_some() {
+                // 首次遇到 HTML + Set-Cookie → cookie 挑战
+                cookie = Some(set_cookie.unwrap());
+                eprintln!("       ⚠ Cookie 挑战，重试中...");
+                last_err = None;
+                continue;
+            }
+
+            if attempt == 1 && !had_cookie {
+                // 尝试剥离 tads 参数（JS 挑战的清理逻辑）
+                if let Some(pos) = current_url.find("?tads") {
+                    current_url = current_url[..pos].to_string();
+                    eprintln!("       ⚠ 清理 URL 参数重试...");
+                    last_err = None;
+                    continue;
+                }
+                if let Some(pos) = current_url.find("&tads") {
+                    current_url = current_url[..pos].to_string();
+                    eprintln!("       ⚠ 清理 URL 参数重试...");
+                    last_err = None;
+                    continue;
+                }
+            }
+
+            let ct_short = if ct.len() > 40 { format!("{}...", &ct[..40]) } else { ct.clone() };
+            last_err = Some(anyhow::anyhow!(
+                "服务器返回了 HTML 页面（可能反盗链），HTTP={} Content-Type={}",
+                status, ct_short
+            ));
+            continue;
+        }
+
+        // 成功：非 HTML 响应 → 下载到文件
+        let total: u64 = resp
+            .header("Content-Length")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let parent = target_path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(parent)?;
+
+        let mut reader = resp.into_reader();
+        let mut file = std::fs::File::create(target_path)?;
+        let mut buf = vec![0u8; CHUNK];
+
+        let pb = if total > 0 {
+            let bar = indicatif::ProgressBar::new(total);
+            bar.set_style(
+                indicatif::ProgressStyle::default_bar()
+                    .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec})")
+                    .unwrap()
+                    .progress_chars("=> "),
+            );
+            bar.set_message("下载中");
+            Some(bar)
+        } else {
+            None
+        };
+
+        loop {
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n])?;
+            if let Some(ref pb) = pb {
+                pb.inc(n as u64);
+            }
+        }
+
+        if let Some(pb) = pb {
+            pb.finish_with_message("下载完成");
+        }
+
+        return Ok(());
     }
 
-    Ok(())
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("ureq 下载失败")))
 }
 
 /// 对 GitHub 地址自动追加 ghproxy 镜像。
@@ -246,6 +361,7 @@ pub fn download_with_url_fallback(
     let mut last_err = None;
 
     for (i, url) in expanded.iter().enumerate() {
+        eprintln!("    URL[{}]: {}", i + 1, url);
         let mut cfg = config.clone();
         // 只有第一个 URL 的首次尝试才启用 renew（避免重复下载）
         if i > 0 {
@@ -254,6 +370,7 @@ pub fn download_with_url_fallback(
         match download_with_fallback(url, target_path, &cfg) {
             Ok(report) => return Ok(report),
             Err(e) => {
+                eprintln!("    \u{2717} 该地址失败");
                 last_err = Some(e);
                 let _ = std::fs::remove_file(target_path);
             }
