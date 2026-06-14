@@ -72,6 +72,9 @@ pub struct InstallRecord {
     /// 安装时间（Unix 时间戳）
     #[serde(default)]
     pub install_time: u64,
+    /// 安装类型（如 "portable", "nsis", "inno" 等），升级时复用
+    #[serde(default)]
+    pub installer_type: String,
 }
 
 fn default_provenance() -> String {
@@ -109,7 +112,7 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
 
     // 空源检查
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
-        anyhow::bail!("未找到源定义。请先运行: as source update");
+        anyhow::bail!("未找到源定义。请先运行: as env source update");
     }
 
     // 1. Exact match
@@ -229,7 +232,7 @@ pub fn write_installed_db(db: &HashMap<String, InstallRecord>) -> anyhow::Result
     Ok(())
 }
 
-pub fn record_installation(name: &str, version: &str, install_path: &str, version_provenance: &str, source_version: &str) -> anyhow::Result<()> {
+pub fn record_installation(name: &str, version: &str, install_path: &str, version_provenance: &str, source_version: &str, installer_type: &str) -> anyhow::Result<()> {
     let mut db = read_installed_db()?;
     db.insert(
         name.to_string(),
@@ -242,6 +245,7 @@ pub fn record_installation(name: &str, version: &str, install_path: &str, versio
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
+            installer_type: installer_type.to_string(),
         },
     );
     write_installed_db(&db)

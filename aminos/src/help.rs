@@ -11,25 +11,106 @@ pub const HELP_STYLES: Styles = Styles::styled()
     .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
     .error(*Styles::styled().get_error());
 
-pub const HELP_TEMPLATE: &str = "\
-\x1b[1;36maminos\x1b[0m — \x1b[32m轻量级 Windows 软件包管理器\x1b[0m
+/// 命令帮助条目：定义命令名称、中文描述、名称样式
+pub struct CmdHelp {
+    pub name: &'static str,
+    pub desc: &'static str,
+    pub style: color::Style,
+}
 
-\x1b[1;33m用法:\x1b[0m
-  \x1b[36mas\x1b[0m \x1b[32m<命令>\x1b[0m [参数]
+/// 根级命令列表（每个命令可独立配色）
+pub const ROOT_COMMANDS: &[CmdHelp] = &[
+    CmdHelp { name: "install",   desc: "安装指定软件",                           style: color::BOLD_GREEN },
+    CmdHelp { name: "list",      desc: "列出可用软件及安装状态",                 style: color::BOLD_CYAN },
+    CmdHelp { name: "uninstall", desc: "卸载指定软件",                           style: color::BOLD_RED },
+    CmdHelp { name: "upgrade",   desc: "升级已安装的软件",                       style: color::BOLD_MAGENTA },
+    CmdHelp { name: "env",       desc: "管理 as 环境（源、缓存、下载引擎）",   style: color::BRIGHT_CYAN },
+    CmdHelp { name: "self",      desc: "管理 as 自身（初始化、更新）",           style: color::BRIGHT_GREEN },
+    CmdHelp { name: "tool",      desc: "管理自研工具（已安装的 as 工具集）",     style: color::BRIGHT_YELLOW },
+];
 
-\x1b[1;33m命令:\x1b[0m
-{subcommands}
-\x1b[1;33m选项:\x1b[0m
-{options}
+/// 打印根命令帮助
+pub fn print_root_help() {
+    let max_name_w = ROOT_COMMANDS
+        .iter()
+        .map(|c| c.name.display_width())
+        .max()
+        .unwrap_or(10);
 
-\x1b[1;33m示例:\x1b[0m
-  \x1b[36mas list\x1b[0m
-  \x1b[36mas install 7zip\x1b[0m
-  \x1b[36mas uninstall 7zip\x1b[0m
+    println!();
+    println!("  {} — {}", color::bold_cyan("aminos"), color::green("轻量级 Windows 软件包管理器"));
+    println!();
+    println!("  {}", color::bold_yellow("用法:"));
+    println!("    {} {} {}", color::cyan("as"), color::green("<命令>"), color::gray("[参数]"));
+    println!();
+    println!("  {}", color::bold_yellow("命令:"));
+    for cmd in ROOT_COMMANDS {
+        let name_colored = cmd.style.paint(pad(cmd.name, max_name_w));
+        println!("    {}    {}", name_colored, cmd.desc);
+    }
+    println!();
+    println!("  {}", color::bold_yellow("选项:"));
+    println!("    {}  {}", color::cyan("-e, --example"), "显示所有命令的示例用法");
+    println!("    {}  {}", color::cyan("-h, --help"),    "显示帮助信息");
+    println!("    {}  {}", color::cyan("-V, --version"), "显示版本信息");
+    println!();
+    println!("  {}", color::bold_yellow("提示:"));
+    println!("    {} 了解更多请使用 {}as <命令> --help{}", color::gray("•"), color::cyan(""), color::gray(""));
+    println!("    {} 查看示例请使用 {}as -e{}", color::gray("•"), color::cyan(""), color::gray(""));
+}
 
-\x1b[1;33m提示:\x1b[0m
-  更多示例请运行 \x1b[36mas -e\x1b[0m
-";
+/// 打印 as env 子命令帮助
+pub fn print_env_help() {
+    println!();
+    println!("  {} — {}", color::bold_cyan("as env"), color::green("管理 as 环境（源、缓存、下载引擎）"));
+    println!();
+    println!("  {}", color::bold_yellow("用法:"));
+    println!("    {} {} {}", color::cyan("as env"), color::green("<子命令>"), color::gray("[参数]"));
+    println!();
+    println!("  {}", color::bold_yellow("子命令:"));
+    println!("    {}  {}", color::cyan("cache"),      "管理下载缓存");
+    println!("    {}  {}", color::cyan("source"),     "管理软件源定义");
+    println!("    {}  {}", color::cyan("downloader"), "管理下载引擎后端");
+    println!();
+    println!("  {}", color::bold_yellow("示例:"));
+    println!("    {}  {}", color::cyan("as env cache"),        "查看缓存文件");
+    println!("    {}  {}", color::cyan("as env source update"),"更新软件源");
+    println!("    {}  {}", color::cyan("as env downloader list"), "列出下载后端");
+}
+
+/// 打印 as self 子命令帮助
+pub fn print_self_help() {
+    println!();
+    println!("  {} — {}", color::bold_cyan("as self"), color::green("管理 as 自身"));
+    println!();
+    println!("  {}", color::bold_yellow("用法:"));
+    println!("    {} {} {}", color::cyan("as self"), color::green("<子命令>"), color::gray("[参数]"));
+    println!();
+    println!("  {}", color::bold_yellow("子命令:"));
+    println!("    {}  {}", color::cyan("init"),   "初始化 as 环境（创建 tools/bin 并注册到 PATH）");
+    println!("    {}  {}", color::cyan("update"), "更新 as 自身到最新版本");
+    println!();
+    println!("  {}", color::bold_yellow("示例:"));
+    println!("    {}  {}", color::cyan("as self init"),   "初始化环境");
+    println!("    {}  {}", color::cyan("as self update"), "更新自身");
+}
+
+/// 打印 as tool 子命令帮助
+pub fn print_tool_help() {
+    println!();
+    println!("  {} — {}", color::bold_cyan("as tool"), color::green("管理自研工具"));
+    println!();
+    println!("  {}", color::bold_yellow("用法:"));
+    println!("    {} {} {}", color::cyan("as tool"), color::green("<子命令>"), color::gray("[参数]"));
+    println!();
+    println!("  {}", color::bold_yellow("子命令:"));
+    println!("    {}  {}", color::cyan("list"),   "列出已安装的自研工具");
+    println!("    {}  {}", color::cyan("remove"), "移除一个自研工具");
+    println!();
+    println!("  {}", color::bold_yellow("示例:"));
+    println!("    {}  {}", color::cyan("as tool list"),     "列出已安装的工具");
+    println!("    {}  {}", color::cyan("as tool remove ls"),"移除工具 ls");
+}
 
 /// 仅含选项的子命令帮助模板
 pub const HELP_TEMPLATE_OPTIONS: &str = "\
@@ -67,6 +148,7 @@ pub fn run_example() {
             ("as install 7zip --gui", "使用图形界面向导安装"),
             ("as install 7zip --renew", "强制重新下载并安装"),
             ("as install 7zip --download-only", "仅下载，不安装"),
+            ("as install 7zip --type portable", "指定安装类型为便携版"),
         ]),
         ("list", "列出可用软件及安装状态", &[
             ("as list", "列出所有软件"),
@@ -74,16 +156,11 @@ pub fn run_example() {
             ("as list --categories", "查看分类概览"),
             ("as list -i", "仅显示已安装的软件"),
             ("as list -m", "仅显示未安装的软件"),
-            ("as list -f 开发工具", "按分类过滤（如: 工具, 开发, 办公, 浏览器）"),
-            ("as list -S 压缩", "搜索名称、别名或描述"),
-            ("as list -S python", "搜索名称包含 python 的软件"),
-            ("as list -D", "仅显示已下载缓存的软件"),
-            ("as list --downloading", "仅显示正在下载的软件"),
-            ("as list --no-download", "仅显示未下载的软件"),
-        ]),
-        ("info", "查看软件详细信息", &[
-            ("as info 7zip", "查看 7-Zip 的基本信息"),
-            ("as info 7zip --urls", "查看所有可用下载地址"),
+            ("as list -f 开发工具", "按分类过滤"),
+            ("as list -s 压缩", "搜索名称、别名或描述"),
+            ("as list -d", "仅显示已下载缓存的软件"),
+            ("as list --info 7zip", "查看 7-Zip 的详细信息"),
+            ("as list --info 7zip --urls", "查看 7-Zip 所有下载地址"),
         ]),
         ("uninstall", "卸载指定软件", &[
             ("as uninstall 7zip", "静默卸载 7-Zip"),
@@ -91,42 +168,42 @@ pub fn run_example() {
             ("as uninstall 7zip --gui", "使用图形界面卸载向导"),
             ("as uninstall 7zip --force", "强制删除（跳过卸载器）"),
         ]),
-        ("cache", "查看已下载的缓存文件", &[
-            ("as cache", "查看缓存文件列表和一致性"),
-            ("as cache --clear", "清除所有缓存文件"),
-            ("as cache --open", "在资源管理器中打开缓存目录"),
-        ]),
-        ("upgrade", "升级所有已安装的软件", &[
+        ("upgrade", "升级已安装的软件", &[
             ("as upgrade", "升级所有已安装的软件"),
             ("as upgrade 7zip", "仅升级指定软件"),
             ("as upgrade --check", "仅检查更新，不下载不安装"),
             ("as upgrade --renew", "强制重新下载（即使版本相同）"),
         ]),
-        ("source", "管理软件源定义", &[
-            ("as source update", "从远程仓库下载最新源定义"),
-            ("as source path", "显示源定义目录路径"),
-            ("as source path --open", "在资源管理器中打开源目录"),
-            ("as source dirs", "显示所有数据目录位置"),
-            ("as source speedtest", "对所有软件的所有源测速"),
-            ("as source speedtest 7zip", "仅对指定软件的源测速"),
-            ("as source speedtest -S", "以软件为单位统计可用性"),
+        ("env cache", "管理下载缓存", &[
+            ("as env cache", "查看缓存文件列表和一致性"),
+            ("as env cache --clear", "清除所有缓存文件"),
+            ("as env cache --open", "在资源管理器中打开缓存目录"),
         ]),
-        ("init", "初始化 as 环境", &[
-            ("as init", "创建 tools/bin 并注册到用户 PATH"),
+        ("env source", "管理软件源定义", &[
+            ("as env source update", "从远程仓库下载最新源定义"),
+            ("as env source path", "显示源定义目录路径"),
+            ("as env source path --open", "在资源管理器中打开源目录"),
+            ("as env source dirs", "显示所有数据目录位置"),
+            ("as env source speedtest", "对所有软件的所有源测速"),
+            ("as env source speedtest 7zip", "仅对指定软件的源测速"),
+            ("as env source speedtest -S", "以软件为单位统计可用性"),
         ]),
-        ("self-update", "更新 as 自身", &[
-            ("as self-update", "下载最新版 as 并热替换"),
+        ("env downloader", "管理下载引擎后端", &[
+            ("as env downloader list", "列出所有下载后端及启用状态"),
+            ("as env downloader set curl on", "启用 curl 后端"),
+            ("as env downloader set curl off", "禁用 curl 后端"),
+            ("as env downloader config", "显示配置文件路径"),
+            ("as env downloader config --open", "在资源管理器中打开配置目录"),
+        ]),
+        ("self init", "初始化 as 环境", &[
+            ("as self init", "创建 tools/bin 并注册到用户 PATH"),
+        ]),
+        ("self update", "更新 as 自身", &[
+            ("as self update", "下载最新版 as 并热替换"),
         ]),
         ("tool", "管理自研工具", &[
             ("as tool list", "列出已安装的自研工具"),
             ("as tool remove ls", "移除自研工具 ls"),
-        ]),
-        ("downloader", "管理下载引擎后端", &[
-            ("as downloader list", "列出所有下载后端及启用状态"),
-            ("as downloader set curl on", "启用 curl 后端"),
-            ("as downloader set curl off", "禁用 curl 后端"),
-            ("as downloader config", "显示配置文件路径"),
-            ("as downloader config --open", "在资源管理器中打开配置目录"),
         ]),
     ];
 
@@ -161,15 +238,29 @@ pub fn print_clap_error(e: clap::Error) {
     use clap::error::ErrorKind;
     let info = e.to_string();
 
-    // Extract error detail: merge all lines after "error: " (multi-line support)
-    let lines: Vec<&str> = info.lines().collect();
+    // 剥离 ANSI 后再提取建议（clap 输出的 tip 带颜色码）
+    let plain_info = color::strip_ansi(&info);
+    let tip = plain_info.lines()
+        .find(|l| l.contains("tip:") || l.contains("did you mean"))
+        .map(|l| l.trim())
+        .unwrap_or("");
+
+    // 提取用法行
+    let usage_line = plain_info
+        .lines()
+        .find(|l| l.starts_with("Usage:"))
+        .and_then(|u| u.strip_prefix("Usage:"))
+        .unwrap_or("");
+
+    // 提取错误详情（使用纯文本，避免 ANSI 干扰）
+    let lines: Vec<&str> = plain_info.lines().collect();
     let error_idx = lines.iter().position(|l| l.starts_with("error: "));
     let detail = error_idx
         .map(|i| {
             let first = lines[i].strip_prefix("error: ").unwrap_or("");
             let rest: Vec<&str> = lines[i + 1..]
                 .iter()
-                .take_while(|l| !l.is_empty() && !l.starts_with("Usage:") && !l.starts_with("For more"))
+                .take_while(|l| !l.is_empty() && !l.starts_with("Usage:") && !l.starts_with("For more") && !l.contains("tip:"))
                 .map(|s| s.trim())
                 .collect();
             let mut parts = vec![first.to_string()];
@@ -178,7 +269,7 @@ pub fn print_clap_error(e: clap::Error) {
         })
         .unwrap_or_default();
 
-    // Extract the first quoted string from the detail (e.g. '-b', '--flag', '<ARG>')
+    // 提取第一个引号内容
     let quoted = detail
         .find('\'')
         .and_then(|s| detail[s + 1..].find('\'').map(|e| &detail[s + 1..s + 1 + e]))
@@ -207,8 +298,12 @@ pub fn print_clap_error(e: clap::Error) {
                 .filter(|s| !s.is_empty())
             {
                 format!("缺少必需参数: {}", missing)
-            } else {
+            } else if detail.contains("requires a subcommand") {
+                "缺少子命令，请查看上方用法".to_string()
+            } else if detail.is_empty() {
                 "缺少必需参数".to_string()
+            } else {
+                detail
             }
         }
         ErrorKind::InvalidValue => {
@@ -245,13 +340,10 @@ pub fn print_clap_error(e: clap::Error) {
         _ => detail,
     };
 
-    let usage_line = info
-        .lines()
-        .find(|l| l.starts_with("Usage:"))
-        .and_then(|u| u.strip_prefix("Usage:"))
-        .unwrap_or("");
-
     eprintln!("{} {}", color::red("错误:"), msg);
+    if !tip.is_empty() {
+        eprintln!("  {}", color::cyan(tip));
+    }
     if !usage_line.is_empty() {
         eprintln!("{} {}", color::bold_yellow("用法:"), usage_line);
     }

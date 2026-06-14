@@ -282,22 +282,10 @@ impl ProgressCtx {
         Self { bar, col1: col1.to_string(), tlabel: std::cell::Cell::new(tlabel) }
     }
     /// 更新状态列（如 "下载中" / "✓ 完成"），自动补齐对齐 + ANSI 颜色。
-    /// 如果进度条有速度和耗时，会自动追加着色后的速度显示。
+    /// 速度信息通过模板的 {bytes_per_sec} 展示在进度条后方，不从 msg 加。
     pub fn set_status(&self, status: &str) {
-        let speed_part = if self.bar.position() > 0 {
-            let dur = self.bar.elapsed();
-            let secs = dur.as_secs_f64().max(0.01);
-            let bps = (self.bar.position() as f64 / secs) as u64;
-            if bps > 0 {
-                format!(" {}", colored_speed(bps))
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
         let base = build_msg(&self.col1, self.tlabel.get(), status);
-        self.bar.set_message(format!("{}{}", base, speed_part));
+        self.bar.set_message(base);
     }
     /// 更新线程标签（如 "多线程" → "单线程"），再调 set_status 即可刷新显示。
     pub fn set_thread_label(&self, label: &'static str) {
@@ -323,30 +311,6 @@ fn colored_status(s: &str) -> String {
         _ if trimmed.starts_with('✓') => format!("{}{}{}", C_GREEN, padded, C_RESET),
         _ if trimmed.starts_with('✗') => format!("{}{}{}", C_RED, padded, C_RESET),
         _ => padded,
-    }
-}
-
-/// 对速度值根据区间着色：慢→红，中→黄，快→绿。
-fn colored_speed(bps: u64) -> String {
-    let unit = format_speed(bps);
-    let color = if bps < 100 * 1024 {
-        C_RED
-    } else if bps < 1024 * 1024 {
-        C_YELLOW
-    } else {
-        C_GREEN
-    };
-    format!("{}{}{}", color, unit, C_RESET)
-}
-
-/// 将 bytes/s 格式化为可读字符串（如 "512.0 KiB/s"）。
-fn format_speed(bps: u64) -> String {
-    if bps >= 1024 * 1024 {
-        format!("{:.1} MiB/s", bps as f64 / (1024.0 * 1024.0))
-    } else if bps >= 1024 {
-        format!("{:.1} KiB/s", bps as f64 / 1024.0)
-    } else {
-        format!("{bps} B/s")
     }
 }
 
@@ -421,7 +385,7 @@ pub fn download_with_fallback(
 
     // ── 进度条模板 ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{msg} [{bar:18.green/white}] {bytes:.green}/{total_bytes:.green} (+{elapsed_precise:.cyan} / -{eta:.yellow})")
+        .template("{msg} [{bar:18.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, +{elapsed_precise:.cyan} / -{eta:.yellow})")
         .unwrap()
         .progress_chars("━━━");
     let untracked_style = indicatif::ProgressStyle::default_bar()

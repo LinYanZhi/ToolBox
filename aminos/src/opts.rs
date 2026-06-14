@@ -11,16 +11,19 @@ pub struct InstallOpts {
     pub renew: bool,
     /// 仅下载，不安装
     pub download_only: bool,
+    /// 安装类型：Some("portable") 或 Some("installer")，None 为交互选择
+    pub inst_type: Option<String>,
 }
 
 impl InstallOpts {
-    pub fn new(names: Vec<String>, version: Option<String>, gui: bool, renew: bool, download_only: bool) -> Self {
+    pub fn new(names: Vec<String>, version: Option<String>, gui: bool, renew: bool, download_only: bool, inst_type: Option<String>) -> Self {
         Self {
             names,
             version: version.unwrap_or_default(),
             gui,
             renew,
             download_only,
+            inst_type,
         }
     }
 }
@@ -46,6 +49,9 @@ pub struct ListOpts {
     pub group: bool,
     /// 显示所有分类概览
     pub categories: bool,
+    /// 查看软件详细信息（替换原 as info 命令）
+    #[allow(dead_code)]
+    pub info: Option<String>,
 }
 
 impl ListOpts {
@@ -60,6 +66,7 @@ impl ListOpts {
         no_download: bool,
         group: bool,
         categories: bool,
+        info: Option<String>,
     ) -> Self {
         Self {
             filter,
@@ -71,6 +78,7 @@ impl ListOpts {
             no_download,
             group,
             categories,
+            info,
         }
     }
 }

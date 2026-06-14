@@ -1,0 +1,237 @@
+===============================================================================
+  as — 轻量级 Windows 软件包管理器 — 命令规范文档
+===============================================================================
+
+一、总览
+-------------------------------------------------------------------------------
+  as                             查看帮助（或 as -h）
+  as -e, --example               显示所有命令的示例用法
+  as -V, --version               显示版本信息
+  as -h, --help                  显示帮助信息
+
+
+二、命令列表（按语义分类）
+===============================================================================
+
+【软件管理】
+-------------------------------------------------------------------------------
+
+  as install <名称...> [选项]     安装指定软件
+
+    参数:
+      <名称...>               软件名称（可同时指定多个，空格分隔）
+
+    选项:
+      -v, --version <版本>    指定版本号
+      -g, --gui               使用图形界面安装（不静默）
+      -r, --renew             强制重新下载
+      -d, --download-only     仅下载，不安装
+      --type <类型>           安装类型：portable（便携版）| installer（安装版）
+
+
+  as list [选项]                 列出可用软件及安装状态
+
+    选项:
+      -f, --filter <分类>     按分类过滤（as list --categories 查看可用分类）
+      -i, --installed         仅显示已安装
+      -m, --not-installed     仅显示未安装
+      -s, --search <关键字>   搜索软件名、别名或描述
+      -d, --downloaded        仅显示已下载
+      --downloading           仅显示下载中
+      --no-download           仅显示未下载
+      -g, --group             按分类分组显示
+      --categories            显示所有分类概览
+
+    注意:
+      --installed 与 --not-installed 互斥
+      --downloaded / --downloading / --no-download 三者互斥
+
+
+  as info <名称> [选项]          查看软件详细信息
+
+    参数:
+      <名称>                  软件名称
+
+    选项:
+      -u, --urls              显示所有下载地址
+
+
+  as uninstall <名称...> [选项]  卸载指定软件
+
+    参数:
+      <名称...>               软件名称（可同时指定多个，空格分隔）
+
+    选项:
+      -g, --gui               使用图形界面卸载
+      -f, --force             强制删除（跳过卸载器）
+
+
+  as cache [选项]                查看已下载的缓存文件
+
+    选项:
+      -c, --clear             清除所有缓存文件
+      -o, --open              在资源管理器中打开缓存目录
+
+    注意:
+      --clear 与 --open 互斥
+
+
+  as upgrade [名称...] [选项]    升级所有已安装的软件
+
+    参数:
+      [名称...]               可选：仅升级指定软件（不指定则全部升级）
+
+    选项:
+      -c, --check             仅检查更新，不下载不安装
+      --renew                 强制重新下载（即使版本相同）
+
+    注意:
+      --check 与 --renew 互斥
+
+
+【环境与自身】
+-------------------------------------------------------------------------------
+
+  as init                        初始化 as 环境（创建 tools/bin 并注册到 PATH）
+
+
+  as self-update                 更新 as 自身到最新版本
+
+
+【源管理】
+-------------------------------------------------------------------------------
+
+  as source [子命令]              管理软件源定义
+
+    子命令:
+      as source update          从远程仓库下载最新源定义
+
+      as source path [选项]     显示当前源目录路径
+        选项:
+          -o, --open            在资源管理器中打开
+
+      as source dirs [选项]     显示所有数据目录位置
+        选项:
+          -o, --open            在资源管理器中打开数据目录
+
+      as source speedtest [<名称...>] [选项]
+                                测速所有下载源
+        参数:
+          [<名称...>]           可选：仅测速指定软件
+        选项:
+          -S, --software        以软件为单位统计（任一源可用即为通）
+
+
+【工具管理】
+-------------------------------------------------------------------------------
+
+  as tool [子命令]                管理自研工具（已安装的 as 工具集）
+
+    子命令:
+      as tool list              列出已安装的自研工具
+      as tool remove <名称>     移除一个自研工具（同 as uninstall）
+        参数:
+          <名称>                工具名称（如 ls、aria2c、uv）
+
+
+【下载引擎】
+-------------------------------------------------------------------------------
+
+  as downloader [子命令]          管理下载引擎后端
+
+    子命令:
+      as downloader list         列出所有下载后端及其启用状态
+
+      as downloader set <名称> <状态>
+                                启用或禁用一个后端
+        参数:
+          <名称>                后端名称（如 curl、RustRange、Aria2c）
+          <状态>                on（启用）或 off（禁用）
+
+      as downloader config [选项]
+                                显示或打开配置文件
+        选项:
+          -o, --open            在资源管理器中打开配置目录
+
+
+三、分类一览
+===============================================================================
+  可通过 as list --categories 查看最新分类定义。
+
+  当前软件分类（参考 aminos-source/*.json）:
+    工具       开发工具     办公软件     浏览器
+    社交通讯   媒体播放     图像处理     安全防护
+    远程控制   系统工具     文件管理     网络工具
+    游戏       编程语言     数据库       …
+
+
+四、参数使用规则
+===============================================================================
+  1. 参数顺序：
+     - 位置参数（命令名、软件名等）放在选项之前
+     - 选项可放在任意位置
+
+  2. 多个值：
+     - 多数命令支持同时指定多个软件名，空格分隔
+     - 如：as install 7zip vscode python git
+
+  3. 短选项组合：
+     - 不支持组合短选项（如 -rf 不可用，需写 -r -f）
+
+  4. 常见互斥关系：
+     install:  无
+     list:     --installed / --not-installed 互斥
+               --downloaded / --downloading / --no-download 三者互斥
+     cache:    --clear / --open 互斥
+     upgrade:  --check / --renew 互斥
+
+
+五、示例速查
+===============================================================================
+
+  as list
+  as list -g
+  as list --categories
+
+  as install 7zip
+  as install vscode python git
+  as install 7zip -v 1.0.0
+  as install 7zip --gui
+  as install 7zip --download-only
+  as install 7zip --type portable
+
+  as info 7zip
+  as info 7zip --urls
+
+  as uninstall 7zip
+  as uninstall 7zip --gui
+  as uninstall 7zip --force
+
+  as cache
+  as cache --clear
+  as cache --open
+
+  as upgrade
+  as upgrade 7zip
+  as upgrade --check
+  as upgrade --renew
+
+  as init
+  as self-update
+
+  as source update
+  as source path
+  as source path --open
+  as source dirs
+  as source speedtest
+  as source speedtest 7zip
+  as source speedtest -S
+
+  as tool list
+  as tool remove ls
+
+  as downloader list
+  as downloader set curl on
+  as downloader set curl off
+  as downloader config
+  as downloader config --open
