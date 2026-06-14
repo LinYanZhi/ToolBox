@@ -5,6 +5,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
+use crate::opts;
 use crate::paths;
 use crate::pe_version;
 use crate::registry;
@@ -71,19 +72,13 @@ fn label_of_type(itype: &str) -> String {
     }
 }
 
-pub fn install_software(
-    name: &str,
-    version: &str,
-    gui: bool,
-    renew: bool,
-    download_only: bool,
-) -> anyhow::Result<()> {
+pub fn install_software(name: &str, opts: &opts::InstallOpts) -> anyhow::Result<()> {
     // 1. Read software definition
     let sd = software::read_software_def(name)?;
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
     // 2. Resolve version — 如果未指定，检查是否有多种安装类型可供选择
-    let ver = if version.is_empty() {
+    let ver = if opts.version.is_empty() {
         // 按安装类型分组版本
         let mut by_type: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
         for (vk, vi) in &sd.versions {
@@ -133,7 +128,7 @@ pub fn install_software(
             sd.default_version.clone()
         }
     } else {
-        version.to_string()
+        opts.version.clone()
     };
 
     let vi = match sd.versions.get(&ver) {
@@ -173,11 +168,11 @@ pub fn install_software(
 
     // ── 自研工具（kind="self"）专用安装路径 ──
     if sd.kind == "self" {
-        return install_self_tool(name, &sd, display, &ver, vi, renew, download_only);
+        return install_self_tool(name, &sd, display, &ver, vi, opts);
     }
 
     // 3. Check already installed (skip if download_only)
-    if !download_only {
+    if !opts.download_only {
         if let Some(ref detection) = vi.detection {
             if let Some(result) = registry::detect_installed(detection) {
                 let installed_ver = result.get("DisplayVersion").map(|s| s.as_str()).unwrap_or(&ver);
@@ -189,15 +184,15 @@ pub fn install_software(
     }
 
     // 4. Download installer
-    let installer_path = get_installer_path(name, &ver, &vi.urls, renew)?;
-    if download_only {
+    let installer_path = get_installer_path(name, &ver, &vi.urls, opts.renew)?;
+    if opts.download_only {
         eprintln!("✓ {} {} 下载完成", display, ver);
         return Ok(());
     }
 
     // 5. Install
     eprintln!("\n▶ 安装 {} {} ...", display, ver);
-    let (installed, portable_install_path) = run_installer(name, &ver, &installer_path, vi, gui)?;
+    let (installed, portable_install_path) = run_installer(name, &ver, &installer_path, vi, opts.gui)?;
     if !installed {
         bail!("安装未完成（用户取消或安装失败）");
     }
@@ -250,12 +245,11 @@ fn install_self_tool(
     display: &str,
     ver: &str,
     vi: &VersionInfo,
-    renew: bool,
-    download_only: bool,
+    opts: &opts::InstallOpts,
 ) -> anyhow::Result<()> {
     // 1. Download
-    let installer_path = get_installer_path(name, ver, &vi.urls, renew)?;
-    if download_only {
+    let installer_path = get_installer_path(name, ver, &vi.urls, opts.renew)?;
+    if opts.download_only {
         eprintln!("✓ {} {} 下载完成", display, ver);
         return Ok(());
     }

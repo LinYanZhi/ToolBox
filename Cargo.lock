@@ -77,7 +77,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sys",
- "winreg",
 ]
 
 [[package]]

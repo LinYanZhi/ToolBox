@@ -13,4 +13,3 @@ color = { path = "../color" }
 config = { path = "../config" }
 net = { path = "../net" }
 sys = { path = "../sys" }
-winreg = "0.55"

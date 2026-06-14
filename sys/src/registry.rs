@@ -20,44 +20,43 @@ pub struct Detection {
 ///
 /// 返回匹配到的注册表键值对。
 pub fn detect_installed(detection: &Detection) -> Option<HashMap<String, String>> {
-    let dn_lower = detection.display_name.as_ref()?.to_lowercase();
-    let publisher_lower = detection.publisher.as_ref().map(|p| p.to_lowercase());
+    let dn_lower = detection.display_name.as_ref()?;
+    let publisher = detection.publisher.as_deref();
+    detect_installed_by(dn_lower, publisher)
+}
+
+/// 使用原始字符串参数检测已安装软件（无需构造 Detection）。
+///
+/// 当调用方有自己的 detection 类型（如带 serde）时，可直接使用此函数，
+/// 避免重复实现注册表遍历逻辑。
+pub fn detect_installed_by(display_name: &str, publisher: Option<&str>) -> Option<HashMap<String, String>> {
+    let dn_lower = display_name.to_lowercase();
+    let publisher_lower = publisher.map(|p| p.to_lowercase());
 
     for check_publisher in [true, false] {
         if check_publisher && publisher_lower.is_none() {
             continue;
         }
-        let pred = |name: &str, publisher: Option<&str>| {
+        let pred = |name: &str, pub_: Option<&str>| {
             if !name.to_lowercase().contains(&dn_lower) {
                 return false;
             }
             if check_publisher {
                 if let Some(ref pub_lower) = publisher_lower {
-                    return publisher.map_or(false, |p| p.to_lowercase().contains(pub_lower));
+                    return pub_.map_or(false, |p| p.to_lowercase().contains(pub_lower));
                 }
             }
             true
         };
-        if let Some(r) = try_match(
-            &pred,
-            RegKey::predef(HKEY_LOCAL_MACHINE),
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        ) {
-            return Some(r);
-        }
-        if let Some(r) = try_match(
-            &pred,
-            RegKey::predef(HKEY_LOCAL_MACHINE),
-            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-        ) {
-            return Some(r);
-        }
-        if let Some(r) = try_match(
-            &pred,
-            RegKey::predef(HKEY_CURRENT_USER),
-            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
-        ) {
-            return Some(r);
+        let hives: &[(HKEY, &str)] = &[
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        ];
+        for &(root, path) in hives {
+            if let Some(r) = try_match(&pred, RegKey::predef(root), path) {
+                return Some(r);
+            }
         }
     }
     None
