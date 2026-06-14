@@ -274,16 +274,34 @@ fn pad_display(s: &str, width: usize) -> String {
 pub struct ProgressCtx {
     pub bar: indicatif::ProgressBar,
     col1: String,
-    tlabel: String,
+    tlabel: std::cell::Cell<&'static str>,
 }
 
 impl ProgressCtx {
-    pub fn new(bar: indicatif::ProgressBar, col1: &str, tlabel: &str) -> Self {
-        Self { bar, col1: col1.to_string(), tlabel: tlabel.to_string() }
+    pub fn new(bar: indicatif::ProgressBar, col1: &str, tlabel: &'static str) -> Self {
+        Self { bar, col1: col1.to_string(), tlabel: std::cell::Cell::new(tlabel) }
     }
     /// 更新状态列（如 "下载中" / "✓ 完成"），自动补齐对齐 + ANSI 颜色。
+    /// 如果进度条有速度和耗时，会自动追加着色后的速度显示。
     pub fn set_status(&self, status: &str) {
-        self.bar.set_message(build_msg(&self.col1, &self.tlabel, status));
+        let speed_part = if self.bar.position() > 0 {
+            let dur = self.bar.elapsed();
+            let secs = dur.as_secs_f64().max(0.01);
+            let bps = (self.bar.position() as f64 / secs) as u64;
+            if bps > 0 {
+                format!(" {}", colored_speed(bps))
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        let base = build_msg(&self.col1, self.tlabel.get(), status);
+        self.bar.set_message(format!("{}{}", base, speed_part));
+    }
+    /// 更新线程标签（如 "多线程" → "单线程"），再调 set_status 即可刷新显示。
+    pub fn set_thread_label(&self, label: &'static str) {
+        self.tlabel.set(label);
     }
 }
 
@@ -305,6 +323,30 @@ fn colored_status(s: &str) -> String {
         _ if trimmed.starts_with('✓') => format!("{}{}{}", C_GREEN, padded, C_RESET),
         _ if trimmed.starts_with('✗') => format!("{}{}{}", C_RED, padded, C_RESET),
         _ => padded,
+    }
+}
+
+/// 对速度值根据区间着色：慢→红，中→黄，快→绿。
+fn colored_speed(bps: u64) -> String {
+    let unit = format_speed(bps);
+    let color = if bps < 100 * 1024 {
+        C_RED
+    } else if bps < 1024 * 1024 {
+        C_YELLOW
+    } else {
+        C_GREEN
+    };
+    format!("{}{}{}", color, unit, C_RESET)
+}
+
+/// 将 bytes/s 格式化为可读字符串（如 "512.0 KiB/s"）。
+fn format_speed(bps: u64) -> String {
+    if bps >= 1024 * 1024 {
+        format!("{:.1} MiB/s", bps as f64 / (1024.0 * 1024.0))
+    } else if bps >= 1024 {
+        format!("{:.1} KiB/s", bps as f64 / 1024.0)
+    } else {
+        format!("{bps} B/s")
     }
 }
 
@@ -362,14 +404,14 @@ pub fn download_with_fallback(
         if !file_cfg.backends.is_empty() && config_file_exists() {
             let names: Vec<&str> = file_cfg.backends.iter().map(|b| b.id()).collect();
             let backends: Vec<Box<dyn DownloadBackend>> = file_cfg.backends.into_iter().collect();
-            eprintln!("    ⚡ {} 个地址 × {} 个后端（配置: {}）",
-                urls.len(), backends.len(), names.join(", "));
+            eprintln!("    {}>>{} {} 个地址 × {} 个后端（配置: {}）",
+                C_GREEN, C_RESET, urls.len(), backends.len(), names.join(", "));
             (backends, file_cfg.max_concurrent, file_cfg.verify)
         } else {
             // 配置文件不存在 → 从旧 config 参数转换
             let backends = backends_from_config(config);
-            eprintln!("    ⚡ {} 个地址 × {} 个后端（默认）",
-                urls.len(), backends.len());
+            eprintln!("    {}>>{} {} 个地址 × {} 个后端（默认）",
+                C_GREEN, C_RESET, urls.len(), backends.len());
             (backends, MAX_CONCURRENT_COMBOS, config.verify)
         }
     };
@@ -379,7 +421,7 @@ pub fn download_with_fallback(
 
     // ── 进度条模板 ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{msg:.bold} [{bar:18.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, eta {eta:.yellow})")
+        .template("{msg} [{bar:18.green/white}] {bytes:.green}/{total_bytes:.green} (+{elapsed_precise:.cyan} / -{eta:.yellow})")
         .unwrap()
         .progress_chars("━━━");
     let untracked_style = indicatif::ProgressStyle::default_bar()
@@ -389,32 +431,56 @@ pub fn download_with_fallback(
     let mut last_error: Option<String> = None;
     let backends = Arc::new(backends);
 
-    // ── 逐后端顺序尝试 ──
-    for strat_idx in 0..backends.len() {
-        let backend = &backends[strat_idx];
+    // ── 筛选可用后端 ──
+    let available: Vec<(usize, &Box<dyn DownloadBackend>)> = (0..backends.len())
+        .filter_map(|i| {
+            if backends[i].health_check() { Some((i, &backends[i])) } else { None }
+        })
+        .collect();
+
+    if available.is_empty() {
+        bail!("没有可用的下载后端");
+    }
+
+    eprintln!();
+
+    // ── 预分配所有进度条（固定行位置，永不移动） ──
+    // bar_grid[abi][ui] = 第 abi 个可用后端的第 ui 个 URL 的进度条
+    let mut bar_grid: Vec<Vec<ProgressCtx>> = Vec::with_capacity(available.len());
+    for (_, be) in &available {
+        let t = be.tracked();
+        let mut row = Vec::with_capacity(urls.len());
+        for _ in 0..urls.len() {
+            let bar = progress().add(indicatif::ProgressBar::new(1));
+            if t { bar.set_style(tracked_style.clone()); }
+            else { bar.set_style(untracked_style.clone()); }
+            let ctx = ProgressCtx::new(bar, be.display_name(), be.thread_label());
+            ctx.set_status("等待中");
+            row.push(ctx);
+        }
+        bar_grid.push(row);
+    }
+
+    // ── 逐后端顺序尝试（每行位置固定） ──
+    for abi in 0..available.len() {
+        let (orig_idx, _be) = &available[abi];
+        let backend = &backends[*orig_idx];
         let sname = backend.display_name();
         let tracked = backend.tracked();
+
+        // 激活当前行
+        let bars: Vec<ProgressCtx> = bar_grid[abi].iter().map(|b| b.clone()).collect();
+        for b in &bars { b.set_status("运行中"); }
+
         let someone_won = Arc::new(AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::channel::<(String, u64, PathBuf)>();
         let pool = Arc::new(PermitPool::new(max_concurrent));
         let mut cancel_handles: Vec<Cancel> = Vec::with_capacity(urls.len());
-
-        // ── 该后端下每个 URL 创建一个进度条 ──
-        let bars: Vec<ProgressCtx> = urls.iter().map(|_url| {
-            let bar = progress().add(indicatif::ProgressBar::new(1));
-            if tracked {
-                bar.set_style(tracked_style.clone());
-            } else {
-                bar.set_style(untracked_style.clone());
-            }
-            let ctx = ProgressCtx::new(bar, sname, backend.thread_label());
-            ctx.set_status("运行中");
-            ctx
-        }).collect();
+        let completed_files: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
 
         // ── 启动每个 URL 的下载线程（PermitPool 限流） ──
         for (ui, url) in urls.iter().enumerate() {
-            let tmp_path = target_path.with_extension(format!("s{}_{}.tmp", strat_idx, ui));
+            let tmp_path = target_path.with_extension(format!("s{}_{}.tmp", *orig_idx, ui));
             let cancel = Cancel::new();
             cancel_handles.push(cancel.clone());
 
@@ -422,18 +488,27 @@ pub fn download_with_fallback(
             let bar = bars[ui].clone();
             let tx = tx.clone();
             let someone_won = Arc::clone(&someone_won);
+            let completed_files = Arc::clone(&completed_files);
             let pool = Arc::clone(&pool);
             let sname = sname.to_string();
-            let tlabel_s = backend.thread_label().to_string();
             let backends_arc = Arc::clone(&backends);
-            let si = strat_idx;
+            let si = *orig_idx;
+            let tmp_path_for_completed = tmp_path.clone();
 
             std::thread::spawn(move || {
                 loop {
                     if someone_won.load(Ordering::Relaxed) {
-                        ProgressCtx::new(bar.bar.clone(), &sname, &tlabel_s)
+                        if tmp_path_for_completed.is_file() {
+                            let file_size = std::fs::metadata(&tmp_path_for_completed).map(|m| m.len()).unwrap_or(0);
+                            if file_size > 0 {
+                                if let Ok(mut cf) = completed_files.lock() {
+                                    cf.push(tmp_path_for_completed.clone());
+                                }
+                            }
+                        }
+                        ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
                             .set_status("✗ 已取消");
-                        let _ = std::fs::remove_file(&tmp_path);
+                        let _ = std::fs::remove_file(&tmp_path_for_completed);
                         return;
                     }
                     if let Some(_permit) = pool.try_acquire(Duration::from_millis(500)) {
@@ -441,9 +516,9 @@ pub fn download_with_fallback(
                     }
                 }
                 if someone_won.load(Ordering::Relaxed) {
-                    ProgressCtx::new(bar.bar.clone(), &sname, &tlabel_s)
+                    ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
                         .set_status("✗ 已取消");
-                    let _ = std::fs::remove_file(&tmp_path);
+                    let _ = std::fs::remove_file(&tmp_path_for_completed);
                     return;
                 }
 
@@ -453,13 +528,20 @@ pub fn download_with_fallback(
                 match result {
                     Ok(_) => {
                         if someone_won.swap(true, Ordering::Relaxed) {
-                            ProgressCtx::new(bar.bar.clone(), &sname, &tlabel_s)
+                            if tmp_path.is_file() {
+                                let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
+                                if file_size > 0 {
+                                    if let Ok(mut cf) = completed_files.lock() {
+                                        cf.push(tmp_path.clone());
+                                    }
+                                }
+                            }
+                            ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
                                 .set_status("✗ 已取消");
-                            let _ = std::fs::remove_file(&tmp_path);
                             return;
                         }
                         let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
-                        ProgressCtx::new(bar.bar.clone(), &sname, &tlabel_s)
+                        ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
                             .set_status("✓ 完成");
                         let _ = tx.send((url.clone(), file_size, tmp_path.clone()));
                     }
@@ -470,10 +552,18 @@ pub fn download_with_fallback(
                             format!("{}…", truncated)
                         } else { emsg };
                         if someone_won.load(Ordering::Relaxed) {
-                            ProgressCtx::new(bar.bar.clone(), &sname, &tlabel_s)
+                            if tmp_path.is_file() {
+                                let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
+                                if file_size > 0 {
+                                    if let Ok(mut cf) = completed_files.lock() {
+                                        cf.push(tmp_path.clone());
+                                    }
+                                }
+                            }
+                            ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
                                 .set_status("✗ 已取消");
                         } else {
-                            ProgressCtx::new(bar.bar.clone(), &sname, &tlabel_s)
+                            ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
                                 .set_status(&format!("✗ {}", short));
                         }
                         let _ = std::fs::remove_file(&tmp_path);
@@ -483,19 +573,46 @@ pub fn download_with_fallback(
         }
 
         // 监控循环：等待第一个成功，或全部失败
+        let round_start = std::time::Instant::now();
+        let grace_period = Duration::from_secs(12);
         let round_result = loop {
             match rx.recv_timeout(Duration::from_secs(2)) {
                 Ok((url, file_size, tmp_path)) => break Ok((url, file_size, tmp_path)),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // 刷新活动行的速度显示
+                    for b in &bars {
+                        let status = b.bar.message();
+                        if status.contains("运行中") || status.contains("下载中") || status.contains("连接中") {
+                            b.set_status("下载中");
+                        }
+                    }
                     if CTRL_C_PRESSED.load(Ordering::Relaxed) {
                         for c in &cancel_handles { c.cancel(); }
                         break Err(anyhow::anyhow!("用户取消 (Ctrl+C)"));
                     }
-                    if cancel_handles.iter().all(|c| c.is_cancelled() || c.last_progress_ms() == 0) {
+                    if round_start.elapsed() < grace_period { continue; }
+                    let all_idle = cancel_handles.iter().all(|c| c.is_cancelled() || c.last_progress_ms() == 0);
+                    if all_idle {
+                        let completed = completed_files.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(fp) = completed.first().filter(|p| p.is_file()) {
+                            let file_size = std::fs::metadata(fp).map(|m| m.len()).unwrap_or(0);
+                            if file_size > 0 {
+                                let path = fp.clone();
+                                break Ok((urls[0].clone(), file_size, path));
+                            }
+                        }
                         break Err(anyhow::anyhow!("{} 所有地址均失败", sname));
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    let completed = completed_files.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(fp) = completed.first().filter(|p| p.is_file()) {
+                        let file_size = std::fs::metadata(fp).map(|m| m.len()).unwrap_or(0);
+                        if file_size > 0 {
+                            let path = fp.clone();
+                            break Ok((urls[0].clone(), file_size, path));
+                        }
+                    }
                     break Err(anyhow::anyhow!("所有下载线程已退出"));
                 }
             }
@@ -505,22 +622,23 @@ pub fn download_with_fallback(
         for c in &cancel_handles { c.cancel(); }
         thread::sleep(Duration::from_millis(500));
 
-        // 最终化进度条
-        for (_, ctx) in bars.iter().enumerate() {
-            let msg = ctx.bar.message();
-            if msg.contains('✓') {
-                if tracked { ctx.bar.finish(); }
-            } else {
-                if msg.contains("运行中") || msg.contains("等待中") {
-                    ctx.bar.set_message(build_msg(&ctx.col1, &ctx.tlabel, "✗ 已取消"));
-                }
-                if tracked { ctx.bar.finish(); }
-            }
-        }
-
-        // 处理该后端的下载结果
+        // 处理结果（错误显示在对应行，不输出 eprintln! 破坏布局）
         match round_result {
             Ok((url, _file_size, tmp_path)) => {
+                // 标记当前行为成功
+                for b in &bars {
+                    if tracked { b.bar.finish(); }
+                }
+                // 标记后续后端的行（如果有）为已跳过
+                for later_abi in (abi + 1)..bar_grid.len() {
+                    for b in &bar_grid[later_abi] {
+                        let msg = b.bar.message();
+                        if !msg.contains('✓') && !msg.contains('✗') {
+                            b.set_status("✗ 已跳过");
+                            if tracked { b.bar.abandon(); }
+                        }
+                    }
+                }
                 let _ = std::fs::remove_file(target_path);
                 if std::fs::rename(&tmp_path, target_path).is_err() {
                     cleanup_strategy_temp(target_path);
@@ -534,10 +652,6 @@ pub fn download_with_fallback(
                 cleanup_strategy_temp(target_path);
                 let file_size = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
                 let elapsed = start.elapsed();
-                eprintln!("    ✓ 成功: {} ({}, {} KB/s)",
-                    sname, color::format_size(file_size),
-                    if elapsed.as_secs() > 0 { file_size / 1024 / elapsed.as_secs() as u64 } else { 0 }
-                );
                 return Ok(DownloadReport {
                     strategy_used: sname.to_string(),
                     total_bytes: file_size, elapsed, url,
@@ -545,9 +659,17 @@ pub fn download_with_fallback(
                 });
             }
             Err(e) => {
+                if CTRL_C_PRESSED.load(Ordering::Relaxed) {
+                    let _ = std::fs::remove_file(target_path);
+                    cleanup_strategy_temp(target_path);
+                    bail!("{}", e);
+                }
+                // 失败信息显示在当前行，不动固定布局
+                for b in &bars {
+                    if tracked { b.bar.abandon(); }
+                }
                 cleanup_strategy_temp(target_path);
                 last_error = Some(format!("{}", e));
-                eprintln!("    ⚠ {} 策略失败，切换到下一个策略...", sname);
             }
         }
     }
@@ -555,6 +677,9 @@ pub fn download_with_fallback(
     // 所有策略均失败
     let _ = std::fs::remove_file(target_path);
     cleanup_strategy_temp(target_path);
+    if CTRL_C_PRESSED.load(Ordering::Relaxed) {
+        bail!("用户取消 (Ctrl+C)");
+    }
     bail!("下载失败: {}", last_error.as_deref().unwrap_or("未知错误"));
 }
 
@@ -749,7 +874,7 @@ fn probe_alive_urls(urls: &[String]) -> Vec<String> {
     let total = urls.len();
     if total == 0 { return vec![]; }
 
-    eprintln!("    ⚡ 并行探测 {} 个地址（8s 封顶）", total);
+    eprintln!("    {}>>{} 并行探测 {} 个地址（8s 封顶）", C_GREEN, C_RESET, total);
 
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let probe_timeout = Duration::from_secs(8);

@@ -31,7 +31,7 @@ pub fn try_aria2c_download(
         .to_string();
     let parent = target_path.parent().unwrap_or(Path::new("."));
 
-    // ── HEAD 获取 Content-Length ──
+    // ── HEAD 获取 Content-Length（仅用于进度条初始长度） ──
     let total_size = probe_content_length(url);
     if let Some(ref ctx) = pb {
         if total_size > 0 {
@@ -40,15 +40,49 @@ pub fn try_aria2c_download(
         ctx.set_status("下载中");
     }
 
-    // ── 构建命令 ──
+    // ── 第一步：分片模式（多线程） ──
+    let split_args: &[&str] = &["-x", "16", "-s", "16", "-k", "1M"];
+    let result = run_aria2c(&aria2c, url, target_path, &parent, &filename, split_args, cancel, pb.clone());
+    if result.is_ok() {
+        return result;
+    }
+    // 如果被取消，直接返回错误，不重试
+    if cancel.is_cancelled() {
+        return result;
+    }
+
+    // ── 第二步：分片失败 → 不分片模式（单线程重试） ──
+    if let Some(ref ctx) = pb {
+        ctx.set_thread_label("单线程");
+        ctx.set_status("重试");
+    }
+    // 清理分片模式留下的残留文件
+    let _ = std::fs::remove_file(target_path);
+    // 也清理 aria2c 的 .downloading 控制文件
+    let ctrl_name = format!("{}.downloading", target_path.to_string_lossy());
+    let _ = std::fs::remove_file(&ctrl_name);
+
+    let nosplit_args: &[&str] = &["-x", "1", "-s", "1"];
+    run_aria2c(&aria2c, url, target_path, &parent, &filename, nosplit_args, cancel, pb)
+}
+
+/// 运行 aria2c 进程并等待完成。
+fn run_aria2c(
+    aria2c: &std::path::Path,
+    url: &str,
+    target_path: &Path,
+    parent: &Path,
+    filename: &str,
+    extra_args: &[&str],
+    cancel: &Cancel,
+    pb: Option<ProgressCtx>,
+) -> anyhow::Result<()> {
     let has_partial = Path::new(&format!("{}.downloading", target_path.to_string_lossy())).is_file();
     let target_exists = target_path.is_file();
 
     let mut cmd = Command::new(&aria2c);
+    cmd.args(extra_args);
     cmd.args([
-        "-x", "16",
-        "-s", "16",
-        "-k", "1M",
         "--retry-wait", "1",
         "--max-tries", "2",
         "--connect-timeout", "8",

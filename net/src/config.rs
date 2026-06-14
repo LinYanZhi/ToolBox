@@ -11,13 +11,22 @@ pub fn config_file_path() -> PathBuf {
 }
 
 /// 列出配置文件中的所有后端及其状态。
-/// 如果配置文件不存在，返回默认后端列表。
+/// 如果配置文件不存在，写入默认配置文件后返回默认列表。
 pub fn list_backend_states() -> Vec<(String, bool, Option<u8>)> {
     let path = config_file_path();
     if !path.is_file() {
+        // 没有配置文件 → 写入默认配置，方便用户自行修改
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let default_toml = TomlConfig::default();
+        if let Ok(content) = toml::to_string_pretty(&default_toml) {
+            let _ = std::fs::write(&path, &content);
+        }
+        eprintln!("    ℹ  已创建默认配置文件: {}", path.display());
         return vec![
-            ("RustRange".into(), true, Some(16)),
             ("Aria2c".into(), true, None),
+            ("RustRange".into(), true, Some(16)),
             ("Ureq".into(), true, None),
             ("UreqInsecure".into(), true, None),
             ("PowerShell".into(), true, None),
@@ -128,11 +137,20 @@ impl Default for DownloaderConfig {
 }
 
 impl DownloaderConfig {
-    /// 加载配置：优先从文件读取，文件不存在则使用默认配置。
+    /// 加载配置：优先从文件读取，文件不存在则写入默认配置后返回默认值。
     pub fn load() -> Self {
         let config_path = config_file_path();
 
         if !config_path.exists() {
+            // 写入默认配置文件，方便用户自行修改
+            if let Some(parent) = config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let default_toml = TomlConfig::default();
+            if let Ok(content) = toml::to_string_pretty(&default_toml) {
+                let _ = std::fs::write(&config_path, &content);
+            }
+            eprintln!("    ℹ  已创建默认配置文件: {}", config_path.display());
             return Self::default();
         }
 
@@ -144,9 +162,12 @@ impl DownloaderConfig {
             }
         };
 
-        match Self::from_toml(&content) {
-            Ok(cfg) => {
-                eprintln!("    ℹ 已加载配置文件: {}", config_path.display());
+        match toml::from_str::<TomlConfig>(&content) {
+            Ok(mut parsed) => {
+                // 自动补缺：检查是否有新的默认后端未在配置文件中
+                sync_strategies_if_needed(&config_path, &mut parsed);
+                let cfg = Self::from_toml_config(&parsed);
+                eprintln!("    {}::{} 已加载配置文件: {}", "\x1b[36m", "\x1b[0m", config_path.display());
                 cfg
             }
             Err(e) => {
@@ -156,12 +177,11 @@ impl DownloaderConfig {
         }
     }
 
-    /// 从 TOML 字符串解析配置。
-    fn from_toml(content: &str) -> anyhow::Result<Self> {
-        let parsed: TomlConfig = toml::from_str(content)?;
+    /// 从已解析的 TomlConfig 构建 DownloaderConfig。
+    fn from_toml_config(parsed: &TomlConfig) -> Self {
         let mut backends = Vec::new();
 
-        for entry in parsed.download.strategies {
+        for entry in &parsed.download.strategies {
             if !entry.enabled {
                 continue;
             }
@@ -179,6 +199,9 @@ impl DownloaderConfig {
                 "PowerShellInvoke" => backends.push(Box::new(PowerShellInvokeBackend)),
                 "BitsTransfer" => backends.push(Box::new(BitsBackend)),
                 "Curl" => backends.push(Box::new(CurlBackend)),
+                "RustSingle" => {
+                    // RustSingle 已合并到 RustRange，静默跳过
+                }
                 other => {
                     eprintln!("    ⚠ 配置文件包含未知后端: {}", other);
                 }
@@ -186,24 +209,26 @@ impl DownloaderConfig {
         }
 
         if backends.is_empty() {
-            anyhow::bail!("配置文件中没有启用的后端");
+            eprintln!("    ⚠ 配置文件中没有启用的后端，使用默认配置");
+            return Self::default();
         }
 
         backends.sort_by_key(|b| b.priority());
 
-        Ok(DownloaderConfig {
+        DownloaderConfig {
             max_concurrent: parsed.download.max_concurrent.unwrap_or(16).max(1).min(64),
             verify: parsed.download.verify.unwrap_or(true),
             resume: parsed.download.resume.unwrap_or(true),
             backends,
-        })
+        }
     }
+
 }
 
 fn default_backends() -> Vec<Box<dyn DownloadBackend>> {
     vec![
-        Box::new(RustRangeBackend::default()),
         Box::new(Aria2cBackend),
+        Box::new(RustRangeBackend::default()),
         Box::new(UreqBackend::normal()),
         Box::new(UreqBackend::insecure()),
         Box::new(PowerShellBackend),
@@ -228,17 +253,42 @@ impl Default for TomlConfig {
                 max_concurrent: Some(16),
                 verify: Some(true),
                 resume: Some(true),
-                strategies: vec![
-                    TomlStrategy { name: "RustRange".into(), enabled: true, threads: Some(16), resume: Some(true) },
-                    TomlStrategy { name: "Aria2c".into(), enabled: true, threads: None, resume: None },
-                    TomlStrategy { name: "Ureq".into(), enabled: true, threads: None, resume: None },
-                    TomlStrategy { name: "UreqInsecure".into(), enabled: true, threads: None, resume: None },
-                    TomlStrategy { name: "PowerShell".into(), enabled: true, threads: None, resume: None },
-                    TomlStrategy { name: "PowerShellInvoke".into(), enabled: true, threads: None, resume: None },
-                    TomlStrategy { name: "BitsTransfer".into(), enabled: true, threads: None, resume: None },
-                    TomlStrategy { name: "Curl".into(), enabled: true, threads: None, resume: None },
-                ],
+                strategies: default_strategies(),
             },
+        }
+    }
+}
+
+/// 默认的后端策略列表（代码维护的权威列表）。
+fn default_strategies() -> Vec<TomlStrategy> {
+    vec![
+        TomlStrategy { name: "Aria2c".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "RustRange".into(), enabled: true, threads: Some(16), resume: Some(true) },
+        TomlStrategy { name: "Ureq".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "UreqInsecure".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "PowerShell".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "PowerShellInvoke".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "BitsTransfer".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "Curl".into(), enabled: true, threads: None, resume: None },
+    ]
+}
+
+/// 检查现有策略列表是否缺失默认后端，如有则追加并写回文件。
+fn sync_strategies_if_needed(config_path: &std::path::Path, parsed: &mut TomlConfig) {
+    let existing_names: std::collections::HashSet<String> = parsed.download.strategies.iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let mut changed = false;
+    for def in default_strategies() {
+        if !existing_names.contains(&def.name) {
+            eprintln!("    ℹ  配置文件中缺少后端「{}」，已自动添加", def.name);
+            parsed.download.strategies.push(def);
+            changed = true;
+        }
+    }
+    if changed {
+        if let Ok(content) = toml::to_string_pretty(&parsed) {
+            let _ = std::fs::write(config_path, content);
         }
     }
 }

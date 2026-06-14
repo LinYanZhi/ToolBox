@@ -120,7 +120,7 @@ impl Default for RustRangeBackend {
 impl DownloadBackend for RustRangeBackend {
     fn id(&self) -> &'static str { "RustRange" }
     fn supported_platforms(&self) -> &[Platform] { &[Platform::Windows, Platform::Linux, Platform::Macos] }
-    fn priority(&self) -> u8 { 1 }
+    fn priority(&self) -> u8 { 2 }  // Aria2c(1) → RustRange(2) 原生多线程
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "多线程" }
     fn health_check(&self) -> bool { true } // 纯 Rust，始终可用
@@ -138,7 +138,7 @@ pub struct Aria2cBackend;
 impl DownloadBackend for Aria2cBackend {
     fn id(&self) -> &'static str { "aria2c" }
     fn supported_platforms(&self) -> &[Platform] { &[Platform::Windows, Platform::Linux, Platform::Macos] }
-    fn priority(&self) -> u8 { 2 }
+    fn priority(&self) -> u8 { 1 }  // 外部二进制，需要安装；安装后最快
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "多线程" }
     fn health_check(&self) -> bool {

@@ -39,11 +39,13 @@ pub fn parallel_download(
     let agent_cfg = AgentConfig::normal(15, 15);
 
     // Step 1: HEAD 获取文件大小
-    let head_resp = agent_cfg
-        .build_agent()?
-        .head(url)
-        .call()
-        .context("HEAD 请求失败")?;
+    let head_resp = match agent_cfg.build_agent()?.head(url).call() {
+        Ok(r) => r,
+        Err(_e) => {
+            // HEAD 失败（服务器不支持的 HEAD），降级为普通 GET 下载
+            return no_range_download(url, target_path, cancel, pb);
+        }
+    };
 
     let total_size: u64 = head_resp
         .header("Content-Length")
@@ -261,6 +263,78 @@ pub fn parallel_download(
     let _ = fs::remove_dir_all(&temp_dir);
     if !external_pb { pb.bar.finish_with_message("下载完成"); } else { pb.set_status("✓ 完成"); }
 
+    Ok(())
+}
+
+/// 当 HEAD 或 Range 均不可用时，降级为普通 GET 单线程下载。
+/// 不需要预先知道文件大小，不使用 Range 分片。
+pub(crate) fn no_range_download(
+    url: &str,
+    target_path: &Path,
+    cancel: &crate::download::Cancel,
+    pb: Option<crate::download::ProgressCtx>,
+) -> anyhow::Result<()> {
+    if cancel.is_cancelled() {
+        return Err(anyhow::anyhow!("已取消"));
+    }
+
+    let agent_cfg = AgentConfig::normal(30, 600);
+    let agent = agent_cfg.build_agent()?;
+    let mut req = agent.get(url);
+    req = agent_cfg.apply_headers(req, url);
+    let resp = req.call().context("GET 下载失败")?;
+
+    if crate::agent::is_html_response(&resp) {
+        anyhow::bail!("服务器返回了 HTML 页面（可能反盗链）");
+    }
+
+    let parent = target_path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+
+    // 尝试从响应头获取文件大小
+    let total_size: u64 = resp.header("Content-Length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    if let Some(ref ctx) = pb {
+        if total_size > 0 {
+            ctx.bar.set_length(total_size);
+        }
+        ctx.set_status("下载中");
+    }
+
+    let mut reader = resp.into_reader();
+    let mut file = if cfg!(windows) {
+        // Windows 上用 create + truncate
+        let f = fs::File::create(target_path)?;
+        f.set_len(0).ok();
+        f
+    } else {
+        fs::File::create(target_path)?
+    };
+    let mut buf = [0u8; 65536];
+
+    loop {
+        if cancel.is_cancelled() {
+            if let Some(ref ctx) = pb {
+                ctx.set_status("✗ 已取消");
+            }
+            return Err(anyhow::anyhow!("已取消"));
+        }
+        let n = reader.read(&mut buf)?;
+        if n == 0 { break; }
+        file.write_all(&buf[..n])?;
+        if let Some(ref ctx) = pb {
+            ctx.bar.inc(n as u64);
+            if total_size > 0 {
+                ctx.bar.set_length(total_size);
+            }
+        }
+    }
+
+    if let Some(ref ctx) = pb {
+        ctx.set_status("✓ 完成");
+    }
     Ok(())
 }
 
