@@ -1,7 +1,22 @@
 use std::fmt::Debug;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::download::{Cancel, ProgressCtx};
+
+/// 工具二进制目录（由 CLI 在启动时设置）。
+static TOOLS_BIN_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// 设置工具二进制搜索目录（如 `%LOCALAPPDATA%/aminos/tools/bin`）。
+/// 调用方（as CLI）应在下载器命令之前调用。
+pub fn set_tools_bin_dir(dir: PathBuf) {
+    let _ = TOOLS_BIN_DIR.set(dir);
+}
+
+/// 获取工具二进制搜索目录。
+pub fn get_tools_bin_dir() -> Option<&'static PathBuf> {
+    TOOLS_BIN_DIR.get()
+}
 
 /// 操作系统平台。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -126,7 +141,12 @@ impl DownloadBackend for Aria2cBackend {
     fn priority(&self) -> u8 { 2 }
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "多线程" }
-    fn health_check(&self) -> bool { which_available("aria2c") }
+    fn health_check(&self) -> bool {
+        // aria2c 只能通过 as tool 安装方式使用
+        get_tools_bin_dir()
+            .map(|dir| dir.join("aria2c.exe").is_file())
+            .unwrap_or(false)
+    }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::aria2c::try_aria2c_download(url, target_path, cancel, pb)
@@ -350,21 +370,48 @@ fn which_path(name: &str) -> Option<String> {
 
 // ── 后端元信息查询（用于 `as downloader list`） ──
 
-/// 查询指定后端名称对应的二进制路径（如有）。
-/// 用于 `download list` 显示。
-pub fn backend_binary_path(name: &str) -> Option<String> {
-    let binary = match name {
-        "RustRange" | "Ureq" | "UreqInsecure" => return None, // 内置，无二进制
-        "Aria2c" => "aria2c",
+/// 该后端是否为纯内置实现（无外部二进制依赖）。
+pub fn backend_is_builtin(name: &str) -> bool {
+    matches!(name, "RustRange" | "Ureq" | "UreqInsecure")
+}
+
+/// 查询指定后端是否处于可用状态（health_check 通过）。
+pub fn backend_is_available(name: &str) -> bool {
+    match name {
+        "RustRange" => true, // 纯 Rust
+        "Aria2c" => get_tools_bin_dir()
+            .map(|dir| dir.join("aria2c.exe").is_file())
+            .unwrap_or(false),
+        "Ureq" | "UreqInsecure" => true,
         "PowerShell" | "PowerShellInvoke" | "BitsTransfer" => {
-            // 三者都用 powershell.exe
-            return which_path("powershell")
-                .or_else(|| Some("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".into()));
+            which_path("powershell").is_some()
+                || std::path::Path::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe").is_file()
         }
-        "Curl" => "curl",
-        _ => return None,
-    };
-    which_path(binary)
+        "Curl" => which_path("curl").is_some()
+            || std::path::Path::new("C:\\Windows\\System32\\curl.exe").is_file(),
+        _ => false,
+    }
+}
+
+/// 查询指定后端名称对应的二进制路径（如有）。
+pub fn backend_binary_path(name: &str) -> Option<String> {
+    if backend_is_builtin(name) {
+        return None; // 纯内置，无二进制
+    }
+    match name {
+        "Aria2c" => {
+            get_tools_bin_dir()
+                .map(|dir| dir.join("aria2c.exe"))
+                .filter(|p| p.is_file())
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+        }
+        "PowerShell" | "PowerShellInvoke" | "BitsTransfer" => {
+            which_path("powershell")
+                .or_else(|| Some("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".into()))
+        }
+        "Curl" => which_path("curl"),
+        _ => None,
+    }
 }
 
 /// 查询指定后端是否支持 Range 分片下载。

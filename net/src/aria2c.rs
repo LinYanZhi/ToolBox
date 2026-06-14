@@ -218,6 +218,11 @@ fn probe_content_length(url: &str) -> u64 {
 }
 
 fn find_aria2c() -> Option<std::path::PathBuf> {
+    // 优先使用工具目录中的 aria2c
+    if let Some(tools_dir) = crate::backend::get_tools_bin_dir() {
+        let candidate = tools_dir.join("aria2c.exe");
+        if candidate.is_file() { return Some(candidate); }
+    }
     if let Ok(path) = std::env::var("AMINOS_ARIA2C_PATH") {
         let p = std::path::PathBuf::from(path);
         if p.is_file() { return Some(p); }

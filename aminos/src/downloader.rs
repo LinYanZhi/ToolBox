@@ -3,6 +3,8 @@ use crate::paths;
 
 /// 运行 `as downloader` 子命令。
 pub fn run_downloader_list() -> anyhow::Result<()> {
+    // 确保工具目录已设置
+    net::backend::set_tools_bin_dir(paths::tools_bin_dir());
     let states = net::config::list_backend_states();
     if states.is_empty() {
         println!("  无法读取下载后端配置（配置文件可能损坏）");
@@ -10,22 +12,31 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
     }
 
     // 收集每列数据
-    struct Row { name: String, enabled: bool, path: String, range: bool }
+    struct Row { name: String, enabled: bool, available: bool, path_text: String, range: bool }
     let rows: Vec<Row> = states.iter().map(|(name, enabled, _threads)| {
-        let path = net::backend::backend_binary_path(name)
-            .unwrap_or_else(|| "[内置]".into());
+        let available = net::backend::backend_is_available(name);
+        let path_text = if net::backend::backend_is_builtin(name) {
+            "[内置]".into()
+        } else if let Some(p) = net::backend::backend_binary_path(name) {
+            if p.starts_with("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\") {
+                "powershell.exe".into()
+            } else {
+                p
+            }
+        } else {
+            "未安装".into()
+        };
         let range = net::backend::backend_supports_range(name);
-        Row { name: name.clone(), enabled: *enabled, path, range }
+        Row { name: name.clone(), enabled: *enabled, available, path_text, range }
     }).collect();
 
     // 计算列宽
     let name_w = rows.iter().map(|r| r.name.display_width()).max().unwrap_or(10);
-    let path_w = rows.iter().map(|r| r.path.display_width()).max().unwrap_or(20).min(64);
-    // 固定中文标签宽度：名称4 + 状态4 + 分片4，留 2 间隔
+    let path_w = rows.iter().map(|r| r.path_text.display_width()).max().unwrap_or(20).min(64);
     let label_name_w = name_w.max("名称".display_width());
-    let label_status_w = 4usize.max("状态".display_width());
+    let label_status_w = 6usize.max("状态".display_width());
     let label_path_w = path_w.max("程序路径".display_width());
-    let label_range_w = 4usize.max("分片".display_width());
+    let label_range_w = 6usize.max("分片".display_width());
 
     println!();
     println!("  {}",
@@ -47,25 +58,27 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
         color::gray(str::repeat("─", sep_w)));
 
     for r in &rows {
-        let status = if r.enabled {
-            format!("{}", color::green("启用"))
+        // 先取纯文本，pad 后再加颜色
+        let padded_status = if !r.enabled {
+            color::red(&color::pad_left("禁用", label_status_w))
+        } else if !r.available {
+            color::yellow(&color::pad_left("未安装", label_status_w))
         } else {
-            format!("{}", color::red("禁用"))
+            color::green(&color::pad_left("启用", label_status_w))
         };
-        let range_mark = if r.range { "✅" } else { "❌" };
+        let padded_path = color::gray(&color::pad_left(&r.path_text, label_path_w));
 
-        // 路径显示：缩短长系统路径
-        let path_text = if r.path.starts_with("C:\\Windows\\System32\\") {
-            r.path.replace("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\", "…\\")
+        let padded_range = if r.range {
+            color::green(&color::pad_left("支持", label_range_w))
         } else {
-            r.path.clone()
+            color::red(&color::pad_left("不支持", label_range_w))
         };
 
         println!("    {}  {}  {}  {}",
             color::cyan(&color::pad_left(&r.name, label_name_w)),
-            status,
-            color::gray(&color::pad_left(&path_text, label_path_w)),
-            color::pad_left(&range_mark, label_range_w),
+            padded_status,
+            padded_path,
+            padded_range,
         );
     }
 

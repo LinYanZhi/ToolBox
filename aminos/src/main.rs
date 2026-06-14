@@ -282,6 +282,8 @@ fn main() {
             return;
         }
     };
+    // 设置工具二进制目录（供下载后端检测 aria2c 等工具）
+    net::backend::set_tools_bin_dir(paths::tools_bin_dir());
     match cli.command {
         None => {
             if cli.example {
@@ -809,14 +811,23 @@ fn run_tool(action: ToolCmd) -> anyhow::Result<()> {
                 .unwrap_or(10)
                 .max(10);
 
+            let max_ver_w = self_tools.iter()
+                .map(|d| d.default_version.display_width())
+                .max()
+                .unwrap_or(10);
+
             for def in &self_tools {
                 let name = if def.display_name.is_empty() { &def.name } else { &def.display_name };
                 let ver = &def.default_version;
                 let installed = db.contains_key(&def.name);
                 let status = if installed {
-                    color::green(format!("{}  {}", color::bold_green("已安装"), color::cyan(ver)))
+                    color::green(format!("{}  {}",
+                        color::bold_green("已安装"),
+                        color::cyan(&pad(ver, max_ver_w))))
                 } else {
-                    color::gray("未安装".to_string())
+                    color::gray(format!("{}  {}",
+                        "未安装",
+                        &pad("", max_ver_w)))
                 };
                 println!("  {}  {}  {}", color::cyan(pad(name, max_name_w)), status, color::gray(&def.description));
             }
