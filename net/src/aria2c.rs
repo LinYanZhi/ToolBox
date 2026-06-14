@@ -1,15 +1,26 @@
+use std::io::BufRead;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{bail, Context};
 
 use crate::agent::Fingerprint;
+use crate::download::{Cancel, ProgressCtx};
 
-/// 使用系统 aria2c 多线程下载。
+/// 使用系统 aria2c 多线程下载，实时跟踪进度。
 ///
-/// aria2c 会分多线程下载，速度远快于单线程 HTTPS。
-/// 自动续传未完成的 `.downloading` 文件。
-pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> {
+/// 进度跟踪方式：
+///   1. HEAD 获取 Content-Length
+///   2. 管道 **stdout**（不是 stderr）
+///   3. `read_line()` 按 `\n` 切分，解析 `[#GID cur/total(%) ...]` 格式
+pub fn try_aria2c_download(
+    url: &str,
+    target_path: &Path,
+    cancel: &Cancel,
+    pb: Option<ProgressCtx>,
+) -> anyhow::Result<()> {
     let aria2c = find_aria2c()
         .ok_or_else(|| anyhow::anyhow!("未找到 aria2c.exe"))?;
 
@@ -20,9 +31,17 @@ pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> 
         .to_string();
     let parent = target_path.parent().unwrap_or(Path::new("."));
 
-    // 检查续传
-    let partial_path = format!("{}.downloading", target_path.to_string_lossy());
-    let has_partial = Path::new(&partial_path).is_file();
+    // ── HEAD 获取 Content-Length ──
+    let total_size = probe_content_length(url);
+    if let Some(ref ctx) = pb {
+        if total_size > 0 {
+            ctx.bar.set_length(total_size);
+        }
+        ctx.set_status("下载中");
+    }
+
+    // ── 构建命令 ──
+    let has_partial = Path::new(&format!("{}.downloading", target_path.to_string_lossy())).is_file();
     let target_exists = target_path.is_file();
 
     let mut cmd = Command::new(&aria2c);
@@ -36,21 +55,15 @@ pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> 
         "--timeout", "120",
         "--allow-overwrite=true",
         "--auto-file-renaming=false",
+        "--summary-interval", "1",
     ]);
 
     if has_partial || target_exists {
         cmd.arg("--continue=true");
     }
 
-    cmd.args([
-        "--dir",
-        &parent.to_string_lossy(),
-        "--out",
-        &filename,
-    ]);
+    cmd.args(["--dir", &parent.to_string_lossy(), "--out", &filename]);
 
-    // 传入浏览器模拟请求头（防盗链关键）
-    // 使用保守的请求头，不发送 Sec-Fetch-* 等浏览器专属头（防反爬误判）
     cmd.arg("--header");
     cmd.arg(format!("User-Agent: {}", Fingerprint::Chrome120.user_agent()));
     cmd.arg("--header");
@@ -58,11 +71,8 @@ pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> 
     cmd.arg("--header");
     cmd.arg("Accept-Language: zh-CN,zh;q=0.9,en;q=0.8");
 
-    let hostname = url
-        .split("://")
-        .nth(1)
-        .and_then(|s| s.split('/').next())
-        .unwrap_or("");
+    let hostname = url.split("://").nth(1)
+        .and_then(|s| s.split('/').next()).unwrap_or("");
     if !hostname.is_empty() {
         cmd.arg("--header");
         cmd.arg(format!("Referer: https://{}/", hostname));
@@ -70,75 +80,160 @@ pub fn try_aria2c_download(url: &str, target_path: &Path) -> anyhow::Result<()> 
 
     cmd.arg(url);
 
-    let status = cmd
-        .stdin(std::process::Stdio::null())
-        .status()
-        .context("运行 aria2c 失败")?;
+    // ── 启动 aria2c（管道 stdout，stderr 静默） ──
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())   // ← 关键：管道 stdout！
+        .stderr(Stdio::null())
+        .spawn()
+        .context("启动 aria2c 失败")?;
 
-    if !status.success() {
-        let _ = std::fs::remove_file(&partial_path);
-        let _ = std::fs::remove_file(target_path);
-        bail!("aria2c 进程异常退出");
+    let stdout = child.stdout.take().expect("aria2c stdout 已 piped");
+
+    // ── Reader 线程：read_line() 按 \n 读取 stdout，解析进度 ──
+    let reader_cancel = cancel.clone();
+    let reader_pb = pb.clone();
+    let reader_handle = thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::with_capacity(256);
+        loop {
+            if reader_cancel.is_cancelled() {
+                return;
+            }
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => return,
+                Ok(_) => {}
+                Err(_) => return,
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some((cur, total)) = parse_aria2_progress(trimmed) {
+                reader_cancel.mark_progress();
+                if let Some(ref ctx) = reader_pb {
+                    if total > 0 && ctx.bar.length().map(|l| l == 0).unwrap_or(true) {
+                        ctx.bar.set_length(total);
+                    }
+                    ctx.bar.set_position(cur);
+                }
+            }
+        }
+    });
+
+    // ── 主线程：try_wait 轮询 ──
+    loop {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if cancel.is_cancelled() {
+                    let _ = std::fs::remove_file(target_path);
+                    return Err(anyhow::anyhow!("已取消"));
+                }
+                if !status.success() {
+                    let _ = std::fs::remove_file(target_path);
+                    bail!("aria2c 进程异常退出");
+                }
+                break;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(e) => bail!("等待 aria2c 退出失败: {}", e),
+        }
     }
 
+    let _ = reader_handle.join();
+
     if !target_path.is_file()
-        || std::fs::metadata(target_path)
-            .map(|m| m.len())
-            .unwrap_or(0)
-            == 0
+        || std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0) == 0
     {
-        let _ = std::fs::remove_file(&partial_path);
         let _ = std::fs::remove_file(target_path);
         bail!("aria2c 下载失败（文件不存在或为空）");
+    }
+
+    if let Some(ref ctx) = pb {
+        if let Ok(meta) = std::fs::metadata(target_path) {
+            ctx.bar.set_length(meta.len());
+            ctx.bar.set_position(meta.len());
+        }
     }
 
     Ok(())
 }
 
-/// 查找 aria2c.exe。
-///
-/// 优先级：
-///   1. 环境变量 `AMINOS_ARIA2C_PATH`
-///   2. `%LOCALAPPDATA%\aminos\tools\aria2c\aria2c.exe`（as 工具包管理）
-///   3. `%USERPROFILE%\Desktop`
-///   4. PATH 环境变量
+fn parse_aria2_progress(line: &str) -> Option<(u64, u64)> {
+    // 实际 stdout 输出格式: [#6ec300 205MiB/228MiB(89%) CN:16 DL:3.9MiB ETA:5s]
+    // 无 "SIZE:" 前缀。合并的 \r 块可能包含多段，只取第一个内容段。
+    let segment = line.split(|c: char| c == '\r' || c == '\n').next()?;
+    if !segment.starts_with("[#") {
+        return None;
+    }
+    let rest = segment.splitn(2, ' ').nth(1)?;
+    let slash = rest.find('/')?;
+    let cur_str = &rest[..slash];
+    let after_total = rest[slash + 1..]
+        .find(|c: char| c != '.' && !c.is_ascii_alphanumeric())?;
+    let total_str = &rest[slash + 1..slash + 1 + after_total];
+
+    let cur = parse_aria2_size(cur_str)?;
+    let total = parse_aria2_size(total_str)?;
+    if total == 0 { None } else { Some((cur.min(total), total)) }
+}
+
+fn parse_aria2_size(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (num_str, unit) = if s.ends_with("KiB") {
+        (&s[..s.len() - 3], 1024u64)
+    } else if s.ends_with("MiB") {
+        (&s[..s.len() - 3], 1024u64 * 1024)
+    } else if s.ends_with("GiB") {
+        (&s[..s.len() - 3], 1024u64 * 1024 * 1024)
+    } else if s.ends_with("TiB") {
+        (&s[..s.len() - 3], 1024u64 * 1024 * 1024 * 1024)
+    } else {
+        let v: u64 = s.parse().ok()?;
+        return Some(v);
+    };
+    let val: f64 = num_str.parse().ok()?;
+    Some((val * unit as f64) as u64)
+}
+
+fn probe_content_length(url: &str) -> u64 {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(5))
+        .user_agent(Fingerprint::Chrome120.user_agent())
+        .build();
+    match agent.head(url).call() {
+        Ok(resp) => resp.header("Content-Length")
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0),
+        Err(_) => 0,
+    }
+}
+
 fn find_aria2c() -> Option<std::path::PathBuf> {
-    // 1. 环境变量
     if let Ok(path) = std::env::var("AMINOS_ARIA2C_PATH") {
         let p = std::path::PathBuf::from(path);
-        if p.is_file() {
-            return Some(p);
-        }
+        if p.is_file() { return Some(p); }
     }
-
-    // 2. as 工具包目录：%LOCALAPPDATA%\aminos\tools\aria2c\aria2c.exe
     if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
         let candidate = std::path::PathBuf::from(localappdata)
-            .join("aminos")
-            .join("tools")
-            .join("aria2c")
-            .join("aria2c.exe");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
+            .join("aminos").join("tools").join("aria2c").join("aria2c.exe");
+        if candidate.is_file() { return Some(candidate); }
     }
-
-    // 3. 桌面
     if let Some(desktop) = std::env::var_os("USERPROFILE")
         .map(|p| std::path::PathBuf::from(p).join("Desktop").join("aria2c.exe"))
-    {
-        if desktop.is_file() {
-            return Some(desktop);
-        }
-    }
-
-    // 4. PATH
+    { if desktop.is_file() { return Some(desktop); } }
     std::env::var_os("PATH").and_then(|paths| {
         for dir in std::env::split_paths(&paths) {
             let candidate = dir.join("aria2c.exe");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+            if candidate.is_file() { return Some(candidate); }
         }
         None
     })

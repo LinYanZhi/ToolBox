@@ -1,34 +1,29 @@
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{bail, Context};
 
+use crate::download::Cancel;
+
 /// 使用系统 curl 下载文件，先尝试正常模式，失败时尝试跳过证书验证。
-///
-/// 优先调用 Windows 10 1809+ 内置的 `System32\curl.exe`，
-/// 也会查找 PATH 中的 curl。
-pub fn try_curl_download(url: &str, target_path: &Path) -> anyhow::Result<()> {
+/// 支持通过 Cancel 取消并自动清理临时文件。
+pub fn try_curl_download(url: &str, target_path: &Path, cancel: &Cancel) -> anyhow::Result<()> {
     let curl = find_curl().ok_or_else(|| anyhow::anyhow!("未找到 curl.exe （不在 System32 或 PATH）"))?;
 
-    // 先尝试正常模式
-    match run_curl(&curl, url, target_path, false) {
+    match run_curl(&curl, url, target_path, false, cancel) {
         Ok(()) => return Ok(()),
-        Err(e) => {
-            eprintln!("       curl 正常模式失败: {}", e);
-        }
+        Err(_) => {}
     }
 
-    // 回退: --insecure
-    eprintln!("       curl 尝试跳过证书验证...");
-    match run_curl(&curl, url, target_path, true) {
+    match run_curl(&curl, url, target_path, true, cancel) {
         Ok(()) => Ok(()),
-        Err(e) => {
-            bail!("curl 也失败 (含 --insecure): {}", e);
-        }
+        Err(e) => bail!("curl 也失败 (含 --insecure): {}", e),
     }
 }
 
-fn run_curl(curl: &Path, url: &str, target_path: &Path, insecure: bool) -> anyhow::Result<()> {
+fn run_curl(curl: &Path, url: &str, target_path: &Path, insecure: bool, cancel: &Cancel) -> anyhow::Result<()> {
     let parent = target_path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
 
@@ -45,7 +40,6 @@ fn run_curl(curl: &Path, url: &str, target_path: &Path, insecure: bool) -> anyho
         cmd.arg("--insecure");
     }
 
-    // 传 Referer 和 User-Agent
     cmd.arg("--user-agent")
         .arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
@@ -56,54 +50,62 @@ fn run_curl(curl: &Path, url: &str, target_path: &Path, insecure: bool) -> anyho
 
     cmd.arg(url);
 
-    let output = cmd
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .context("运行 curl 失败")?;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("启动 curl 失败")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(anyhow::anyhow!("curl 退出码 {}: {}",
-            output.status.code().unwrap_or(-1),
-            if stderr.is_empty() { "无错误信息" } else { &stderr }
-        ));
+    // ── 非阻塞等待 curl，支持取消 ──
+    loop {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+            let _ = std::fs::remove_file(target_path);
+            return Err(anyhow::anyhow!("已取消"));
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if cancel.is_cancelled() {
+                    let _ = std::fs::remove_file(target_path);
+                    return Err(anyhow::anyhow!("已取消"));
+                }
+                if !status.success() {
+                    let _ = std::fs::remove_file(target_path);
+                    return Err(anyhow::anyhow!("curl 退出码 {}", status.code().unwrap_or(-1)));
+                }
+                break;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(_) => {
+                let _ = std::fs::remove_file(target_path);
+                bail!("等待 curl 失败");
+            }
+        }
     }
 
     if !target_path.is_file() || std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0) == 0 {
+        let _ = std::fs::remove_file(target_path);
         bail!("curl 下载的文件为空或不存在");
     }
 
     Ok(())
 }
 
-/// 在系统路径中查找 curl.exe。
 fn find_curl() -> Option<std::path::PathBuf> {
-    // 环境变量
     if let Ok(path) = std::env::var("AMINOS_CURL_PATH") {
         let p = std::path::PathBuf::from(path);
-        if p.is_file() {
-            return Some(p);
-        }
+        if p.is_file() { return Some(p); }
     }
-
-    // System32（Win10 1809+ / Win11 内置）
     if let Some(system_root) = std::env::var_os("SystemRoot") {
         let system32 = std::path::PathBuf::from(system_root)
-            .join("System32")
-            .join("curl.exe");
-        if system32.is_file() {
-            return Some(system32);
-        }
+            .join("System32").join("curl.exe");
+        if system32.is_file() { return Some(system32); }
     }
-
-    // PATH
     std::env::var_os("PATH").and_then(|paths| {
         for dir in std::env::split_paths(&paths) {
             let candidate = dir.join("curl.exe");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+            if candidate.is_file() { return Some(candidate); }
         }
         None
     })
@@ -112,21 +114,16 @@ fn find_curl() -> Option<std::path::PathBuf> {
 /// 使用 curl 测速：捕获 stdout 中的字节数/时间，返回 KB/s。
 pub fn try_curl_stdout(url: &str, timeout_secs: u64) -> Option<f64> {
     let curl = find_curl()?;
-
     let max_time = timeout_secs + 5;
     let start = std::time::Instant::now();
     let output = Command::new(&curl)
         .args(["-sL", "-r", "0-65535", "--max-time", &max_time.to_string(), url])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
         .output()
         .ok()?;
-
     let elapsed = start.elapsed().as_secs_f64();
     let size = output.stdout.len();
-
-    if elapsed < 0.1 || size < 1024 {
-        return None;
-    }
+    if elapsed < 0.1 || size < 1024 { return None; }
     Some((size as f64 / 1024.0) / elapsed)
 }

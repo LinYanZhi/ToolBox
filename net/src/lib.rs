@@ -1,10 +1,14 @@
 pub mod agent;
 pub mod aria2c;
+pub mod backend;
+pub mod config;
 pub mod curl;
 pub mod download;
 pub mod powershell;
+pub mod probe;
 pub mod range;
 pub mod speedtest;
+pub mod validator;
 pub mod verify;
 
 pub use agent::{AgentConfig, Fingerprint};

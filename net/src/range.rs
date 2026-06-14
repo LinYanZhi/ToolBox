@@ -27,7 +27,7 @@ pub fn parallel_download(
     num_threads: usize,
     _resume: bool,
     cancel: &crate::download::Cancel,
-    pb: Option<indicatif::ProgressBar>,
+    pb: Option<crate::download::ProgressCtx>,
 ) -> anyhow::Result<()> {
     let parent = target_path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
@@ -94,31 +94,43 @@ pub fn parallel_download(
     let errors = Arc::new(Mutex::new(Vec::new()));
 
     // 全局进度条（通过共享 MultiProgress 管理，避免多进度条打架）
-    let pb = pb.unwrap_or_else(|| crate::download::progress().add(indicatif::ProgressBar::new(total_size)));
-    if pb.length().map(|l| l == 0).unwrap_or(true) {
-        pb.set_length(total_size);
-    }
-    pb.set_style(
-        indicatif::ProgressStyle::default_bar()
-            .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-            .unwrap()
-            .progress_chars("=> "),
-    );
-    pb.set_message("分片下载");
+    let external_pb = pb.is_some();
+    let pb = pb.unwrap_or_else(|| {
+        let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
+        bar.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("{msg:.green} [{bar:30.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, {eta})")
+                .unwrap()
+                .progress_chars("━━━"),
+        );
+        bar.set_message("分片下载");
+        crate::download::ProgressCtx::new(bar, "RustRange", "多线程")
+    });
+    let bar = pb.bar.clone();
+    // 无论外部还是内部 bar，都必须把 length 设为真实文件大小。
+    // 外部 bar 初始化时 length=1（new(1)），不能跳过 set_length。
+    bar.set_length(total_size);
 
     // 进度监控线程
+    let first_byte_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let first_byte_flag_c = Arc::clone(&first_byte_flag);
     let pb_progress = Arc::clone(&progress);
     let pb_cancel = cancel.clone();
+    let pb_clone = pb.clone();
     let pb_handle = {
-        let pb = pb.clone();
+        let bar = bar.clone();
         thread::spawn(move || {
             loop {
                 if pb_cancel.is_cancelled() {
-                    pb.finish_and_clear();
                     return;
                 }
                 let cur = pb_progress.load(Ordering::Relaxed);
-                pb.set_position(cur);
+                // 首个字节后更新状态为"下载中"
+                if external_pb && first_byte_flag_c.load(Ordering::Relaxed) && cur > 0 {
+                    first_byte_flag_c.store(false, Ordering::Relaxed);
+                    pb_clone.set_status("下载中");
+                }
+                bar.set_position(cur);
                 if cur >= total_size {
                     break;
                 }
@@ -197,7 +209,6 @@ pub fn parallel_download(
         // 如果已取消，不再等待后续线程
         if cancel.is_cancelled() {
             let _ = fs::remove_dir_all(&temp_dir);
-            pb.finish_and_clear();
             return Err(anyhow::anyhow!("已取消"));
         }
         match h.join() {
@@ -217,20 +228,20 @@ pub fn parallel_download(
 
     // 停止进度监控并刷新到 100%
     let _ = pb_handle.join();
-    pb.set_position(total_size);
+    pb.bar.set_position(total_size);
 
     // Step 5: 检查错误
     {
         let errs = errors.lock().unwrap();
         if !errs.is_empty() {
-            pb.abandon_with_message("下载失败");
+            if !external_pb { pb.bar.abandon_with_message("下载失败"); }
             let _ = fs::remove_dir_all(&temp_dir);
             bail!("多线程下载失败: {}", errs.join("; "));
         }
     }
 
     // Step 6: 合并分片
-    pb.set_message("合并分片");
+    if !external_pb { pb.bar.set_message("合并分片"); }
     let mut output = fs::File::create(target_path)?;
     for i in 0..actual {
         let chunk_path = temp_dir.join(format!("{:04}", i));
@@ -248,13 +259,13 @@ pub fn parallel_download(
 
     // Step 7: 清理
     let _ = fs::remove_dir_all(&temp_dir);
-    pb.finish_with_message("下载完成");
+    if !external_pb { pb.bar.finish_with_message("下载完成"); } else { pb.set_status("✓ 完成"); }
 
     Ok(())
 }
 
 /// 单线程回退下载（含进度条）。
-fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel: &crate::download::Cancel, pb: Option<indicatif::ProgressBar>) -> anyhow::Result<()> {
+fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel: &crate::download::Cancel, pb: Option<crate::download::ProgressCtx>) -> anyhow::Result<()> {
     if cancel.is_cancelled() {
         return Err(anyhow::anyhow!("已取消"));
     }
@@ -272,31 +283,35 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
     let parent = target_path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
 
-    let pb = if let Some(bar) = pb {
-        bar.set_length(total_size);
-        bar.set_message("单线程下载");
-        Some(bar)
+    let external_pb = pb.is_some();
+    let pb = if let Some(ctx) = pb {
+        // 外部传入的进度条上下文 — 使用它但不覆盖 status（会在下载开始时更新）
+        if total_size > 0 {
+            ctx.bar.set_length(total_size);
+        }
+        Some(ctx)
     } else if total_size > 0 {
         let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
-                .template("{msg:.green} [{bar:30}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+                .template("{msg:.green} [{bar:30.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, {eta})")
                 .unwrap()
-                .progress_chars("=> "),
+                .progress_chars("━━━"),
         );
         bar.set_message("单线程下载");
-        Some(bar)
+        Some(crate::download::ProgressCtx::new(bar, "RustRange", "单线程"))
     } else {
         None
     };
+    let mut first_byte = true;
 
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(target_path)?;
     let mut buf = [0u8; 65536];
     loop {
         if cancel.is_cancelled() {
-            if let Some(ref pb) = pb {
-                pb.finish_and_clear();
+            if let Some(ref ctx) = pb {
+                ctx.set_status("✗ 已取消");
             }
             let _ = fs::remove_file(target_path);
             return Err(anyhow::anyhow!("已取消"));
@@ -305,15 +320,21 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
         if n == 0 {
             break;
         }
+        if first_byte {
+            first_byte = false;
+            if let Some(ref ctx) = pb {
+                if external_pb { ctx.set_status("下载中"); }
+            }
+        }
         file.write_all(&buf[..n])?;
         cancel.mark_progress();
-        if let Some(ref pb) = pb {
-            pb.inc(n as u64);
+        if let Some(ref ctx) = pb {
+            ctx.bar.inc(n as u64);
         }
     }
 
-    if let Some(pb) = pb {
-        pb.finish_with_message("下载完成");
+    if let Some(ctx) = pb {
+        if external_pb { ctx.set_status("✓ 完成"); } else { ctx.bar.finish_with_message("下载完成"); }
     }
 
     Ok(())

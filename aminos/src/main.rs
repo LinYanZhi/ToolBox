@@ -1,3 +1,4 @@
+mod downloader;
 mod installer;
 mod paths;
 mod pe_version;
@@ -198,6 +199,12 @@ enum Command {
         #[command(subcommand)]
         action: ToolCmd,
     },
+    /// 管理下载引擎后端
+    #[command(help_template = HELP_TEMPLATE_SUBCMDS)]
+    Downloader {
+        #[command(subcommand)]
+        action: DownloaderCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -241,6 +248,28 @@ enum ToolCmd {
         /// 工具名称
         #[arg(required = true)]
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DownloaderCmd {
+    /// 列出所有下载后端及其启用状态
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    List,
+    /// 启用或禁用一个后端
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    Set {
+        /// 后端名称（如 curl, RustRange, Aria2c）
+        name: String,
+        /// on 或 off
+        state: String,
+    },
+    /// 显示或打开配置文件
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    Config {
+        /// 在资源管理器中打开配置目录
+        #[arg(short, long)]
+        open: bool,
     },
 }
 
@@ -290,6 +319,9 @@ fn main() {
         }
         Some(Command::Tool { action }) => {
             let _ = run(|| run_tool(action));
+        }
+        Some(Command::Downloader { action }) => {
+            let _ = run(|| run_downloader(action));
         }
     }
 }
@@ -362,6 +394,13 @@ fn run_example() {
         ("tool", "管理自研工具", &[
             ("as tool list", "列出已安装的自研工具"),
             ("as tool remove ls", "移除自研工具 ls"),
+        ]),
+        ("downloader", "管理下载引擎后端", &[
+            ("as downloader list", "列出所有下载后端及启用状态"),
+            ("as downloader set curl on", "启用 curl 后端"),
+            ("as downloader set curl off", "禁用 curl 后端"),
+            ("as downloader config", "显示配置文件路径"),
+            ("as downloader config --open", "在资源管理器中打开配置目录"),
         ]),
     ];
 
@@ -784,6 +823,29 @@ fn run_tool(action: ToolCmd) -> anyhow::Result<()> {
         }
         ToolCmd::Remove { name } => {
             installer::uninstall_software(&name, false, false)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_downloader(action: DownloaderCmd) -> anyhow::Result<()> {
+    match action {
+        DownloaderCmd::List => {
+            downloader::run_downloader_list()?;
+        }
+        DownloaderCmd::Set { name, state } => {
+            let enable = match state.as_str() {
+                "on" | "启用" | "enable" | "1" => true,
+                "off" | "禁用" | "disable" | "0" => false,
+                _ => {
+                    eprintln!("    {} 无效状态: {}（使用 on/off）", color::red("错误"), state);
+                    std::process::exit(1);
+                }
+            };
+            downloader::run_downloader_set(&name, enable)?;
+        }
+        DownloaderCmd::Config { open } => {
+            downloader::run_downloader_config(open)?;
         }
     }
     Ok(())

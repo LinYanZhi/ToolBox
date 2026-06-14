@@ -1,5 +1,9 @@
 @echo off
-call mm home
+
+del as.exe
+del ls.exe
+del %USERPROFILE%\Desktop\as.exe
+del %USERPROFILE%\Desktop\ls.exe
 
 call cargo build -p ls --release
 call cargo build -p as --release

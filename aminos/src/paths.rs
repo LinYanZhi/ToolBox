@@ -34,3 +34,8 @@ pub fn tools_dir() -> PathBuf {
 pub fn tools_bin_dir() -> PathBuf {
     tools_dir().join("bin")
 }
+
+/// 下载引擎配置目录：%LOCALAPPDATA%\aminos\config\
+pub fn config_dir() -> PathBuf {
+    RESOLVER.appdata_root().join("config")
+}

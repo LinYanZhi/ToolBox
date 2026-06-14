@@ -191,12 +191,12 @@ pub fn install_software(
     // 4. Download installer
     let installer_path = get_installer_path(name, &ver, &vi.urls, renew)?;
     if download_only {
-        println!("✓ {} {} 下载完成", display, ver);
+        eprintln!("✓ {} {} 下载完成", display, ver);
         return Ok(());
     }
 
     // 5. Install
-    println!("\n▶ 安装 {} {} ...", display, ver);
+    eprintln!("\n▶ 安装 {} {} ...", display, ver);
     let (installed, portable_install_path) = run_installer(name, &ver, &installer_path, vi, gui)?;
     if !installed {
         bail!("安装未完成（用户取消或安装失败）");
@@ -256,7 +256,7 @@ fn install_self_tool(
     // 1. Download
     let installer_path = get_installer_path(name, ver, &vi.urls, renew)?;
     if download_only {
-        println!("✓ {} {} 下载完成", display, ver);
+        eprintln!("✓ {} {} 下载完成", display, ver);
         return Ok(());
     }
 
