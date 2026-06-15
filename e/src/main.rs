@@ -195,6 +195,8 @@ fn show_env_vars(left_align: bool, no_color: bool) {
     env_vars.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
 
     let max_name_len = env_vars.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let term_w = terminal_width() as usize;
+    let prefix_indent = max_name_len + 3; // 名字 + " = "
 
     println!();
     for (name, value) in &env_vars {
@@ -203,21 +205,115 @@ fn show_env_vars(left_align: bool, no_color: bool) {
             .or_else(|| color_map.get(&name.to_uppercase()))
             .or_else(|| color_map.get(&name.to_lowercase()));
 
-        if no_color || color.is_none() {
-            let formatted = if left_align {
-                format!("{:<width$} = {}", name, value, width = max_name_len)
+        // 构建前缀（变量名部分）
+        let prefix = if no_color || color.is_none() {
+            if left_align {
+                format!("{:<width$} = ", name, width = max_name_len)
             } else {
-                format!("{:>width$} = {}", name, value, width = max_name_len)
-            };
-            println!("{}", formatted);
+                format!("{:>width$} = ", name, width = max_name_len)
+            }
         } else {
             let painted = paint(name, color.unwrap());
-            let formatted = if left_align {
-                format!("{:<width$}", painted, width = max_name_len)
+            let padded = if left_align {
+                pad_left(&painted, max_name_len)
             } else {
-                format!("{:>width$}", painted, width = max_name_len)
+                pad_right(&painted, max_name_len)
             };
-            println!("{} = {}", formatted, value);
+            format!("{} = ", padded)
+        };
+
+        // 续行缩进
+        let indent = " ".repeat(prefix_indent);
+
+        // 计算可用宽度
+        let avail = if term_w > prefix_indent { term_w - prefix_indent } else { 60 };
+
+        // 分行输出
+        let lines = wrap_value(value, avail);
+        for (i, line) in lines.iter().enumerate() {
+            if i == 0 {
+                println!("{}{}", prefix, line);
+            } else {
+                println!("{}{}", indent, line);
+            }
+        }
+    }
+}
+
+/// 将长值按可用宽度分行，优先在 `;` 处断开
+fn wrap_value(value: &str, avail: usize) -> Vec<String> {
+    if value.display_width() <= avail {
+        return vec![value.to_string()];
+    }
+
+    let mut result = Vec::new();
+    let mut pos = 0;
+    let chars: Vec<char> = value.chars().collect();
+    let len = chars.len();
+
+    while pos < len {
+        // 计算从 pos 开始最远能到哪
+        let end = if pos + avail >= len {
+            len
+        } else {
+            // 在 [pos, pos+avail) 范围内找最后一个 `;`
+            let search_end = (pos + avail).min(len);
+            let mut break_at = search_end;
+            // 从后往前找 `;`
+            for i in (pos..search_end).rev() {
+                if chars[i] == ';' {
+                    break_at = i + 1; // 包括分号
+                    break;
+                }
+            }
+            // 如果没有分号，找空格
+            if break_at == search_end {
+                for i in (pos..search_end).rev() {
+                    if chars[i] == ' ' || chars[i] == ',' {
+                        break_at = i + 1;
+                        break;
+                    }
+                }
+            }
+            break_at
+        };
+
+        let slice: String = chars[pos..end].iter().collect();
+        result.push(slice);
+        pos = end;
+    }
+
+    result
+}
+
+/// 获取终端宽度（列数），失败默认 120
+fn terminal_width() -> u16 {
+    #[repr(C)]
+    struct ConsoleScreenBufferInfo {
+        dw_size: [u16; 2],
+        dw_cursor: [u16; 2],
+        w_attrs: u16,
+        sr_window: [u16; 4],
+        dw_max: [u16; 2],
+    }
+
+    unsafe extern "system" {
+        fn GetStdHandle(id: u32) -> isize;
+        fn GetConsoleScreenBufferInfo(h: isize, info: *mut ConsoleScreenBufferInfo) -> i32;
+    }
+
+    const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32;
+
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        if handle == -1 || handle == 0 {
+            return 120;
+        }
+        let mut info: ConsoleScreenBufferInfo = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(handle, &mut info) != 0 {
+            (info.sr_window[2] - info.sr_window[0] + 1).max(40)
+        } else {
+            120
         }
     }
 }
