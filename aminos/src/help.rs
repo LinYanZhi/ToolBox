@@ -103,7 +103,7 @@ pub fn print_config_help() {
         ("as config path -o",       "在资源管理器中打开配置目录"),
         ("as config cache",         "查看缓存文件"),
         ("as config cache --clear", "清除所有缓存"),
-        ("as config source update", "更新软件源"),
+        ("as config source update", "更新软件源和工具源"),
         ("as config speedtest",     "测速下载源"),
         ("as config downloader list", "列出下载后端"),
     ];
@@ -120,7 +120,7 @@ pub fn print_config_help() {
 /// 打印 as config source 子命令帮助
 pub fn print_source_help() {
     println!();
-    println!("  {} — {}", color::bold_cyan("as config source"), color::green("管理软件源定义"));
+    println!("  {} — {}", color::bold_cyan("as config source"), color::green("管理软件源和工具源定义"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
     println!("    {} {} {}", color::cyan("as config source"), color::green("<子命令>"), color::gray("[参数]"));
@@ -324,7 +324,7 @@ pub fn run_example() {
             ("as config path", "显示所有数据目录位置"),
             ("as config path -o", "在资源管理器中打开配置目录"),
         ]),
-        ("config source", "管理软件源定义", &[
+        ("config source", "管理源定义（软件 + 工具）", &[
             ("as config source update", "从远程仓库下载最新源定义"),
             ("as config source path", "显示源定义目录路径"),
             ("as config source path -o", "在资源管理器中打开源目录"),

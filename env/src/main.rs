@@ -69,22 +69,16 @@ enum Commands {
         #[arg(short = 'h', long = "help")]
         help: bool,
     },
-    /// 激活环境（输出 shell 脚本，请 eval 执行）
+    /// 激活环境（生成 .bat 和 .ps1 脚本到 %LOCALAPPDATA%\e\）
     Activate {
         /// 环境名称
         name: String,
-        /// 输出 PowerShell 脚本（默认 cmd.exe）
-        #[arg(long = "ps1")]
-        ps1: bool,
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
     },
-    /// 停用当前环境（输出恢复脚本）
+    /// 停用当前环境（显示停用脚本路径）
     Deactivate {
-        /// 输出 PowerShell 脚本（默认 cmd.exe）
-        #[arg(long = "ps1")]
-        ps1: bool,
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
@@ -158,20 +152,20 @@ fn main() {
             show_path(cli.no_color);
             return;
         }
-        Some(Commands::Activate { name: _, ps1: _, help: true }) => {
+        Some(Commands::Activate { name: _, help: true }) => {
             print_subcommand_help("activate");
             return;
         }
-        Some(Commands::Activate { name, ps1, help: false }) => {
-            cmd_activate(&name, ps1);
+        Some(Commands::Activate { name, help: false }) => {
+            cmd_activate(&name);
             return;
         }
-        Some(Commands::Deactivate { ps1: _, help: true }) => {
+        Some(Commands::Deactivate { help: true }) => {
             print_subcommand_help("deactivate");
             return;
         }
-        Some(Commands::Deactivate { ps1, help: false }) => {
-            cmd_deactivate(ps1);
+        Some(Commands::Deactivate { help: false }) => {
+            cmd_deactivate();
             return;
         }
         Some(Commands::List { help: true }) => {
@@ -453,7 +447,7 @@ fn get_matching_color(path: &str, color_map: &HashMap<String, String>) -> Option
 
 // ── 环境激活/停用 ──────────────────────────────────
 
-fn cmd_activate(name: &str, ps1: bool) {
+fn cmd_activate(name: &str) {
     let def = match activate::load_env(name) {
         Some(d) => d,
         None => {
@@ -463,18 +457,65 @@ fn cmd_activate(name: &str, ps1: bool) {
         }
     };
 
-    if ps1 {
-        activate::print_activate_ps1(&def, name);
-    } else {
-        activate::print_activate_cmd(&def, name);
+    match activate::write_activate_scripts(&def, name) {
+        Ok(()) => {
+            let scripts_dir = std::env::var("LOCALAPPDATA")
+                .map(|p| std::path::PathBuf::from(p).join("e"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let bat = scripts_dir.join(format!("activate-{}.bat", name));
+            let ps1 = scripts_dir.join(format!("Activate-{}.ps1", name));
+
+            println!("{} 环境 '{}' 的激活脚本已生成", green("✓"), cyan(name));
+            println!();
+            println!("  {}", bold_yellow("运行以下脚本激活:"));
+            println!("    {}  {}", green("cmd.exe:"),       cyan(bat.to_string_lossy()));
+            println!("    {}  {}", green("PowerShell:"),    cyan(ps1.to_string_lossy()));
+            println!();
+            println!("  {}", bold_yellow("停用环境:"));
+            println!("    {}  {}", green("cmd.exe:"),       cyan(scripts_dir.join(format!("deactivate-{}.bat", name)).to_string_lossy()));
+            println!("    {}  {}", green("PowerShell:"),    cyan(scripts_dir.join(format!("Deactivate-{}.ps1", name)).to_string_lossy()));
+        }
+        Err(e) => {
+            eprintln!("{} {}", red("错误:"), e);
+        }
     }
 }
 
-fn cmd_deactivate(ps1: bool) {
-    if ps1 {
-        activate::print_deactivate_ps1();
-    } else {
-        activate::print_deactivate_cmd();
+fn cmd_deactivate() {
+    let scripts_dir = std::env::var("LOCALAPPDATA")
+        .map(|p| std::path::PathBuf::from(p).join("e"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // 列出所有可用的停用脚本
+    let mut found = false;
+    if let Ok(entries) = std::fs::read_dir(&scripts_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                if name.starts_with("deactivate-") {
+                    let _env_name = name.trim_start_matches("deactivate-");
+                    if !found {
+                        println!("{} 可用的停用脚本:", green("✓"));
+                        found = true;
+                    }
+                    println!("  {} {}",
+                        gray("•"),
+                        cyan(path.to_string_lossy()));
+                    if let Some(ext) = path.extension() {
+                        if ext == "bat" {
+                            println!("    {} 运行: {}", gray("cmd.exe:"), gray(format!("call \"{}\"", path.to_string_lossy())));
+                        } else if ext == "ps1" {
+                            println!("    {} 运行: {}", gray("PowerShell:"), gray(format!(". '{}'", path.to_string_lossy())));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !found {
+        eprintln!("{} 没有找到停用脚本", yellow("注意:"));
+        eprintln!("{} 请先运行 e activate <环境名> 生成脚本", gray("提示:"));
     }
 }
 
@@ -563,8 +604,8 @@ fn print_short_help() {
     println!("    {} [{}]", green("e"), gray("路径"));
     println!("    {} {} {}", green("e"), cyan("set"),         gray("显示所有环境变量"));
     println!("    {} {} {}", green("e"), cyan("path"),        gray("显示 PATH"));
-    println!("    {} {} {}", green("e"), cyan("activate"),    gray("激活环境"));
-    println!("    {} {} {}", green("e"), cyan("deactivate"),  gray("恢复环境"));
+    println!("    {} {} {}", green("e"), cyan("activate"),    gray("生成激活/停用脚本"));
+    println!("    {} {} {}", green("e"), cyan("deactivate"),  gray("列出停用脚本路径"));
     println!("    {} {}", green("e -g"),                      gray("打开环境变量对话框"));
     println!();
     println!("  {}", bold_yellow("子命令:"));
@@ -572,8 +613,8 @@ fn print_short_help() {
     let cmds: &[(&str, &str)] = &[
         ("set",       "显示所有环境变量（带颜色）"),
         ("path",      "显示 PATH（带颜色）"),
-        ("activate",  "激活环境（输出 shell 脚本）"),
-        ("deactivate","恢复环境（输出恢复脚本）"),
+        ("activate",  "生成激活/停用脚本"),
+        ("deactivate","列出停用脚本路径"),
         ("list",      "列出可用环境"),
         ("venv",      "创建新环境定义"),
         ("config",    "显示/打开配置目录"),
@@ -649,28 +690,34 @@ fn print_subcommand_help(cmd: &str) {
                 gray("不使用颜色输出"));
         }
         "activate" => {
-            println!("  {} — {}", bold_cyan("e activate"), green("激活环境"));
+            println!("  {} — {}", bold_cyan("e activate"), green("生成激活脚本"));
             println!();
             println!("  {}", bold_yellow("用法:"));
-            println!("    {} {} {}  {}", green("e"), cyan("activate"), gray("<环境名>"), gray("(输出 cmd.exe 脚本)"));
-            println!("    {} {} {} {}  {}", green("e"), cyan("activate"), gray("<环境名>"), cyan("--ps1"), gray("(输出 PowerShell 脚本)"));
+            println!("    {} {} {}", green("e"), cyan("activate"), gray("<环境名>"));
             println!();
             println!("  {}", bold_yellow("说明:"));
-            println!("  {} 输出 shell 脚本到 stdout，请在终端中 eval 执行", gray(""));
-            println!("  {} PowerShell: {}  {}", gray("•"), cyan("e activate home | iex"), gray(""));
-            println!("  {} Cmd: {}  {}", gray("•"), cyan("e activate home > %TEMP%\\act.bat && call %TEMP%\\act.bat"), gray(""));
+            println!("  {} 在 %LOCALAPPDATA%\\e\\ 目录下生成激活/停用脚本", gray(""));
+            println!("  {} 生成的文件:", gray(""));
+            println!("    {}  {}", cyan("•"), cyan("activate-<环境名>.bat"));
+            println!("    {}  {}", cyan("•"), cyan("Activate-<环境名>.ps1"));
+            println!("    {}  {}", cyan("•"), cyan("deactivate-<环境名>.bat"));
+            println!("    {}  {}", cyan("•"), cyan("Deactivate-<环境名>.ps1"));
+            println!();
+            println!("  {}", bold_yellow("使用方式:"));
+            println!("  {}  {}  {}", gray("cmd.exe:"),      gray("先运行 e activate <环境名>，再运行 activate-<环境名>.bat"), gray(""));
+            println!("  {}  {}  {}", gray("PowerShell:"),   gray("先运行 e activate <环境名>，再运行 .\\Activate-<环境名>.ps1"), gray(""));
+            println!("  {}  {}  {}", gray("停用:"),         gray("运行 deactivate-<环境名>.bat 或 Deactivate-<环境名>.ps1"), gray(""));
         }
         "deactivate" => {
-            println!("  {} — {}", bold_cyan("e deactivate"), green("恢复环境"));
+            println!("  {} — {}", bold_cyan("e deactivate"), green("列出可用的停用脚本路径"));
             println!();
             println!("  {}", bold_yellow("用法:"));
-            println!("    {} {}  {}", green("e"), cyan("deactivate"), gray("(输出 cmd.exe 恢复脚本)"));
-            println!("    {} {} {}  {}", green("e"), cyan("deactivate"), cyan("--ps1"), gray("(输出 PowerShell 恢复脚本)"));
+            println!("    {} {}", green("e deactivate"), gray(""));
             println!();
             println!("  {}", bold_yellow("说明:"));
-            println!("  {} 恢复到 activate 前的环境状态", "");
-            println!("  {} PowerShell: {}  {}", gray("•"), cyan("e deactivate | iex"), gray(""));
-            println!("  {} Cmd: {}  {}", gray("•"), cyan("e deactivate > %TEMP%\\deact.bat && call %TEMP%\\deact.bat"), gray(""));
+            println!("  {} 显示所有已生成停用脚本的路径", gray(""));
+            println!("  {} 运行对应脚本即可恢复到激活前的环境状态", gray(""));
+            println!("  {} 如果还没有停用脚本，请先运行 e activate <环境名>", gray(""));
         }
         "list" => {
             println!("  {} — {}", bold_cyan("e list"), green("列出可用环境"));
@@ -755,10 +802,8 @@ fn print_examples() {
 
     let act_examples: &[(&str, &str)] = &[
         ("e list", "列出可用环境"),
-        ("e activate home", "激活 home 环境（输出 cmd 脚本）"),
-        ("e activate home --ps1", "激活 home 环境（输出 PowerShell 脚本）"),
-        ("e deactivate", "恢复环境（输出 cmd 脚本）"),
-        ("e deactivate --ps1", "恢复环境（输出 PowerShell 脚本）"),
+        ("e activate home", "生成 home 环境的激活/停用脚本"),
+        ("e deactivate", "列出已生成的停用脚本"),
     ];
 
     let max_w3 = act_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(34);
@@ -771,8 +816,9 @@ fn print_examples() {
     println!();
 
     println!("  {}", bold_yellow("使用方式:"));
-    println!("  {}  {}  {}", gray("PowerShell:"), cyan("e activate home | iex"), gray(""));
-    println!("  {}  {}  {}", gray("Cmd:"), cyan("e activate home > %TEMP%\\act.bat && call %TEMP%\\act.bat"), gray(""));
+    println!("  {}  {}  {}", gray("cmd.exe:"),      gray("activate-home.bat"), gray(""));
+    println!("  {}  {}  {}", gray("PowerShell:"),   gray(".\\Activate-home.ps1"), gray(""));
+    println!("  {}  {}  {}", gray("停用:"),         gray("deactivate-home.bat"), gray(""));
     println!();
 
     println!("  {}", bold_yellow("创建新环境 (venv):"));
@@ -792,7 +838,7 @@ fn print_examples() {
 
     println!("  {}", bold_yellow("文件存储:"));
     println!("  {}  {}", gray("配置/环境定义:"), cyan("%LOCALAPPDATA%\\e\\"));
-    println!("  {}  {}", gray("状态快照:"), cyan("%TEMP%\\e-state-<PID>.json（每个会话独立）"));
+    println!("  {}  {}", gray("激活/停用脚本:"), cyan("%LOCALAPPDATA%\\e\\activate-<环境名>.bat / .ps1"));
     println!();
 
     println!("  {}", bold_yellow("配置文件"));

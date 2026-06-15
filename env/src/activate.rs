@@ -17,62 +17,23 @@ pub struct EnvDef {
     pub paths_prepend: Vec<String>,
 }
 
-/// 环境快照（保存当前会话环境，用于 deactivate 恢复）
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct EnvSnapshot {
-    pub old_path: String,
-    pub old_prompt: String,
-    pub old_variables: HashMap<String, String>,
-    pub set_variables: Vec<String>,
-    pub env_name: String,
+/// 环境快照（用于内嵌到 deactivate 脚本中）
+struct EnvSnapshot {
+    old_path: String,
+    old_prompt: String,
+    old_variables: HashMap<String, String>,
+    set_variables: Vec<String>,
 }
 
-// ── 获取父进程 PID（Windows） ──────────────────
+// ── 目录 ──────────────────────────────────
 
-#[repr(C)]
-struct ProcessBasicInfo {
-    exit_status: i32,
-    peb_base: *mut u8,
-    affinity_mask: usize,
-    base_priority: i32,
-    unique_pid: usize,
-    inherited_from: usize, // 父进程 PID
+/// 获取脚本输出目录：%LOCALAPPDATA%\e\
+fn get_scripts_dir() -> PathBuf {
+    let local = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
+    PathBuf::from(local).join("e")
 }
 
-unsafe extern "system" {
-    fn NtQueryInformationProcess(
-        handle: isize,
-        info_class: u32,
-        info: *mut u8,
-        len: u32,
-        ret_len: *mut u32,
-    ) -> i32;
-    fn GetCurrentProcess() -> isize;
-}
-
-/// 获取调用者的父进程 PID（即 shell 的 PID）
-fn get_session_id() -> u32 {
-    unsafe {
-        let mut pbi: ProcessBasicInfo = std::mem::zeroed();
-        let status = NtQueryInformationProcess(
-            GetCurrentProcess(),
-            0, // ProcessBasicInformation
-            &mut pbi as *mut _ as *mut u8,
-            std::mem::size_of::<ProcessBasicInfo>() as u32,
-            std::ptr::null_mut(),
-        );
-        if status == 0 {
-            pbi.inherited_from as u32
-        } else {
-            // 失败回退到当前 PID
-            std::process::id()
-        }
-    }
-}
-
-// ── 环境定义目录 ──────────────────────────────────
-
-/// 获取环境定义目录（统一在 %LOCALAPPDATA%\e\envs\）
+/// 获取环境定义目录
 pub fn get_envs_dir() -> PathBuf {
     let local = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
     PathBuf::from(local).join("e").join("envs")
@@ -138,99 +99,255 @@ prompt: "[{}] $P$G"
     );
 
     std::fs::write(&path, template).map_err(|e| format!("无法写入 {}: {}", path.display(), e))?;
-
     Ok(path)
 }
 
-// ── 状态文件（按会话独立） ──────────────────
+// ── 生成激活/停用脚本 ─────────────────────────
 
-/// 状态文件路径：%TEMP%\e-state-<父进程PID>.json
-fn get_state_path() -> PathBuf {
-    let tmp = std::env::var("TEMP").unwrap_or_else(|_| ".".into());
-    let session = get_session_id();
-    PathBuf::from(tmp).join(format!("e-state-{}.json", session))
+/// 生成激活脚本和停用脚本（停用脚本内嵌快照值）。
+///
+/// 输出到 %LOCALAPPDATA%\e\ 目录：
+///   - activate-<name>.bat     (cmd)
+///   - Activate-<name>.ps1     (PowerShell)
+///   - deactivate-<name>.bat   (cmd)
+///   - Deactivate-<name>.ps1   (PowerShell)
+pub fn write_activate_scripts(def: &EnvDef, name: &str) -> Result<(), String> {
+    let dir = get_scripts_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("无法创建目录 {}: {}", dir.display(), e))?;
+
+    let snapshot = capture_snapshot(name, def);
+
+    // ── cmd 激活脚本 ──
+    write_activate_bat(&dir, name, def)?;
+    // ── PowerShell 激活脚本 ──
+    write_activate_ps1(&dir, name, def)?;
+    // ── cmd 停用脚本（内嵌快照） ──
+    write_deactivate_bat(&dir, name, &snapshot)?;
+    // ── PowerShell 停用脚本（内嵌快照） ──
+    write_deactivate_ps1(&dir, name, &snapshot)?;
+
+    Ok(())
 }
 
-/// 保存当前环境快照
-pub fn save_snapshot(snapshot: &EnvSnapshot) {
-    if let Ok(json) = serde_json::to_string_pretty(snapshot) {
-        let _ = std::fs::write(get_state_path(), json);
+// ── CMD 激活脚本 ──
+
+fn write_activate_bat(dir: &PathBuf, name: &str, def: &EnvDef) -> Result<(), String> {
+    let path = dir.join(format!("activate-{}.bat", name));
+    let mut lines = Vec::new();
+
+    lines.push("@echo off".to_string());
+    lines.push(format!("REM 激活环境: {}", name));
+    lines.push(String::new());
+
+    // 保存旧值
+    lines.push("set \"_E_OLD_PATH=%PATH%\"".to_string());
+    lines.push(format!("set \"_E_OLD_PROMPT=%PROMPT%\""));
+    for key in def.variables.keys() {
+        lines.push(format!("set \"_E_OLD_{}=%{}%\"", key, key));
     }
-}
+    lines.push(String::new());
 
-/// 读取环境快照
-pub fn load_snapshot() -> Option<EnvSnapshot> {
-    let content = std::fs::read_to_string(get_state_path()).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-/// 清除快照
-pub fn clear_snapshot() {
-    let _ = std::fs::remove_file(get_state_path());
-}
-
-// ── 输出激活脚本 ──────────────────────────────────
-
-/// 生成 cmd.exe 激活脚本
-pub fn print_activate_cmd(def: &EnvDef, env_name: &str) {
-    let snapshot = capture_snapshot(env_name, def);
-    save_snapshot(&snapshot);
-
-    println!("@echo off");
-    println!("REM e: activate environment '{}'", env_name);
-    println!();
-
+    // 设置新变量
     for (key, val) in &def.variables {
-        println!("@set \"{}={}\"", key, val);
+        lines.push(format!("set \"{}={}\"", key, val));
     }
 
+    // PATH 前置追加
     if !def.paths_prepend.is_empty() {
         for p in &def.paths_prepend {
-            println!("@set \"PATH={};%PATH%\"", p);
+            lines.push(format!("set \"PATH={};%PATH%\"", p));
         }
     }
 
+    // PROMPT
     if !def.prompt.is_empty() {
-        println!("@set \"PROMPT={}\"", def.prompt);
+        lines.push(format!("set \"PROMPT={}\"", def.prompt));
     }
 
-    println!();
-    println!("@echo {} {}[{}]{} {}",
-        green("激活环境:"),
+    lines.push(String::new());
+    lines.push(format!("echo {} {} @{}@",
+        green("已激活环境:"),
         cyan(""),
-        cyan(env_name),
-        gray(""),
-        gray("使用 e deactivate 恢复"));
+        cyan(name)));
+    lines.push(format!("echo {}",
+        gray("运行 deactivate-{}.bat 恢复".to_string())));
+    lines.push(format!("echo {}",
+        gray(format!("停用: %LOCALAPPDATA%\\e\\deactivate-{}.bat", name))));
+
+    let content = lines
+        .iter()
+        .map(|l| {
+            // 替换 ANSI 标记
+            l.replace("@", "")
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n");
+
+    // 去掉 ANSI 转义，保留纯文本
+    let content = strip_ansi_escapes(&content);
+
+    std::fs::write(&path, content)
+        .map_err(|e| format!("无法写入 {}: {}", path.display(), e))?;
+    Ok(())
 }
 
-/// 生成 PowerShell 激活脚本
-pub fn print_activate_ps1(def: &EnvDef, env_name: &str) {
-    let snapshot = capture_snapshot(env_name, def);
-    save_snapshot(&snapshot);
+/// 去掉 ANSI 转义序列（批处理不支持）
+fn strip_ansi_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // 跳过 CSI 序列：\x1b[...m
+            while let Some(n) = chars.next() {
+                if n == 'm' { break; }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 
-    println!("# e: activate environment '{}'", env_name);
-    println!();
+// ── PowerShell 激活脚本 ──
 
+fn write_activate_ps1(dir: &PathBuf, name: &str, def: &EnvDef) -> Result<(), String> {
+    let path = dir.join(format!("Activate-{}.ps1", name));
+    let mut lines = Vec::new();
+
+    lines.push(format!("# 激活环境: {}", name));
+    lines.push(String::new());
+
+    // 保存旧值
+    lines.push("$_E_OLD_PATH = $env:PATH".to_string());
+    lines.push("$_E_OLD_PROMPT = $env:PROMPT".to_string());
+    for key in def.variables.keys() {
+        lines.push(format!("$_E_OLD_{0} = $env:{0}", key));
+    }
+    lines.push(String::new());
+
+    // 设置新变量
     for (key, val) in &def.variables {
-        println!("$env:{} = '{}'", key, val);
+        lines.push(format!("$env:{} = '{}'", key, val));
     }
 
+    // PATH 前置追加
     if !def.paths_prepend.is_empty() {
         for p in &def.paths_prepend {
-            println!("$env:PATH = '{};' + $env:PATH", p);
+            lines.push(format!("$env:PATH = '{};' + $env:PATH", p));
         }
     }
 
+    // PROMPT
     if !def.prompt.is_empty() {
-        println!("$env:PROMPT = '{}'", def.prompt);
+        lines.push(format!("$env:PROMPT = '{}'", def.prompt));
     }
 
-    println!("Write-Host \"激活环境:\" -ForegroundColor Green");
-    println!("Write-Host \" {}\" -NoNewline -ForegroundColor Cyan", env_name);
-    println!("Write-Host \" - 使用 e deactivate 恢复\"");
+    lines.push(String::new());
+    lines.push(format!("Write-Host \"已激活环境: {}\" -ForegroundColor Green", name));
+    lines.push(format!("Write-Host \"停用: . '{}\" -ForegroundColor Gray",
+        dir.join(format!("Deactivate-{}.ps1", name)).to_string_lossy()));
+
+    let content = lines.join("\r\n");
+    std::fs::write(&path, content)
+        .map_err(|e| format!("无法写入 {}: {}", path.display(), e))?;
+    Ok(())
 }
 
-fn capture_snapshot(env_name: &str, def: &EnvDef) -> EnvSnapshot {
+// ── CMD 停用脚本（内嵌快照值） ──
+
+fn write_deactivate_bat(dir: &PathBuf, name: &str, snap: &EnvSnapshot) -> Result<(), String> {
+    let path = dir.join(format!("deactivate-{}.bat", name));
+    let mut lines = Vec::new();
+
+    lines.push("@echo off".to_string());
+    lines.push(format!("REM 停用环境: {}", name));
+    lines.push(String::new());
+
+    // 恢复 PATH（直接从脚本变量恢复，不依赖 _E_OLD_PATH 保存的值）
+    // 但优先使用 _E_OLD_PATH（如果用户没手动改动过）
+    lines.push(format!("if defined _E_OLD_PATH (set \"PATH=%_E_OLD_PATH%\") else (set \"PATH={}\")",
+        snap.old_path));
+
+    // 恢复 PROMPT
+    if !snap.old_prompt.is_empty() {
+        lines.push(format!("if defined _E_OLD_PROMPT (set \"PROMPT=%_E_OLD_PROMPT%\") else (set \"PROMPT={}\")",
+            snap.old_prompt));
+    } else {
+        lines.push("set \"PROMPT=%_E_OLD_PROMPT%\"".to_string());
+    }
+
+    // 恢复变量
+    for key in &snap.set_variables {
+        if let Some(old_val) = snap.old_variables.get(key) {
+            lines.push(format!(
+                "if defined _E_OLD_{key} (set \"{key}=%_E_OLD_{key}%\") else (set \"{key}={val}\")",
+                key = key, val = old_val));
+        } else {
+            lines.push(format!("set \"{}=\"", key));
+        }
+    }
+
+    // 清理 _E_OLD_ 变量
+    lines.push("set \"_E_OLD_PATH=\"".to_string());
+    lines.push("set \"_E_OLD_PROMPT=\"".to_string());
+    for key in &snap.set_variables {
+        lines.push(format!("set \"_E_OLD_{}=\"", key));
+    }
+
+    lines.push(String::new());
+    lines.push(format!("echo 已退出环境: {}", name));
+
+    let content = strip_ansi_escapes(&lines.join("\r\n"));
+    std::fs::write(&path, content)
+        .map_err(|e| format!("无法写入 {}: {}", path.display(), e))?;
+    Ok(())
+}
+
+// ── PowerShell 停用脚本（内嵌快照值） ──
+
+fn write_deactivate_ps1(dir: &PathBuf, name: &str, snap: &EnvSnapshot) -> Result<(), String> {
+    let path = dir.join(format!("Deactivate-{}.ps1", name));
+    let mut lines = Vec::new();
+
+    lines.push(format!("# 停用环境: {}", name));
+    lines.push(String::new());
+
+    // 恢复 PATH
+    lines.push(format!(
+        "if ($_E_OLD_PATH -ne $null) {{ $env:PATH = $_E_OLD_PATH }} else {{ $env:PATH = '{}' }}",
+        snap.old_path));
+
+    // 恢复 PROMPT
+    if !snap.old_prompt.is_empty() {
+        lines.push(format!(
+            "if ($_E_OLD_PROMPT -ne $null) {{ $env:PROMPT = $_E_OLD_PROMPT }} else {{ $env:PROMPT = '{}' }}",
+            snap.old_prompt));
+    }
+
+    // 恢复变量
+    for key in &snap.set_variables {
+        if let Some(old_val) = snap.old_variables.get(key) {
+            lines.push(format!(
+                "if ($_E_OLD_{key} -ne $null) {{ $env:{key} = $_E_OLD_{key} }} else {{ $env:{key} = '{val}' }}",
+                key = key, val = old_val));
+        } else {
+            lines.push(format!("Remove-Item Env:{} -ErrorAction SilentlyContinue", key));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push(format!("Write-Host \"已退出环境: {}\" -ForegroundColor Green", name));
+
+    let content = lines.join("\r\n");
+    std::fs::write(&path, content)
+        .map_err(|e| format!("无法写入 {}: {}", path.display(), e))?;
+    Ok(())
+}
+
+// ── 快照 ──────────────────────────────────
+
+fn capture_snapshot(_env_name: &str, def: &EnvDef) -> EnvSnapshot {
     let old_path = std::env::var("PATH").unwrap_or_default();
     let old_prompt = std::env::var("PROMPT").unwrap_or_default();
     let mut old_variables = HashMap::new();
@@ -244,83 +361,7 @@ fn capture_snapshot(env_name: &str, def: &EnvDef) -> EnvSnapshot {
         old_prompt,
         old_variables,
         set_variables: def.variables.keys().cloned().collect(),
-        env_name: env_name.to_string(),
     }
-}
-
-// ── 输出停用脚本 ──────────────────────────────────
-
-/// 生成 cmd.exe 停用脚本
-pub fn print_deactivate_cmd() {
-    let snapshot = match load_snapshot() {
-        Some(s) => s,
-        None => {
-            eprintln!("{} 没有已激活的环境", red("错误:"));
-            eprintln!("{} 请先运行 e activate <环境名>", gray("提示:"));
-            return;
-        }
-    };
-
-    println!("@echo off");
-    println!("REM e: deactivate environment '{}'", snapshot.env_name);
-    println!();
-
-    println!("@set \"PATH={}\"", snapshot.old_path);
-
-    if !snapshot.old_prompt.is_empty() {
-        println!("@set \"PROMPT={}\"", snapshot.old_prompt);
-    }
-
-    for key in &snapshot.set_variables {
-        if let Some(old_val) = snapshot.old_variables.get(key) {
-            println!("@set \"{}={}\"", key, old_val);
-        } else {
-            println!("@set \"{}=\"", key);
-        }
-    }
-
-    println!();
-    println!("@echo {} {}[{}]{}",
-        green("已退出环境:"),
-        cyan(""),
-        cyan(&snapshot.env_name),
-        gray(""));
-
-    clear_snapshot();
-}
-
-/// 生成 PowerShell 停用脚本
-pub fn print_deactivate_ps1() {
-    let snapshot = match load_snapshot() {
-        Some(s) => s,
-        None => {
-            eprintln!("{} 没有已激活的环境", red("错误:"));
-            eprintln!("{} 请先运行 e activate <环境名>", gray("提示:"));
-            return;
-        }
-    };
-
-    println!("# e: deactivate environment '{}'", snapshot.env_name);
-    println!();
-
-    println!("$env:PATH = '{}'", snapshot.old_path);
-
-    if !snapshot.old_prompt.is_empty() {
-        println!("$env:PROMPT = '{}'", snapshot.old_prompt);
-    }
-
-    for key in &snapshot.set_variables {
-        if let Some(old_val) = snapshot.old_variables.get(key) {
-            println!("$env:{} = '{}'", key, old_val);
-        } else {
-            println!("Remove-Item Env:{} -ErrorAction SilentlyContinue", key);
-        }
-    }
-
-    println!("Write-Host \"已退出环境:\" -ForegroundColor Green");
-    println!("Write-Host \" {}\" -ForegroundColor Cyan", snapshot.env_name);
-
-    clear_snapshot();
 }
 
 // ── 打印环境列表（终端展示） ─────────────────────
@@ -340,6 +381,7 @@ pub fn print_env_list() {
         return;
     }
 
+    let scripts_dir = get_scripts_dir();
     for name in &envs {
         if let Some(def) = load_env(name) {
             let var_count = def.variables.len();
@@ -355,16 +397,18 @@ pub fn print_env_list() {
         }
     }
     println!();
-    println!("  {}  {}  {}  {}",
-        gray("激活:"),
-        cyan("e activate <环境名> --cmd | iex"),
-        gray(""),
-        gray("(PowerShell)"));
-    println!("  {}  {}  {}",
-        gray("停用:"),
-        cyan("e deactivate --cmd | iex"),
-        gray("(PowerShell)"));
+    println!("  {}", bold_yellow("使用方法:"));
     println!();
-    println!("  {}", gray(format!("定义文件: {}\\<环境名>.yaml", envs_dir.display())));
-    println!("  {}", gray(format!("状态快照: %TEMP%\\e-state-<PID>.json（每个会话独立）")));
+    for name in &envs {
+        let bat = scripts_dir.join(format!("activate-{}.bat", name));
+        let ps1 = scripts_dir.join(format!("Activate-{}.ps1", name));
+        println!("  {}", cyan(name));
+        println!("    {} {}", green("cmd:"),        gray(bat.to_string_lossy()));
+        println!("    {} {}", green("PowerShell:"), gray(ps1.to_string_lossy()));
+    }
+    println!();
+    println!("  {}", gray("先运行 e activate <环境名> 生成脚本，然后执行对应脚本激活。"));
+    println!();
+    println!("  {}", gray(format!("定义文件: {}", envs_dir.display())));
+    println!("  {}", gray(format!("脚本目录: {}", scripts_dir.display())));
 }

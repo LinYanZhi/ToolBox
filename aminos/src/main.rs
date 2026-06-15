@@ -193,7 +193,7 @@ pub enum ConfigCmd {
 
 #[derive(Subcommand)]
 pub enum SourceCmd {
-    /// 从远程仓库下载最新源定义
+    /// 从远程仓库下载最新源定义（同时更新软件源和工具源）
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Update,
     /// 显示当前源目录路径
