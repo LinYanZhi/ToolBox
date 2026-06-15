@@ -73,8 +73,12 @@ fn label_of_type(itype: &str) -> String {
 }
 
 pub fn install_software(name: &str, opts: &opts::InstallOpts) -> anyhow::Result<()> {
-    // 1. Read software definition
     let sd = software::read_software_def(name)?;
+    install_software_by_def(name, &sd, opts)
+}
+
+/// 安装第三方软件（使用预读取的 SoftwareDef，供 cmd_install 直接调用）
+pub fn install_software_by_def(name: &str, sd: &software::SoftwareDef, opts: &opts::InstallOpts) -> anyhow::Result<()> {
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
     // 2. Resolve version — 如果未指定，检查是否有多种安装类型可供选择
@@ -305,22 +309,63 @@ fn install_self_tool(
     println!("\n✓ {} {} 安装完成", display, ver);
     println!("  位置: {}", tool_dir.display());
 
-    // 检查 PATH 是否已包含 tools/bin
+    // 检查 tools/bin 是否已加入用户 PATH（注册表）
     let bin_dir = paths::tools_bin_dir();
-    let in_path = std::env::var("PATH").ok()
-        .map(|p| {
-            let bin = bin_dir.to_string_lossy().to_lowercase();
-            p.split(';').any(|s| s.trim().to_lowercase() == bin)
-        })
-        .unwrap_or(false);
+    let registered = is_tools_bin_in_user_path();
+    let in_session = is_tools_bin_in_session_path(&bin_dir);
 
-    if in_path {
+    if registered && in_session {
         println!("  {} 可直接在终端使用", color::cyan(&format!("{}", name)));
+    } else if registered && !in_session {
+        // 注册表已有，但当前终端未刷新
+        println!("  {} 可直接在终端使用", color::cyan(&format!("{}", name)));
+        println!("  如需在当前终端立即生效，请执行:");
+        let bin_path = bin_dir.to_string_lossy();
+        if detect_powershell() {
+            println!("    {}", color::bold_green(&format!("$env:PATH = \"{};$env:PATH\"", bin_path)));
+        } else {
+            println!("    {}", color::bold_green(&format!("set PATH={};%PATH%", bin_path)));
+        }
     } else {
         println!("  {} 请先运行 {} 将 tools/bin 加入 PATH", name, color::cyan("as self init"));
     }
 
     Ok(())
+}
+
+// ── 公开接口：自研工具安装/卸载（供 cm d_tool.rs 调用）────
+
+/// 安装自研工具：从 source/tools/ 读取定义，下载 ZIP 并硬链接到 tools/bin/
+pub fn install_tool(name: &str, opts: &opts::InstallOpts) -> anyhow::Result<()> {
+    let sd = software::read_tool_def(name)?;
+    let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
+
+    let ver = if opts.version.is_empty() {
+        sd.default_version.clone()
+    } else {
+        opts.version.clone()
+    };
+
+    let vi = match sd.versions.get(&ver) {
+        Some(vi) => vi,
+        None => {
+            let available: Vec<&str> = sd.versions.keys().map(|v| v.as_str()).collect();
+            bail!("{}: 未找到版本 '{}'\n  可用版本: {}", name, ver, available.join(", "));
+        }
+    };
+
+    if vi.urls.is_empty() {
+        bail!("{}: 未配置下载地址", name);
+    }
+
+    install_self_tool(name, &sd, display, &ver, vi, opts)
+}
+
+/// 卸载自研工具：删除 tools/{name}/ 目录和 tools/bin/{name}.exe 硬链接
+pub fn uninstall_tool(name: &str) -> anyhow::Result<()> {
+    let sd = software::read_tool_def(name)?;
+    let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
+    uninstall_self_tool(name, display)
 }
 
 // ── Uninstall ─────────────────────────────────────────────
@@ -1162,4 +1207,70 @@ fn sort_versions_desc(versions: &mut [&str]) {
             (Some(pa), Some(pb)) => pb.cmp(pa),  // 都是预发布：后缀字符串降序
         }
     });
+}
+
+/// 检查 tools/bin 是否已注册到用户 PATH（读取注册表，不受当前会话影响）
+fn is_tools_bin_in_user_path() -> bool {
+    let bin_dir = paths::tools_bin_dir();
+    let bin_path = bin_dir.to_string_lossy().to_string();
+
+    let ps_cmd = format!("[Environment]::GetEnvironmentVariable('PATH', 'User')");
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_cmd])
+        .output();
+    match output {
+        Ok(o) => {
+            let user_path = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            user_path.split(';')
+                .any(|p| p.trim().to_lowercase() == bin_path.to_lowercase())
+        }
+        Err(_) => false,
+    }
+}
+
+/// 检查 tools/bin 是否在当前终端会话的 PATH 中
+fn is_tools_bin_in_session_path(bin_dir: &Path) -> bool {
+    std::env::var("PATH").ok().map_or(false, |p| {
+        let bin = bin_dir.to_string_lossy().to_lowercase();
+        p.split(';').any(|s| s.trim().to_lowercase() == bin)
+    })
+}
+
+/// 检测当前终端是否为 PowerShell（而非 cmd.exe）
+fn detect_powershell() -> bool {
+    if let Some(ppid) = get_parent_process_name() {
+        let lower = ppid.to_lowercase();
+        lower.contains("powershell") || lower.contains("pwsh")
+    } else {
+        false
+    }
+}
+
+/// 获取父进程名称
+fn get_parent_process_name() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let pid = std::process::id();
+        let output = std::process::Command::new("wmic")
+            .args(["process", "where", &format!("ProcessId={}", pid), "get", "ParentProcessId"])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parent_pid = stdout
+            .lines()
+            .nth(1)
+            .and_then(|l| l.trim().parse::<u32>().ok())?;
+
+        let output = std::process::Command::new("wmic")
+            .args(["process", "where", &format!("ProcessId={}", parent_pid), "get", "Name"])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let name = stdout.lines().nth(1).map(|l| l.trim().to_string())?;
+        Some(name)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }

@@ -2,8 +2,19 @@ use std::path::PathBuf;
 
 static RESOLVER: config::PathResolver = config::PathResolver::aminos();
 
+/// 源定义根目录：`source/`
 pub fn source_dir() -> PathBuf {
     RESOLVER.source_dir()
+}
+
+/// 第三方软件源定义目录：`source/apps/`
+pub fn apps_source_dir() -> PathBuf {
+    source_dir().join("apps")
+}
+
+/// 自研工具源定义目录：`source/tools/`
+pub fn tools_source_dir() -> PathBuf {
+    source_dir().join("tools")
 }
 
 pub fn builds_dir() -> PathBuf {

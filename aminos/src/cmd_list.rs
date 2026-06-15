@@ -71,7 +71,7 @@ pub fn scan_download_cache() -> HashMap<String, (&'static str, &'static str)> {
 
 pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     // Auto-init: if source dir is empty, suggest `as source update`
-    let source = paths::source_dir();
+    let source = paths::apps_source_dir();
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
         println!("{}", color::yellow("  未找到源定义。首次使用请运行:"));
         println!("  as env source update\n");

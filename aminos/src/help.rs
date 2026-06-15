@@ -104,12 +104,19 @@ pub fn print_tool_help() {
     println!("    {} {} {}", color::cyan("as tool"), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
-    println!("    {}  {}", color::cyan("list"),   "列出已安装的自研工具");
+    println!("    {}  {}", color::cyan("install"), "安装/更新自研工具（从 source/tools/ 读取）");
+    println!("    {}  {}", color::cyan("upgrade"), "升级所有已安装的自研工具");
+    println!("    {}  {}", color::cyan("list"),   "列出所有可用自研工具及安装状态");
     println!("    {}  {}", color::cyan("remove"), "移除一个自研工具");
     println!();
     println!("  {}", color::bold_yellow("示例:"));
-    println!("    {}  {}", color::cyan("as tool list"),     "列出已安装的工具");
-    println!("    {}  {}", color::cyan("as tool remove ls"),"移除工具 ls");
+    println!("    {}  {}", color::cyan("as tool install ls"),   "安装 ls 工具");
+    println!("    {}  {}", color::cyan("as tool install ls uv"), "同时安装多个工具");
+    println!("    {}  {}", color::cyan("as tool list"),   "列出自研工具");
+    println!("    {}  {}", color::cyan("as tool remove ls"),   "移除 ls 工具");
+    println!("    {}  {}", color::cyan("as tool upgrade"),   "升级所有自研工具");
+    println!();
+    println!("  {}", color::gray("第三方软件请使用 as install 命令"));
 }
 
 /// 仅含选项的子命令帮助模板

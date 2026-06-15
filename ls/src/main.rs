@@ -1,5 +1,6 @@
 mod config;
 mod display;
+mod envset;
 mod links;
 mod scanner;
 
@@ -49,7 +50,7 @@ struct Cli {
     #[arg(short = 'z', long = "size")]
     size: bool,
 
-    #[arg(short = 't', long = "tree", num_args = 0..=1, default_missing_value = "-1")]
+    #[arg(short = 't', long = "tree", require_equals = true, default_missing_value = "-1", num_args = 0..=1)]
     tree: Option<i32>,
 
     #[arg(long = "link")]
@@ -60,6 +61,22 @@ struct Cli {
 
     #[arg(short = 'v', long = "version")]
     version: bool,
+
+    /// 显示所有环境变量（带颜色）
+    #[arg(long = "set", short = 'S')]
+    set: bool,
+
+    /// 显示 PATH 环境变量（带颜色）
+    #[arg(long = "path", short = 'P')]
+    path: bool,
+
+    /// 变量名左对齐（配合 --set 使用）
+    #[arg(short = 'l', long = "left")]
+    left: bool,
+
+    /// 打开 Windows 环境变量对话框（配合 --set 使用）
+    #[arg(long = "gui")]
+    gui: bool,
 }
 
 const fn version_str() -> &'static str {
@@ -103,6 +120,26 @@ fn main() {
     config::ColorConfig::init();
     let color_config = config::ColorConfig::default();
     let formatter = Formatter::new(color_config, cli.no_color);
+
+    // --gui: 打开 Windows 环境变量对话框
+    if cli.gui {
+        let _ = std::process::Command::new("rundll32.exe")
+            .args(["sysdm.cpl,EditEnvironmentVariables"])
+            .spawn();
+        return;
+    }
+
+    // --set: 显示环境变量
+    if cli.set {
+        envset::show_env_vars(cli.left, cli.no_color);
+        return;
+    }
+
+    // --path: 显示 PATH
+    if cli.path {
+        envset::show_path(cli.no_color);
+        return;
+    }
 
     if let Some(link_path) = &cli.link {
         handle_link_check(link_path);
@@ -216,9 +253,13 @@ fn print_help() {
         ("-a, --abs-path", "打印完整路径"),
         ("-r, --right-align", "右对齐文件名"),
         ("-z, --size", "显示文件大小"),
-        ("-t [深度]", "树形显示目录结构，-t 3 指定深度，不带数字无限递归"),
+        ("-t[=深度]", "树形显示目录结构（-t=3 指定深度，-t 单独使用无限递归）"),
         ("--link PATH", "检查指定路径的链接信息"),
         ("-v, --version", "显示版本信息"),
+        ("-S, --set", "显示所有环境变量（带颜色配置）"),
+        ("-l, --left", "变量名左对齐（配合 --set）"),
+        ("--gui", "打开 Windows 环境变量对话框"),
+        ("-P, --path", "显示 PATH 环境变量（带颜色配置）"),
     ];
 
     // 计算选项标签的最大显示宽度用于对齐

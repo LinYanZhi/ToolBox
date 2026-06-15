@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context};
+use color;
 use serde::{Deserialize, Serialize};
 
 use crate::paths;
@@ -94,39 +95,43 @@ pub fn update_sources() -> anyhow::Result<()> {
     .map(|s| s.to_string())
     .collect();
 
-    let repo = config::SourceRepo::new(builtin);
-    let result = config::source::update_sources(&paths::source_dir(), &repo);
-    // 更新后清除缓存，下次 list 重新解析
+    // 1. 同步第三方软件源定义到 source/apps/
+    println!("{}", color::bold_cyan("同步软件源..."));
+    let apps_builtin: Vec<String> = builtin.iter().map(|u| format!("{}/apps", u)).collect();
+    let apps_repo = config::SourceRepo::new(apps_builtin);
+    config::source::update_sources(&paths::apps_source_dir(), &apps_repo)?;
+
+    // 2. 同步自研工具源定义到 source/tools/
+    println!("{}", color::bold_cyan("同步工具源..."));
+    let tools_builtin: Vec<String> = builtin.iter().map(|u| format!("{}/tools", u)).collect();
+    let tools_repo = config::SourceRepo::new(tools_builtin);
+    config::source::update_sources(&paths::tools_source_dir(), &tools_repo)?;
+
     clear_defs_cache();
-    result
+    clear_tool_cache();
+    Ok(())
 }
 
-/// Read a single software definition. Supports:
-/// 1. Exact filename match
-/// 2. Case-insensitive filename match
-/// 3. Match by `display_name`
-/// 4. Match by `aliases`
+/// Read a single third-party software definition from source/apps/.
 pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
-    let source = paths::source_dir();
     let lower = name.to_lowercase();
-
-    // 空源检查
-    if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
-        anyhow::bail!("未找到源定义。请先运行: as env source update");
+    let dir = paths::apps_source_dir();
+    if !dir.is_dir() {
+        bail!("未找到源定义。请先运行: as env source update");
     }
 
     // 1. Exact match
-    let exact = source.join(format!("{}.json", lower));
+    let exact = dir.join(format!("{}.json", lower));
     if exact.exists() {
         return parse_json(&exact);
     }
 
-    // Collect all .json files and try matches
+    // Collect all .json files
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(&source) {
+    if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().map_or(false, |e| e == "json") && path.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                 candidates.push(path);
             }
         }
@@ -154,16 +159,53 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
         }
     }
 
-    bail!("未找到软件 '{}' 的定义", name)
+    bail!("未找到软件 '{}' 的定义。请先运行: as env source update", name)
+}
+
+/// 读取自研工具定义（从 source/tools/ 查找）
+pub fn read_tool_def(name: &str) -> anyhow::Result<SoftwareDef> {
+    let source = paths::tools_source_dir();
+    let lower = name.to_lowercase();
+
+    if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
+        anyhow::bail!("未找到工具源定义。请先运行: as env source update");
+    }
+
+    let exact = source.join(format!("{}.json", lower));
+    if exact.exists() {
+        return parse_json(&exact);
+    }
+
+    if let Ok(entries) = fs::read_dir(&source) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "json") {
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if stem.to_lowercase() == lower {
+                    return parse_json(&path);
+                }
+            }
+        }
+    }
+
+    bail!("未找到自研工具 '{}' 的定义", name)
 }
 
 /// 缓存, 避免多次重复解析所有 JSON 文件。
 /// 在 `update_sources()` 中自动失效。
 static DEFS_CACHE: std::sync::Mutex<Option<Vec<SoftwareDef>>> = std::sync::Mutex::new(None);
+static TOOL_CACHE: std::sync::Mutex<Option<Vec<SoftwareDef>>> = std::sync::Mutex::new(None);
 
 /// 清除源定义缓存（由 source update 时调用）。
 pub fn clear_defs_cache() {
     if let Ok(mut cache) = DEFS_CACHE.lock() {
+        *cache = None;
+    }
+}
+
+/// 清除工具定义缓存
+pub fn clear_tool_cache() {
+    if let Ok(mut cache) = TOOL_CACHE.lock() {
         *cache = None;
     }
 }
@@ -177,14 +219,24 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
         }
     }
 
-    let source = paths::source_dir();
-    if !source.is_dir() {
-        return Ok(Vec::new());
+    let mut defs: Vec<SoftwareDef> = Vec::new();
+    let apps_dir = paths::apps_source_dir();
+    if apps_dir.is_dir() {
+        read_defs_from_dir(&apps_dir, &mut defs);
     }
 
-    let mut defs: Vec<SoftwareDef> = Vec::new();
+    // 写入缓存
+    if let Ok(mut cache) = DEFS_CACHE.lock() {
+        *cache = Some(defs.clone());
+    }
+
+    Ok(defs)
+}
+
+/// 从目录读取所有 JSON 定义到集合
+fn read_defs_from_dir(dir: &std::path::Path, defs: &mut Vec<SoftwareDef>) {
     let mut paths: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(&source) {
+    if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let p = entry.path();
             if p.extension().map_or(false, |e| e == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
@@ -193,15 +245,45 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
         }
     }
     paths.sort();
-
     for p in paths {
         if let Ok(sd) = parse_json(&p) {
             defs.push(sd);
         }
     }
+}
 
-    // 写入缓存
-    if let Ok(mut cache) = DEFS_CACHE.lock() {
+/// 列出所有自研工具定义（从 source/tools/ 读取）
+pub fn list_tool_defs() -> anyhow::Result<Vec<SoftwareDef>> {
+    if let Ok(cache) = TOOL_CACHE.lock() {
+        if let Some(ref defs) = *cache {
+            return Ok((*defs).clone());
+        }
+    }
+
+    let source = paths::tools_source_dir();
+    if !source.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut defs = Vec::new();
+    let mut json_paths: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&source) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.extension().map_or(false, |e| e == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                json_paths.push(p);
+            }
+        }
+    }
+    json_paths.sort();
+
+    for p in json_paths {
+        if let Ok(sd) = parse_json(&p) {
+            defs.push(sd);
+        }
+    }
+
+    if let Ok(mut cache) = TOOL_CACHE.lock() {
         *cache = Some(defs.clone());
     }
 

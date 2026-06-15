@@ -165,7 +165,7 @@ fn download_index(repos: &[&str], ts: u64) -> Result<(Vec<u8>, String)> {
             }
         }
     }
-    anyhow::bail!("所有镜像均无法连接，请检查网络。首次使用请运行: as source update");
+    anyhow::bail!("所有镜像均无法连接，请检查网络。首次使用请运行: as env source update");
 }
 
 /// 并发下载文件（12 路线程池），失败时自动尝试下一个镜像。

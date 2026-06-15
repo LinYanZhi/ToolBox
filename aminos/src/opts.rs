@@ -116,3 +116,44 @@ impl UpgradeOpts {
         Self { names, check, renew }
     }
 }
+
+/// 自研工具安装选项
+#[derive(Debug, Clone)]
+pub struct ToolInstallOpts {
+    /// 工具名称列表
+    pub names: Vec<String>,
+    /// 指定版本号（空字符串表示默认）
+    pub version: String,
+    /// 强制重新下载
+    pub renew: bool,
+    /// 仅下载，不安装
+    pub download_only: bool,
+}
+
+impl ToolInstallOpts {
+    pub fn new(names: Vec<String>, version: Option<String>, renew: bool, download_only: bool) -> Self {
+        Self {
+            names,
+            version: version.unwrap_or_default(),
+            renew,
+            download_only,
+        }
+    }
+}
+
+/// 自研工具升级选项
+#[derive(Debug, Clone)]
+pub struct ToolUpgradeOpts {
+    /// 可选：仅升级指定工具（空则全部升级）
+    pub names: Vec<String>,
+    /// 仅检查更新
+    pub check: bool,
+    /// 强制重新下载（即使版本相同）
+    pub renew: bool,
+}
+
+impl ToolUpgradeOpts {
+    pub fn new(names: Vec<String>, check: bool, renew: bool) -> Self {
+        Self { names, check, renew }
+    }
+}

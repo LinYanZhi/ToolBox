@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+
 /// 文件扩展名 → 颜色映射
 pub type ExtColorMap = Vec<(String, String)>;
 
@@ -47,39 +50,39 @@ impl ColorConfig {
 impl Default for ColorConfig {
     fn default() -> Self {
         Self {
-            dir_color: "96".into(),              // bright cyan
-            dir_link_color: "36".into(),         // cyan
+            dir_color: "96".into(),
+            dir_link_color: "36".into(),
             dir_link_arrow: "=>".into(),
-            dir_link_arrow_color: "90".into(),   // gray
-            dir_link_path_color: "90".into(),    // gray
-            dir_link_path_basename_color: "96".into(), // bright cyan
+            dir_link_arrow_color: "90".into(),
+            dir_link_path_color: "90".into(),
+            dir_link_path_basename_color: "96".into(),
 
             file_extensions: vec![
-                (".7z".into(),   "31".into()),    // red
+                (".7z".into(),   "31".into()),
                 (".zip".into(),  "31".into()),
                 (".rar".into(),  "31".into()),
                 (".tar".into(),  "31".into()),
                 (".gz".into(),   "31".into()),
                 (".bz2".into(),  "31".into()),
                 (".xz".into(),   "31".into()),
-                (".exe".into(),  "32".into()),    // green
+                (".exe".into(),  "32".into()),
                 (".msi".into(),  "32".into()),
                 (".bat".into(),  "32".into()),
                 (".cmd".into(),  "32".into()),
-                (".py".into(),   "93".into()),    // bright yellow
-                (".rs".into(),   "33".into()),    // yellow
+                (".py".into(),   "93".into()),
+                (".rs".into(),   "33".into()),
                 (".js".into(),   "33".into()),
                 (".ts".into(),   "33".into()),
-                (".html".into(), "35".into()),    // purple
+                (".html".into(), "35".into()),
                 (".css".into(),  "35".into()),
-                (".json".into(), "37".into()),    // white
+                (".json".into(), "37".into()),
                 (".toml".into(), "37".into()),
                 (".yaml".into(), "37".into()),
                 (".yml".into(),  "37".into()),
                 (".md".into(),   "37".into()),
                 (".txt".into(),  "37".into()),
-                (".lnk".into(),  "94".into()),    // light blue
-                (".dll".into(),  "90".into()),    // gray
+                (".lnk".into(),  "94".into()),
+                (".dll".into(),  "90".into()),
                 (".pdb".into(),  "90".into()),
                 (".dat".into(),  "90".into()),
                 (".ini".into(),  "90".into()),
@@ -113,4 +116,122 @@ impl ColorConfig {
         }
         None
     }
+}
+
+// ── ls.yaml 配置（--set / --path）─────────────────────────
+
+/// ls.yaml 顶层结构
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct LsConfig {
+    #[serde(default)]
+    pub variables: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub variable_styles: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub paths: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub path_styles: HashMap<String, Vec<String>>,
+}
+
+/// 将 "颜色: [项目列表]" 转为 "项目: 颜色"
+fn invert_map(input: &HashMap<String, Vec<String>>) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    for (color, items) in input {
+        for item in items {
+            result.insert(item.clone(), color.clone());
+        }
+    }
+    result
+}
+
+/// 获取 ls.yaml 配置文件的路径
+///
+/// 只查找 ls.exe 同级目录下的 `ls.yaml`，不依赖 aminos 环境。
+fn get_ls_config_path() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        exe.parent().unwrap_or(std::path::Path::new(".")).join("ls.yaml")
+    } else {
+        PathBuf::from("ls.yaml")
+    }
+}
+
+/// 加载 ls.yaml 配置
+pub fn load_ls_config() -> LsConfig {
+    let path = get_ls_config_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            serde_yaml::from_str(&content).unwrap_or_default()
+        }
+        Err(_) => LsConfig::default(),
+    }
+}
+
+/// 获取环境变量配置（已反转：变量名 → 颜色/样式）
+pub fn get_variable_color_map() -> HashMap<String, String> {
+    let cfg = load_ls_config();
+    let colors = invert_map(&cfg.variables);
+    let styles = invert_map(&cfg.variable_styles);
+    let mut merged = colors;
+    for (k, v) in styles {
+        merged.entry(k).or_insert(v);
+    }
+    merged
+}
+
+/// 获取排除的环境变量集合
+pub fn get_exclude_set() -> Vec<String> {
+    load_ls_config().exclude
+}
+
+/// 获取 PATH 路径配置（已反转：路径 → 颜色/样式）
+pub fn get_path_color_map() -> HashMap<String, String> {
+    let cfg = load_ls_config();
+    let colors = invert_map(&cfg.paths);
+    let styles = invert_map(&cfg.path_styles);
+    let mut merged = colors;
+    for (k, v) in styles {
+        merged.entry(k).or_insert(v);
+    }
+    merged
+}
+
+/// 简单的通配符匹配，只支持 `*`（匹配任意字符）
+pub fn wildmatch(pattern: &str, text: &str) -> bool {
+    let pattern_lower = pattern.to_lowercase();
+    let text_lower = text.to_lowercase();
+
+    // 将通配符模式转为简单的逐段匹配
+    let parts: Vec<&str> = pattern_lower.split('*').collect();
+    if parts.len() == 1 {
+        // 没有通配符
+        return text_lower == pattern_lower;
+    }
+
+    let mut pos = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            // 第一个分段必须从开头匹配
+            if !text_lower.starts_with(part) {
+                return false;
+            }
+            pos = part.len();
+        } else if i == parts.len() - 1 {
+            // 最后一个分段必须匹配到结尾
+            if !text_lower[pos..].ends_with(part) {
+                return false;
+            }
+        } else {
+            // 中间分段可以在任意位置
+            match text_lower[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    true
 }

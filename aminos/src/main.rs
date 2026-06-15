@@ -25,7 +25,7 @@ mod speedtest;
 use clap::{Parser, Subcommand};
 
 use help::{HELP_STYLES, HELP_TEMPLATE_OPTIONS, HELP_TEMPLATE_SUBCMDS, print_clap_error, print_root_help, run_example, run};
-use opts::{InstallOpts, ListOpts, UninstallOpts, UpgradeOpts};
+use opts::{InstallOpts, ListOpts, ToolInstallOpts, ToolUpgradeOpts, UninstallOpts, UpgradeOpts};
 
 /// AminOS - lightweight software package manager
 #[derive(Parser)]
@@ -141,12 +141,12 @@ enum Command {
         #[command(subcommand)]
         action: Option<SelfCmd>,
     },
-    /// 管理自研工具（已安装的 as 工具集）
-    #[command(help_template = HELP_TEMPLATE_SUBCMDS)]
-    Tool {
-        #[command(subcommand)]
-        action: Option<ToolCmd>,
-    },
+    /// 管理自研工具（安装、升级、列出、移除）
+#[command(help_template = HELP_TEMPLATE_SUBCMDS)]
+Tool {
+    #[command(subcommand)]
+    action: Option<ToolCmd>,
+},
 }
 
 #[derive(Subcommand)]
@@ -217,10 +217,38 @@ pub enum SourceCmd {
 
 #[derive(Subcommand)]
 pub enum ToolCmd {
+    /// 安装自研工具
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    Install {
+        /// 工具名称（可同时指定多个）
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// 指定版本号
+        #[arg(short, long)]
+        version: Option<String>,
+        /// 强制重新下载
+        #[arg(short = 'r', long)]
+        renew: bool,
+        /// 仅下载，不安装
+        #[arg(short = 'd', long = "download-only")]
+        download_only: bool,
+    },
+    /// 升级自研工具
+    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
+    Upgrade {
+        /// 可选：仅升级指定工具（不指定则全部升级）
+        names: Vec<String>,
+        /// 仅检查更新，不下也不装
+        #[arg(short, long, conflicts_with = "renew")]
+        check: bool,
+        /// 强制重新下载（即使版本相同）
+        #[arg(long, conflicts_with = "check")]
+        renew: bool,
+    },
     /// 列出已安装的自研工具
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     List,
-    /// 移除一个自研工具（同 as uninstall）
+    /// 移除一个自研工具
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Remove {
         /// 工具名称
@@ -315,7 +343,20 @@ fn main() {
         }
         Some(Command::Tool { action }) => {
             match action {
-                Some(cmd) => { let _ = run(|| cmd_tool::run_tool(cmd)); }
+                Some(ToolCmd::Install { names, version, renew, download_only }) => {
+                    let opts = ToolInstallOpts::new(names, version, renew, download_only);
+                    let _ = run(|| cmd_tool::run_install(opts));
+                }
+                Some(ToolCmd::Upgrade { names, check, renew }) => {
+                    let opts = ToolUpgradeOpts::new(names, check, renew);
+                    let _ = run(|| cmd_tool::run_upgrade(opts));
+                }
+                Some(ToolCmd::List) => {
+                    let _ = run(|| cmd_tool::run_list());
+                }
+                Some(ToolCmd::Remove { name }) => {
+                    let _ = run(|| cmd_tool::run_remove(&name));
+                }
                 None => help::print_tool_help(),
             }
         }
