@@ -1,6 +1,5 @@
 mod config;
 mod display;
-mod envset;
 mod links;
 mod scanner;
 
@@ -64,22 +63,6 @@ struct Cli {
 
     #[arg(short = 'v', long = "version")]
     version: bool,
-
-    /// 显示所有环境变量（带颜色）
-    #[arg(long = "set", short = 'S')]
-    set: bool,
-
-    /// 显示 PATH 环境变量（带颜色）
-    #[arg(long = "path", short = 'P')]
-    path: bool,
-
-    /// 变量名左对齐（配合 --set 使用）
-    #[arg(short = 'l', long = "left")]
-    left: bool,
-
-    /// 打开 Windows 环境变量对话框（配合 --set 使用）
-    #[arg(long = "gui")]
-    gui: bool,
 }
 
 const fn version_str() -> &'static str {
@@ -128,26 +111,6 @@ fn main() {
     config::ColorConfig::init();
     let color_config = config::ColorConfig::default();
     let formatter = Formatter::new(color_config, cli.no_color);
-
-    // --gui: 打开 Windows 环境变量对话框
-    if cli.gui {
-        let _ = std::process::Command::new("rundll32.exe")
-            .args(["sysdm.cpl,EditEnvironmentVariables"])
-            .spawn();
-        return;
-    }
-
-    // --set: 显示环境变量
-    if cli.set {
-        envset::show_env_vars(cli.left, cli.no_color);
-        return;
-    }
-
-    // --path: 显示 PATH
-    if cli.path {
-        envset::show_path(cli.no_color);
-        return;
-    }
 
     if let Some(link_path) = &cli.link {
         handle_link_check(link_path);
@@ -222,95 +185,63 @@ fn main() {
     }
 }
 
-/// 简洁帮助（同 -h，仿 as -h 风格）
+/// 简洁帮助（仿 as -h 风格）
 fn print_short_help() {
-    use color::*;
-
-    println!("  {}",
-        bold_cyan("ls — 轻量级目录列表工具"));
-
+    println!("  {}", bold_cyan("ls — 轻量级目录列表工具"));
     println!();
-    println!("  {}",
-        bold_yellow("用法:"));
-    println!("    {} [{}]",
-        green("ls"),
-        gray("目录路径"));
+    println!("  {}", bold_yellow("用法:"));
+    println!("    {} [{}]", green("ls"), gray("目录路径"));
     println!();
-
-    println!("  {}",
-        bold_yellow("选项:"));
-    println!("  {:<20} {}", cyan("-h, --help"),   gray("显示简洁帮助"));
-    println!("  {:<20} {}", cyan("-e, --examples"), gray("显示所有选项示例"));
-    println!("  {:<20} {}", cyan("-v, --version"), gray("显示版本信息"));
-    println!("  {:<20} {}", cyan("-n, --no-color"), gray("不使用颜色输出"));
-    println!("  {:<20} {}", cyan("-s, --sort <排序>"), gray("排序: default name suffix create update"));
-    println!("  {:<20} {}", cyan("--exclude <后缀> ..."), gray("排除指定后缀"));
-    println!("  {:<20} {}", cyan("-i, --include <后缀> ..."), gray("只包含指定后缀"));
-    println!("  {:<20} {}", cyan("-f, --only-files"), gray("只显示文件"));
-    println!("  {:<20} {}", cyan("-d, --only-dirs"), gray("只显示目录"));
-    println!("  {:<20} {}", cyan("-a, --abs-path"), gray("打印完整路径"));
-    println!("  {:<20} {}", cyan("-r, --right-align"), gray("右对齐文件名"));
-    println!("  {:<20} {}", cyan("-z, --size"), gray("显示文件大小"));
-    println!("  {:<20} {}", cyan("-t[=N]"), gray("树形显示（-t=3 指定深度）"));
-    println!("  {:<20} {}", cyan("--link <路径>"), gray("检查链接信息"));
-    println!("  {:<20} {}", cyan("-S, --set"), gray("显示所有环境变量"));
-    println!("  {:<20} {}", cyan("-P, --path"), gray("显示 PATH"));
-    println!("  {:<20} {}", cyan("-l, --left"), gray("变量名左对齐（配合 --set）"));
-    println!("  {:<20} {}", cyan("--gui"), gray("打开环境变量对话框"));
+    println!("  {}", bold_yellow("选项:"));
+    println!("  {:<22} {}", cyan("-h, --help"),      gray("显示简洁帮助"));
+    println!("  {:<22} {}", cyan("-e, --examples"),   gray("显示所有选项示例"));
+    println!("  {:<22} {}", cyan("-v, --version"),    gray("显示版本信息"));
+    println!("  {:<22} {}", cyan("-n, --no-color"),   gray("不使用颜色输出"));
+    println!("  {:<22} {}", cyan("-s, --sort <排序>"), gray("排序: default name suffix create update"));
+    println!("  {:<22} {}", cyan("--exclude <后缀> ..."), gray("排除指定后缀"));
+    println!("  {:<22} {}", cyan("-i, --include <后缀> ..."), gray("只包含指定后缀"));
+    println!("  {:<22} {}", cyan("-f, --only-files"),  gray("只显示文件"));
+    println!("  {:<22} {}", cyan("-d, --only-dirs"),   gray("只显示目录"));
+    println!("  {:<22} {}", cyan("-a, --abs-path"),    gray("打印完整路径"));
+    println!("  {:<22} {}", cyan("-r, --right-align"), gray("右对齐文件名"));
+    println!("  {:<22} {}", cyan("-z, --size"),        gray("显示文件大小"));
+    println!("  {:<22} {}", cyan("-t[=N]"),           gray("树形显示（-t=3 指定深度）"));
+    println!("  {:<22} {}", cyan("--link <路径>"),     gray("检查链接信息"));
     println!();
-
-    println!("  {}",
-        bold_yellow("示例:"));
-    println!("    {}  {}", green("ls"), gray("列出当前目录"));
-    println!("    {}  {}", green("ls C:\\path"), gray("列出指定目录"));
-    println!("    {}  {}", green("ls -S"), gray("显示环境变量"));
-    println!("    {}  {}", green("ls -P"), gray("显示 PATH"));
-    println!("    {}  {}", green("ls -e"), gray("查看更多示例"));
-    println!();
-
     println!("  {}  {}  {}",
         gray("提示:"),
         gray("查看完整示例请使用"),
         cyan("ls -e"));
+    println!("  {}  {}  {}",
+        gray("提示:"),
+        gray("环境变量工具请使用"),
+        cyan("e -h"));
 }
 
-/// 全部示例（同 -e，仿 as -e 风格）
+/// 全部示例（仿 as -e 风格）
 fn print_examples_help() {
-    use color::*;
-
-    println!("  {}",
-        bold_cyan("ls — 轻量级目录列表工具"));
+    println!("  {}", bold_cyan("ls — 轻量级目录列表工具"));
     println!();
-
-    println!("  {}",
-        bold_yellow("目录列表"));
-    println!("  {:<24} {}", cyan("ls"), gray("列出当前目录"));
-    println!("  {:<24} {}", cyan("ls PATH"), gray("列出指定目录"));
-    println!("  {:<24} {}", cyan("ls -t[=N]"), gray("树形显示（-t=3 指定深度）"));
-    println!("  {:<24} {}", cyan("ls --exclude .txt .md"), gray("排除指定后缀"));
-    println!("  {:<24} {}", cyan("ls -i .rs .py"), gray("只包含指定后缀"));
-    println!("  {:<24} {}", cyan("ls -a"), gray("显示完整路径"));
-    println!("  {:<24} {}", cyan("ls -r"), gray("右对齐文件名"));
-    println!("  {:<24} {}", cyan("ls -z"), gray("显示文件大小"));
-    println!("  {:<24} {}", cyan("ls -f"), gray("只显示文件"));
-    println!("  {:<24} {}", cyan("ls -d"), gray("只显示目录"));
-    println!("  {:<24} {}", cyan("ls -s sort"), gray("排序: name suffix create update"));
-    println!("  {:<24} {}", cyan("ls --link PATH"), gray("检查链接信息"));
-    println!("  {:<24} {}", cyan("ls -n"), gray("不使用颜色输出"));
+    println!("  {}", bold_yellow("目录列表"));
+    println!("  {:<26} {}", cyan("ls"), gray("列出当前目录"));
+    println!("  {:<26} {}", cyan("ls PATH"), gray("列出指定目录"));
+    println!("  {:<26} {}", cyan("ls -t[=N]"), gray("树形显示（-t=3 指定深度）"));
+    println!("  {:<26} {}", cyan("ls --exclude .txt .md"), gray("排除指定后缀"));
+    println!("  {:<26} {}", cyan("ls -i .rs .py"), gray("只包含指定后缀"));
+    println!("  {:<26} {}", cyan("ls -a"), gray("显示完整路径"));
+    println!("  {:<26} {}", cyan("ls -r"), gray("右对齐文件名"));
+    println!("  {:<26} {}", cyan("ls -z"), gray("显示文件大小"));
+    println!("  {:<26} {}", cyan("ls -f"), gray("只显示文件"));
+    println!("  {:<26} {}", cyan("ls -d"), gray("只显示目录"));
+    println!("  {:<26} {}", cyan("ls -s name"), gray("按名称排序"));
+    println!("  {:<26} {}", cyan("ls -s suffix"), gray("按后缀排序"));
+    println!("  {:<26} {}", cyan("ls --link PATH"), gray("检查链接信息"));
+    println!("  {:<26} {}", cyan("ls -n"), gray("不使用颜色输出"));
     println!();
-
-    println!("  {}",
-        bold_yellow("环境变量 / PATH"));
-    println!("  {:<24} {}", cyan("ls -S"), gray("显示所有环境变量"));
-    println!("  {:<24} {}", cyan("ls -S -l"), gray("变量名左对齐"));
-    println!("  {:<24} {}", cyan("ls -P"), gray("显示 PATH"));
-    println!("  {:<24} {}", cyan("ls --gui"), gray("打开环境变量对话框"));
-    println!();
-
-    println!("  {}",
-        bold_yellow("配置文件"));
-    println!("  {:<24} {}",
-        gray("ls.yaml"), gray("放在 ls.exe 同级，覆盖默认配色"));
+    println!("  {}", bold_yellow("环境变量/PATH（需安装 e 工具）"));
+    println!("  {:<26} {}", cyan("e -s"), gray("显示所有环境变量"));
+    println!("  {:<26} {}", cyan("e -p"), gray("显示 PATH"));
+    println!("  {:<26} {}", cyan("e -g"), gray("打开环境变量对话框"));
     println!();
 }
 
@@ -335,20 +266,8 @@ fn print_clap_error(err: &clap::error::Error) {
                 eprintln!("{} 使用 --help 查看可用选项", gray("提示:"));
             }
         }
-        ErrorKind::InvalidSubcommand => {
-            eprintln!("{} 未知的子命令", red("错误:"));
-            eprintln!("{} 使用 --help 查看可用选项", gray("提示:"));
-        }
         ErrorKind::MissingRequiredArgument => {
             eprintln!("{} 缺少必需参数", red("错误:"));
-            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
-        }
-        ErrorKind::TooManyValues => {
-            eprintln!("{} 参数值过多", red("错误:"));
-            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
-        }
-        ErrorKind::TooFewValues => {
-            eprintln!("{} 参数值不足", red("错误:"));
             eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
         }
         ErrorKind::ValueValidation => {
@@ -373,10 +292,10 @@ fn print_clap_error(err: &clap::error::Error) {
             let first_line = msg.lines().next().unwrap_or("未知错误");
             if first_line.contains("unexpected") || first_line.contains("error:") {
                 eprintln!("{} 参数解析失败", red("错误:"));
-                eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
             } else {
                 eprintln!("{} {}", red("错误:"), first_line);
             }
+            eprintln!("{} 使用 --help 查看正确用法", gray("提示:"));
         }
     }
 }
@@ -475,13 +394,9 @@ fn format_item_line(
 }
 
 /// 带引号的环境版本号输出
-fn format_text_colored(text: &str, cli: &Cli) -> String {
+fn format_text_colored(text: &str, _cli: &Cli) -> String {
     let quoted = format!("\"{}\"", text);
-    if cli.no_color {
-        quoted
-    } else {
-        gray(&quoted)
-    }
+    gray(&quoted)
 }
 
 /// 排序项目
@@ -592,23 +507,15 @@ fn print_tree(
 }
 
 /// 清理路径字符串：去除尾部引号、反斜杠、空白等 shell 转义残留。
-///
-/// 例如 `"C:\Program Files\7-Zip\"` → `C:\Program Files\7-Zip`
-/// Windows 命令行中 `\"` 会被解析为字面引号而不是结束引号，
-/// 因此可能传入 `C:\Program Files\7-Zip"`，需要剥离尾部多余的引号。
 fn sanitize_path(raw: &str) -> String {
     let mut s = raw.to_string();
-    // 去除首尾空白
     s = s.trim().to_string();
-    // 去除首尾成对引号（兼容完整包裹的情况）
     while (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
         s = s[1..s.len()-1].to_string();
     }
-    // 去除尾部单个引号（Windows \" 转义残留）
     while s.ends_with('"') || s.ends_with('\'') {
         s.pop();
     }
-    // 去除尾部反斜杠（但保留 `C:\` 这种根目录反斜杠）
     while s.len() > 3 && s.ends_with('\\') {
         s.pop();
     }

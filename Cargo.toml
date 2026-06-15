@@ -4,6 +4,7 @@ members = [
     "aminos",
     "color",
     "config",
+    "e",
     "ls",
     "net",
     "sys",

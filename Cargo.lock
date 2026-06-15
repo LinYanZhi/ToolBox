@@ -266,6 +266,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "e"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "color",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
