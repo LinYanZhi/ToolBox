@@ -5,6 +5,7 @@ mod cmd_info;
 mod cmd_init;
 mod cmd_install;
 mod cmd_list;
+mod cmd_names;
 mod cmd_self;
 mod cmd_self_update;
 mod cmd_source;

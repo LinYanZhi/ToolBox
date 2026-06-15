@@ -1,7 +1,7 @@
 use color::{self, DisplayWidth, pad_left as pad};
 
 use crate::opts::{ToolInstallOpts, ToolUpgradeOpts};
-use crate::{installer, software};
+use crate::{installer, software, cmd_names};
 
 /// 安装自研工具
 pub fn run_install(opts: ToolInstallOpts) -> anyhow::Result<()> {
@@ -115,7 +115,7 @@ pub fn run_list() -> anyhow::Result<()> {
 
     if defs.is_empty() {
         println!("没有可用的自研工具。");
-        println!("{}", color::gray("请先运行: as env source update"));
+        println!("{}", color::gray(format!("请先运行: {}", cmd_names::SOURCE_UPDATE_HINT)));
         return Ok(());
     }
 
@@ -153,7 +153,7 @@ pub fn run_list() -> anyhow::Result<()> {
     }
 
     println!();
-    println!("{}", color::gray("安装: as tool install <名称>   卸载: as tool remove <名称>"));
+    println!("{}", color::gray(format!("安装: {} <名称>   卸载: {} <名称>", cmd_names::TOOL_INSTALL, cmd_names::TOOL_REMOVE)));
     Ok(())
 }
 

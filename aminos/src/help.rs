@@ -2,6 +2,7 @@ use clap::builder::styling::{AnsiColor, Color, Style, Styles};
 
 use color::pad_left as pad;
 use color::DisplayWidth;
+use crate::cmd_names;
 
 /// 统一帮助配色方案
 pub const HELP_STYLES: Styles = Styles::styled()
@@ -70,13 +71,14 @@ pub fn print_root_help() {
     println!("    {} 查看示例请使用 {}as -e{}", color::gray("•"), color::cyan(""), color::gray(""));
 }
 
+
+
 /// 打印 as config 子命令帮助
 pub fn print_config_help() {
-    println!();
-    println!("  {} — {}", color::bold_cyan("as config"), color::green("管理 as 环境和配置"));
+    println!("  {} — {}", color::bold_cyan(cmd_names::CONFIG), color::green("管理 as 环境和配置"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan("as config"), color::green("<子命令>"), color::gray("[参数]"));
+    println!("    {} {} {}", color::cyan(cmd_names::CONFIG), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
 
@@ -98,19 +100,19 @@ pub fn print_config_help() {
     println!();
      println!("  {}", color::bold_yellow("示例:"));
 
-    let examples: &[(&str, &str)] = &[
-        ("as config path",          "查看所有数据目录位置"),
-        ("as config path -o",       "在资源管理器中打开配置目录"),
-        ("as config cache",         "查看缓存文件"),
-        ("as config cache --clear", "清除所有缓存"),
-        ("as config source update", "更新软件源和工具源"),
-        ("as config speedtest",     "测速下载源"),
-        ("as config downloader list", "列出下载后端"),
+    let examples = vec![
+        (cmd_names::CONFIG_PATH.to_string(),          "查看所有数据目录位置"),
+        (format!("{} -o", cmd_names::CONFIG_PATH),    "在资源管理器中打开配置目录"),
+        (cmd_names::CONFIG_CACHE.to_string(),          "查看缓存文件"),
+        (cmd_names::CONFIG_CACHE_CLEAR.to_string(),    "清除所有缓存"),
+        (cmd_names::CONFIG_SOURCE_UPDATE.to_string(),  "更新软件源和工具源"),
+        (cmd_names::CONFIG_SPEEDTEST.to_string(),      "测速下载源"),
+        (cmd_names::CONFIG_DOWNLOADER_LIST.to_string(),"列出下载后端"),
     ];
 
-    let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(32);
+    let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(44);
 
-    for (cmd, desc) in examples {
+    for (cmd, desc) in &examples {
         println!("    {}  {}",
             pad(&color::cyan(cmd), max_w),
             desc);
@@ -120,10 +122,10 @@ pub fn print_config_help() {
 /// 打印 as config source 子命令帮助
 pub fn print_source_help() {
     println!();
-    println!("  {} — {}", color::bold_cyan("as config source"), color::green("管理软件源和工具源定义"));
+    println!("  {} — {}", color::bold_cyan(cmd_names::CONFIG_SOURCE), color::green("管理软件源和工具源定义"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan("as config source"), color::green("<子命令>"), color::gray("[参数]"));
+    println!("    {} {} {}", color::cyan(cmd_names::CONFIG_SOURCE), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
 
@@ -145,10 +147,10 @@ pub fn print_source_help() {
 /// 打印 as config downloader 子命令帮助
 pub fn print_downloader_help() {
     println!();
-    println!("  {} — {}", color::bold_cyan("as config downloader"), color::green("管理下载引擎后端"));
+    println!("  {} — {}", color::bold_cyan(cmd_names::CONFIG_DOWNLOADER), color::green("管理下载引擎后端"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan("as config downloader"), color::green("<子命令>"), color::gray("[参数]"));
+    println!("    {} {} {}", color::cyan(cmd_names::CONFIG_DOWNLOADER), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
 
@@ -171,10 +173,10 @@ pub fn print_downloader_help() {
 /// 打印 as self 子命令帮助
 pub fn print_self_help() {
     println!();
-    println!("  {} — {}", color::bold_cyan("as self"), color::green("管理 as 自身"));
+    println!("  {} — {}", color::bold_cyan(cmd_names::SELF), color::green("管理 as 自身"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan("as self"), color::green("<子命令>"), color::gray("[参数]"));
+    println!("    {} {} {}", color::cyan(cmd_names::SELF), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
 
@@ -193,14 +195,14 @@ pub fn print_self_help() {
     println!();
     println!("  {}", color::bold_yellow("示例:"));
 
-    let self_examples: &[(&str, &str)] = &[
-        ("as self init",   "初始化环境"),
-        ("as self update", "更新自身"),
+    let self_examples = vec![
+        (cmd_names::SELF_INIT.to_string(),   "初始化环境"),
+        (cmd_names::SELF_UPDATE.to_string(), "更新自身"),
     ];
 
     let max_w = self_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(20);
 
-    for (cmd, desc) in self_examples {
+    for (cmd, desc) in &self_examples {
         println!("    {}  {}",
             pad(&color::cyan(cmd), max_w),
             desc);
@@ -210,10 +212,10 @@ pub fn print_self_help() {
 /// 打印 as tool 子命令帮助
 pub fn print_tool_help() {
     println!();
-    println!("  {} — {}", color::bold_cyan("as tool"), color::green("管理自研工具"));
+    println!("  {} — {}", color::bold_cyan(cmd_names::TOOL), color::green("管理自研工具"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan("as tool"), color::green("<子命令>"), color::gray("[参数]"));
+    println!("    {} {} {}", color::cyan(cmd_names::TOOL), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
 
@@ -234,23 +236,23 @@ pub fn print_tool_help() {
     println!();
     println!("  {}", color::bold_yellow("示例:"));
 
-    let tool_examples: &[(&str, &str)] = &[
-        ("as tool install ls",        "安装 ls 工具"),
-        ("as tool install ls uv",      "同时安装多个工具"),
-        ("as tool list",              "列出自研工具"),
-        ("as tool remove ls",         "移除 ls 工具"),
-        ("as tool upgrade",           "升级所有自研工具"),
+    let tool_examples = vec![
+        (format!("{} ls", cmd_names::TOOL_INSTALL), "安装 ls 工具"),
+        (format!("{} ls uv", cmd_names::TOOL_INSTALL), "同时安装多个工具"),
+        (cmd_names::TOOL_LIST.to_string(), "列出自研工具"),
+        (format!("{} ls", cmd_names::TOOL_REMOVE), "移除 ls 工具"),
+        (cmd_names::TOOL_UPGRADE.to_string(), "升级所有自研工具"),
     ];
 
-    let max_w = tool_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(28);
+    let max_w = tool_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(32);
 
-    for (cmd, desc) in tool_examples {
+    for (cmd, desc) in &tool_examples {
         println!("    {}  {}",
             pad(&color::cyan(cmd), max_w),
             desc);
     }
     println!();
-    println!("  {}", color::gray("第三方软件请使用 as install 命令"));
+    println!("  {}", color::gray(format!("第三方软件请使用 {} 命令", cmd_names::INSTALL)));
 }
 
 /// 仅含选项的子命令帮助模板
@@ -281,97 +283,136 @@ pub fn run_example() {
     println!("  {}", color::bold_cyan("aminos 命令参考手册"));
     println!();
 
-    let examples: &[(&str, &str, &[(&str, &str)])] = &[
-        ("install", "安装指定软件", &[
-            ("as install 7zip", "安装 7-Zip（最新版）"),
-            ("as install vscode python git", "同时安装多个软件"),
-            ("as install 7zip -v 1.0.0", "安装指定版本"),
-            ("as install 7zip --gui", "使用图形界面向导安装"),
-            ("as install 7zip --renew", "强制重新下载并安装"),
-            ("as install 7zip --download-only", "仅下载，不安装"),
-            ("as install 7zip --type portable", "指定安装类型为便携版"),
-        ]),
-        ("list", "列出可用软件及安装状态", &[
-            ("as list", "列出所有软件"),
-            ("as list -g", "按分类分组显示"),
-            ("as list --categories", "查看分类概览"),
-            ("as list -i", "仅显示已安装的软件"),
-            ("as list -m", "仅显示未安装的软件"),
-            ("as list -f 开发工具", "按分类过滤"),
-            ("as list -s 压缩", "搜索名称、别名或描述"),
-            ("as list -d", "仅显示已下载缓存的软件"),
-            ("as list --info 7zip", "查看 7-Zip 的详细信息"),
-            ("as list --info 7zip --urls", "查看 7-Zip 所有下载地址"),
-        ]),
-        ("uninstall", "卸载指定软件", &[
-            ("as uninstall 7zip", "静默卸载 7-Zip"),
-            ("as uninstall vscode python", "同时卸载多个软件"),
-            ("as uninstall 7zip --gui", "使用图形界面卸载向导"),
-            ("as uninstall 7zip --force", "强制删除（跳过卸载器）"),
-        ]),
-        ("upgrade", "升级已安装的软件", &[
-            ("as upgrade", "升级所有已安装的软件"),
-            ("as upgrade 7zip", "仅升级指定软件"),
-            ("as upgrade --check", "仅检查更新，不下载不安装"),
-            ("as upgrade --renew", "强制重新下载（即使版本相同）"),
-        ]),
-        ("config cache", "管理下载缓存", &[
-            ("as config cache", "查看缓存文件列表和一致性"),
-            ("as config cache --clear", "清除所有缓存文件"),
-            ("as config cache --open", "在资源管理器中打开缓存目录"),
-        ]),
-        ("config path", "显示/打开配置目录", &[
-            ("as config path", "显示所有数据目录位置"),
-            ("as config path -o", "在资源管理器中打开配置目录"),
-        ]),
-        ("config source", "管理源定义（软件 + 工具）", &[
-            ("as config source update", "从远程仓库下载最新源定义"),
-            ("as config source path", "显示源定义目录路径"),
-            ("as config source path -o", "在资源管理器中打开源目录"),
-        ]),
-        ("config speedtest", "测速所有下载源", &[
-            ("as config speedtest", "对所有软件的所有源测速"),
-            ("as config speedtest 7zip", "仅对指定软件的源测速"),
-            ("as config speedtest -S", "以软件为单位统计可用性"),
-        ]),
-        ("config downloader", "管理下载引擎后端", &[
-            ("as config downloader list", "列出所有下载后端及启用状态"),
-            ("as config downloader set curl on", "启用 curl 后端"),
-            ("as config downloader set curl off", "禁用 curl 后端"),
-            ("as config downloader config", "显示配置文件路径"),
-            ("as config downloader config -o", "在资源管理器中打开配置目录"),
-        ]),
-        ("self init", "初始化 as 环境", &[
-            ("as self init", "创建 tools/bin 并注册到用户 PATH"),
-        ]),
-        ("self update", "更新 as 自身", &[
-            ("as self update", "下载最新版 as 并热替换"),
-        ]),
-        ("tool", "管理自研工具", &[
-            ("as tool list", "列出已安装的自研工具"),
-            ("as tool remove ls", "移除自研工具 ls"),
-        ]),
+    // 每组示例：(分组名, 分组描述, 示例列表)
+    struct Group<'a> { cmd: String, desc: &'a str, entries: Vec<(String, &'a str)> }
+
+    let examples = vec![
+        Group {
+            cmd: "install".into(), desc: "安装指定软件",
+            entries: vec![
+                (format!("{} 7zip", cmd_names::INSTALL), "安装 7-Zip（最新版）"),
+                (format!("{} vscode python git", cmd_names::INSTALL), "同时安装多个软件"),
+                (format!("{} 7zip -v 1.0.0", cmd_names::INSTALL), "安装指定版本"),
+                (format!("{} 7zip --gui", cmd_names::INSTALL), "使用图形界面向导安装"),
+                (format!("{} 7zip --renew", cmd_names::INSTALL), "强制重新下载并安装"),
+                (format!("{} 7zip --download-only", cmd_names::INSTALL), "仅下载，不安装"),
+                (format!("{} 7zip --type portable", cmd_names::INSTALL), "指定安装类型为便携版"),
+            ],
+        },
+        Group {
+            cmd: "list".into(), desc: "列出可用软件及安装状态",
+            entries: vec![
+                (cmd_names::LIST.to_string(), "列出所有软件"),
+                (format!("{} -g", cmd_names::LIST), "按分类分组显示"),
+                (format!("{} --categories", cmd_names::LIST), "查看分类概览"),
+                (format!("{} -i", cmd_names::LIST), "仅显示已安装的软件"),
+                (format!("{} -m", cmd_names::LIST), "仅显示未安装的软件"),
+                (format!("{} -f 开发工具", cmd_names::LIST), "按分类过滤"),
+                (format!("{} -s 压缩", cmd_names::LIST), "搜索名称、别名或描述"),
+                (format!("{} -d", cmd_names::LIST), "仅显示已下载缓存的软件"),
+                (format!("{} --info 7zip", cmd_names::LIST), "查看 7-Zip 的详细信息"),
+                (format!("{} --info 7zip --urls", cmd_names::LIST), "查看 7-Zip 所有下载地址"),
+            ],
+        },
+        Group {
+            cmd: "uninstall".into(), desc: "卸载指定软件",
+            entries: vec![
+                (format!("{} 7zip", cmd_names::UNINSTALL), "静默卸载 7-Zip"),
+                (format!("{} vscode python", cmd_names::UNINSTALL), "同时卸载多个软件"),
+                (format!("{} 7zip --gui", cmd_names::UNINSTALL), "使用图形界面卸载向导"),
+                (format!("{} 7zip --force", cmd_names::UNINSTALL), "强制删除（跳过卸载器）"),
+            ],
+        },
+        Group {
+            cmd: "upgrade".into(), desc: "升级已安装的软件",
+            entries: vec![
+                (cmd_names::UPGRADE.to_string(), "升级所有已安装的软件"),
+                (format!("{} 7zip", cmd_names::UPGRADE), "仅升级指定软件"),
+                (format!("{} --check", cmd_names::UPGRADE), "仅检查更新，不下载不安装"),
+                (format!("{} --renew", cmd_names::UPGRADE), "强制重新下载（即使版本相同）"),
+            ],
+        },
+        Group {
+            cmd: "config cache".into(), desc: "管理下载缓存",
+            entries: vec![
+                (cmd_names::CONFIG_CACHE.to_string(), "查看缓存文件列表和一致性"),
+                (cmd_names::CONFIG_CACHE_CLEAR.to_string(), "清除所有缓存文件"),
+                (cmd_names::CONFIG_CACHE_OPEN.to_string(), "在资源管理器中打开缓存目录"),
+            ],
+        },
+        Group {
+            cmd: "config path".into(), desc: "显示/打开配置目录",
+            entries: vec![
+                (cmd_names::CONFIG_PATH.to_string(), "显示所有数据目录位置"),
+                (format!("{} -o", cmd_names::CONFIG_PATH), "在资源管理器中打开配置目录"),
+            ],
+        },
+        Group {
+            cmd: "config source".into(), desc: "管理源定义（软件 + 工具）",
+            entries: vec![
+                (cmd_names::CONFIG_SOURCE_UPDATE.to_string(), "从远程仓库下载最新源定义"),
+                (cmd_names::CONFIG_SOURCE_PATH.to_string(), "显示源定义目录路径"),
+                (format!("{} -o", cmd_names::CONFIG_SOURCE_PATH), "在资源管理器中打开源目录"),
+            ],
+        },
+        Group {
+            cmd: "config speedtest".into(), desc: "测速所有下载源",
+            entries: vec![
+                (cmd_names::CONFIG_SPEEDTEST.to_string(), "对所有软件的所有源测速"),
+                (format!("{} 7zip", cmd_names::CONFIG_SPEEDTEST), "仅对指定软件的源测速"),
+                (format!("{} -S", cmd_names::CONFIG_SPEEDTEST), "以软件为单位统计可用性"),
+            ],
+        },
+        Group {
+            cmd: "config downloader".into(), desc: "管理下载引擎后端",
+            entries: vec![
+                (cmd_names::CONFIG_DOWNLOADER_LIST.to_string(), "列出所有下载后端及启用状态"),
+                (format!("{} set curl on", cmd_names::CONFIG_DOWNLOADER), "启用 curl 后端"),
+                (format!("{} set curl off", cmd_names::CONFIG_DOWNLOADER), "禁用 curl 后端"),
+                (cmd_names::CONFIG_DOWNLOADER_CONFIG.to_string(), "显示配置文件路径"),
+                (cmd_names::CONFIG_DOWNLOADER_CONFIG_OPEN.to_string(), "在资源管理器中打开配置目录"),
+            ],
+        },
+        Group {
+            cmd: "self init".into(), desc: "初始化 as 环境",
+            entries: vec![
+                (cmd_names::SELF_INIT.to_string(), "创建 tools/bin 并注册到用户 PATH"),
+            ],
+        },
+        Group {
+            cmd: "self update".into(), desc: "更新 as 自身",
+            entries: vec![
+                (cmd_names::SELF_UPDATE.to_string(), "下载最新版 as 并热替换"),
+            ],
+        },
+        Group {
+            cmd: "tool".into(), desc: "管理自研工具",
+            entries: vec![
+                (cmd_names::TOOL_LIST.to_string(), "列出已安装的自研工具"),
+                (format!("{} ls", cmd_names::TOOL_REMOVE), "移除自研工具 ls"),
+            ],
+        },
     ];
 
     // 计算示例命令文本的最大显示宽度用于对齐
     let max_usage_w = examples
         .iter()
-        .flat_map(|(_, _, entries)| entries.iter())
-        .map(|(usage, _)| (*usage).display_width())
+        .flat_map(|g| g.entries.iter())
+        .map(|(usage, _)| usage.display_width())
         .max()
         .unwrap_or(44);
 
-    for (cmd, desc, entries) in examples {
+    for group in &examples {
         println!(
             "  {}  {}",
-            color::bold_green(format!("{:<12}", cmd)),
-            color::gray(desc)
+            color::bold_green(format!("{:<12}", group.cmd)),
+            color::gray(group.desc)
         );
         println!();
-        for (usage, explanation) in *entries {
+        for (usage, explanation) in &group.entries {
             println!(
                 "    {}  {}",
-                color::cyan(pad(usage, max_usage_w)),
+                color::cyan(pad(&usage, max_usage_w)),
                 explanation
             );
         }

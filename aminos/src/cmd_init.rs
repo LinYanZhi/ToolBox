@@ -2,8 +2,7 @@ use std::fs;
 
 use anyhow::{Context, bail};
 use color;
-
-use crate::paths;
+use crate::{paths, cmd_names};
 
 /// 初始化 as 环境：创建 tools/bin 目录并注册到 PATH。
 pub fn run_init() -> anyhow::Result<()> {
@@ -64,7 +63,7 @@ pub fn run_init() -> anyhow::Result<()> {
     }
 
     println!("\n✓ as 环境初始化完成");
-    println!("  现在可通过 {} 安装自研工具", color::cyan("as install <工具名>"));
+    println!("  现在可通过 {} 安装自研工具", color::cyan(cmd_names::INSTALL));
     Ok(())
 }
 

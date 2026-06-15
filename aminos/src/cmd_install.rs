@@ -1,4 +1,5 @@
 use crate::opts::InstallOpts;
+use crate::cmd_names;
 use color;
 
 pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
@@ -11,7 +12,7 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
                 // 如果是自研工具（kind="self"），提示用 as tool install
                 if sd.kind == "self" {
                     eprintln!("  {} {} 是自研工具，请改用:", color::yellow("提示"), name);
-                    eprintln!("    {}", color::cyan(&format!("as tool install {}", name)));
+                    eprintln!("    {}", color::cyan(&format!("{} {}", cmd_names::TOOL_INSTALL, name)));
                     continue;
                 }
                 // 正常安装第三方软件
@@ -24,7 +25,7 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
                 match crate::software::read_tool_def(&n) {
                     Ok(_) => {
                         eprintln!("  {} {} 是自研工具，请使用:", color::yellow("提示"), name);
-                        eprintln!("    {}", color::cyan(&format!("as tool install {}", name)));
+                        eprintln!("    {}", color::cyan(&format!("{} {}", cmd_names::TOOL_INSTALL, name)));
                     }
                     Err(e) => {
                         eprintln!("  {} {}: {}", color::yellow("跳过"), name, e);

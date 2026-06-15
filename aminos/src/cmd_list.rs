@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use color::{self, DisplayWidth, pad_left as pad, truncate};
 
 use crate::helpers::name_matches;
+use crate::cmd_names;
 use crate::opts::ListOpts;
 use crate::{paths, registry, software};
 
@@ -74,7 +75,7 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     let source = paths::apps_source_dir();
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
         println!("{}", color::yellow("  未找到源定义。首次使用请运行:"));
-        println!("  as env source update\n");
+        println!("  {}\n", cmd_names::CONFIG_SOURCE_UPDATE);
         return Ok(());
     }
 

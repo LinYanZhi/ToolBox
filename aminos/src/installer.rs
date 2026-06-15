@@ -5,10 +5,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
-use crate::opts;
-use crate::paths;
-use crate::pe_version;
-use crate::registry;
+use crate::{opts, paths, pe_version, registry, cmd_names};
 use crate::software::{self, SoftwareDef, VersionInfo};
 use color;
 
@@ -327,7 +324,7 @@ fn install_self_tool(
             println!("    {}", color::bold_green(&format!("set PATH={};%PATH%", bin_path)));
         }
     } else {
-        println!("  {} 请先运行 {} 将 tools/bin 加入 PATH", name, color::cyan("as self init"));
+        println!("  {} 请先运行 {} 将 tools/bin 加入 PATH", name, color::cyan(cmd_names::SELF_INIT_HINT));
     }
 
     Ok(())

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context};
 use color;
+use crate::cmd_names;
 use serde::{Deserialize, Serialize};
 
 use crate::paths;
@@ -117,7 +118,7 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
     let lower = name.to_lowercase();
     let dir = paths::apps_source_dir();
     if !dir.is_dir() {
-        bail!("未找到源定义。请先运行: as env source update");
+        bail!("未找到源定义。请先运行: as config source update");
     }
 
     // 1. Exact match
@@ -159,7 +160,7 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
         }
     }
 
-    bail!("未找到软件 '{}' 的定义。请先运行: as env source update", name)
+    bail!("未找到软件 '{}' 的定义。请先运行: as config source update", name)
 }
 
 /// 读取自研工具定义（从 source/tools/ 查找）
@@ -168,7 +169,7 @@ pub fn read_tool_def(name: &str) -> anyhow::Result<SoftwareDef> {
     let lower = name.to_lowercase();
 
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
-        anyhow::bail!("未找到工具源定义。请先运行: as env source update");
+        anyhow::bail!("未找到工具源定义。请先运行: {}", cmd_names::SOURCE_UPDATE_HINT);
     }
 
     let exact = source.join(format!("{}.json", lower));

@@ -1,4 +1,4 @@
-use crate::{paths, pe_version, software};
+use crate::{paths, pe_version, software, cmd_names};
 use color::{self, DisplayWidth, format_size, pad_left as pad, truncate};
 
 pub fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
@@ -92,8 +92,9 @@ pub fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
     }
 
     println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size))));
-    println!("{}", color::gray("  as env cache --clear  清除缓存"));
-    println!("{}", color::gray("  as env cache --open   在资源管理器中打开"));
+
+    println!("{}", color::gray(format!("  {}  清除缓存", cmd_names::CONFIG_CACHE_CLEAR)));
+    println!("{}", color::gray(format!("  {}   在资源管理器中打开", cmd_names::CONFIG_CACHE_OPEN)));
     Ok(())
 }
 
