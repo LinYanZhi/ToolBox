@@ -168,16 +168,93 @@ pub fn load_ls_config() -> LsConfig {
     }
 }
 
-/// 获取环境变量配置（已反转：变量名 → 颜色/样式）
-pub fn get_variable_color_map() -> HashMap<String, String> {
-    let cfg = load_ls_config();
-    let colors = invert_map(&cfg.variables);
-    let styles = invert_map(&cfg.variable_styles);
-    let mut merged = colors;
-    for (k, v) in styles {
-        merged.entry(k).or_insert(v);
+/// 内置默认环境变量配色
+fn default_variable_colors() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    // 系统/路径类 → 青色
+    m.insert("PATH".into(), "cyan".into());
+    m.insert("PWD".into(), "cyan".into());
+    m.insert("OLDPWD".into(), "cyan".into());
+    m.insert("HOME".into(), "cyan".into());
+    m.insert("USERPROFILE".into(), "cyan".into());
+    // 身份类 → 绿色
+    m.insert("USERNAME".into(), "green".into());
+    m.insert("USER".into(), "green".into());
+    m.insert("COMPUTERNAME".into(), "green".into());
+    m.insert("HOSTNAME".into(), "green".into());
+    // 系统目录 → 蓝色
+    m.insert("SystemRoot".into(), "blue".into());
+    m.insert("WINDIR".into(), "blue".into());
+    m.insert("ProgramFiles".into(), "blue".into());
+    m.insert("ProgramFiles(x86)".into(), "blue".into());
+    m.insert("ProgramData".into(), "blue".into());
+    m.insert("ALLUSERSPROFILE".into(), "blue".into());
+    // 临时目录 → 黄色
+    m.insert("TEMP".into(), "yellow".into());
+    m.insert("TMP".into(), "yellow".into());
+    // 开发环境 → 红色/紫色
+    m.insert("JAVA_HOME".into(), "red".into());
+    m.insert("JAVA_HOME_11".into(), "red".into());
+    m.insert("JAVA_HOME_17".into(), "red".into());
+    m.insert("JAVA_HOME_21".into(), "red".into());
+    m.insert("GOROOT".into(), "red".into());
+    m.insert("RUSTUP_HOME".into(), "red".into());
+    m.insert("CARGO_HOME".into(), "red".into());
+    // Shell 类 → 紫色
+    m.insert("SHELL".into(), "purple".into());
+    m.insert("EDITOR".into(), "purple".into());
+    m.insert("VISUAL".into(), "purple".into());
+    // 显示相关 → 浅蓝色
+    m.insert("TERM".into(), "lightblue".into());
+    m.insert("TERMINAL".into(), "lightblue".into());
+    m.insert("COLORTERM".into(), "lightblue".into());
+    m.insert("DISPLAY".into(), "lightblue".into());
+    m
+}
+
+/// 内置默认 PATH 路径配色
+fn default_path_colors() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    // 自研工具
+    m.insert("*aminos*".into(), "cyan".into());
+    m.insert("*\\.cargo\\*".into(), "cyan".into());
+    m.insert("*\\.tool\\*".into(), "cyan".into());
+    // 开发工具
+    m.insert("*\\Python\\*".into(), "green".into());
+    m.insert("*\\nodejs\\*".into(), "green".into());
+    m.insert("*\\Git\\*".into(), "lightred".into());
+    m.insert("*\\Java\\*".into(), "red".into());
+    m.insert("*\\Go\\*".into(), "red".into());
+    // 系统目录
+    m.insert("*\\System32\\*".into(), "blue".into());
+    m.insert("*\\Windows\\*".into(), "blue".into());
+    m.insert("*\\Program Files*".into(), "blue".into());
+    // 应用数据
+    m.insert("*\\AppData\\*".into(), "gray".into());
+    m.insert("*\\Local\\*".into(), "gray".into());
+    m.insert("*\\Roaming\\*".into(), "gray".into());
+    m
+}
+
+/// 合并两张 map（ls.yaml 覆盖内置默认）
+fn merge_color_maps(defaults: HashMap<String, String>, yaml_overrides: HashMap<String, String>) -> HashMap<String, String> {
+    let mut merged = defaults;
+    for (k, v) in yaml_overrides {
+        merged.insert(k, v);
     }
     merged
+}
+
+/// 获取环境变量配置（内置默认 + ls.yaml 覆盖）
+pub fn get_variable_color_map() -> HashMap<String, String> {
+    let cfg = load_ls_config();
+    let yaml_colors = invert_map(&cfg.variables);
+    let yaml_styles = invert_map(&cfg.variable_styles);
+    let mut yaml_all = yaml_colors;
+    for (k, v) in yaml_styles {
+        yaml_all.entry(k).or_insert(v);
+    }
+    merge_color_maps(default_variable_colors(), yaml_all)
 }
 
 /// 获取排除的环境变量集合
@@ -185,16 +262,16 @@ pub fn get_exclude_set() -> Vec<String> {
     load_ls_config().exclude
 }
 
-/// 获取 PATH 路径配置（已反转：路径 → 颜色/样式）
+/// 获取 PATH 路径配置（内置默认 + ls.yaml 覆盖）
 pub fn get_path_color_map() -> HashMap<String, String> {
     let cfg = load_ls_config();
-    let colors = invert_map(&cfg.paths);
-    let styles = invert_map(&cfg.path_styles);
-    let mut merged = colors;
-    for (k, v) in styles {
-        merged.entry(k).or_insert(v);
+    let yaml_colors = invert_map(&cfg.paths);
+    let yaml_styles = invert_map(&cfg.path_styles);
+    let mut yaml_all = yaml_colors;
+    for (k, v) in yaml_styles {
+        yaml_all.entry(k).or_insert(v);
     }
-    merged
+    merge_color_maps(default_path_colors(), yaml_all)
 }
 
 /// 简单的通配符匹配，只支持 `*`（匹配任意字符）
