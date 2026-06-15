@@ -50,9 +50,20 @@ pub fn print_root_help() {
     }
     println!();
     println!("  {}", color::bold_yellow("选项:"));
-    println!("    {}  {}", color::cyan("-e, --example"), "显示所有命令的示例用法");
-    println!("    {}  {}", color::cyan("-h, --help"),    "显示帮助信息");
-    println!("    {}  {}", color::cyan("-V, --version"), "显示版本信息");
+
+    let opts: &[(&str, &str)] = &[
+        ("-e, --example",  "显示所有命令的示例用法"),
+        ("-h, --help",     "显示帮助信息"),
+        ("-V, --version",  "显示版本信息"),
+    ];
+
+    let max_opt_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(18);
+
+    for (opt, desc) in opts {
+        println!("    {}  {}",
+            pad(&color::cyan(opt), max_opt_w),
+            desc);
+    }
     println!();
     println!("  {}", color::bold_yellow("提示:"));
     println!("    {} 了解更多请使用 {}as <命令> --help{}", color::gray("•"), color::cyan(""), color::gray(""));
@@ -68,14 +79,36 @@ pub fn print_env_help() {
     println!("    {} {} {}", color::cyan("as env"), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
-    println!("    {}  {}", color::cyan("cache"),      "管理下载缓存");
-    println!("    {}  {}", color::cyan("source"),     "管理软件源定义");
-    println!("    {}  {}", color::cyan("downloader"), "管理下载引擎后端");
+
+    let env_subcmds: &[(&str, &str)] = &[
+        ("cache",      "管理下载缓存"),
+        ("source",     "管理软件源定义"),
+        ("downloader", "管理下载引擎后端"),
+    ];
+
+    let max_w = env_subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(12);
+
+    for (name, desc) in env_subcmds {
+        println!("    {}  {}",
+            pad(&color::cyan(name), max_w),
+            desc);
+    }
     println!();
-    println!("  {}", color::bold_yellow("示例:"));
-    println!("    {}  {}", color::cyan("as env cache"),        "查看缓存文件");
-    println!("    {}  {}", color::cyan("as env source update"),"更新软件源");
-    println!("    {}  {}", color::cyan("as env downloader list"), "列出下载后端");
+     println!("  {}", color::bold_yellow("示例:"));
+
+    let env_examples: &[(&str, &str)] = &[
+        ("as env cache",         "查看缓存文件"),
+        ("as env source update", "更新软件源"),
+        ("as env downloader list", "列出下载后端"),
+    ];
+
+    let max_w = env_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(26);
+
+    for (cmd, desc) in env_examples {
+        println!("    {}  {}",
+            pad(&color::cyan(cmd), max_w),
+            desc);
+    }
 }
 
 /// 打印 as self 子命令帮助
@@ -87,12 +120,34 @@ pub fn print_self_help() {
     println!("    {} {} {}", color::cyan("as self"), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
-    println!("    {}  {}", color::cyan("init"),   "初始化 as 环境（创建 tools/bin 并注册到 PATH）");
-    println!("    {}  {}", color::cyan("update"), "更新 as 自身到最新版本");
+
+    let self_subcmds: &[(&str, &str)] = &[
+        ("init",   "初始化 as 环境（创建 tools/bin 并注册到 PATH）"),
+        ("update", "更新 as 自身到最新版本"),
+    ];
+
+    let max_w = self_subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(8);
+
+    for (name, desc) in self_subcmds {
+        println!("    {}  {}",
+            pad(&color::cyan(name), max_w),
+            desc);
+    }
     println!();
     println!("  {}", color::bold_yellow("示例:"));
-    println!("    {}  {}", color::cyan("as self init"),   "初始化环境");
-    println!("    {}  {}", color::cyan("as self update"), "更新自身");
+
+    let self_examples: &[(&str, &str)] = &[
+        ("as self init",   "初始化环境"),
+        ("as self update", "更新自身"),
+    ];
+
+    let max_w = self_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(20);
+
+    for (cmd, desc) in self_examples {
+        println!("    {}  {}",
+            pad(&color::cyan(cmd), max_w),
+            desc);
+    }
 }
 
 /// 打印 as tool 子命令帮助
@@ -104,17 +159,39 @@ pub fn print_tool_help() {
     println!("    {} {} {}", color::cyan("as tool"), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
-    println!("    {}  {}", color::cyan("install"), "安装/更新自研工具（从 source/tools/ 读取）");
-    println!("    {}  {}", color::cyan("upgrade"), "升级所有已安装的自研工具");
-    println!("    {}  {}", color::cyan("list"),   "列出所有可用自研工具及安装状态");
-    println!("    {}  {}", color::cyan("remove"), "移除一个自研工具");
+
+    let tool_subcmds: &[(&str, &str)] = &[
+        ("install", "安装/更新自研工具（从 source/tools/ 读取）"),
+        ("upgrade", "升级所有已安装的自研工具"),
+        ("list",    "列出所有可用自研工具及安装状态"),
+        ("remove",  "移除一个自研工具"),
+    ];
+
+    let max_w = tool_subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(10);
+
+    for (name, desc) in tool_subcmds {
+        println!("    {}  {}",
+            pad(&color::cyan(name), max_w),
+            desc);
+    }
     println!();
     println!("  {}", color::bold_yellow("示例:"));
-    println!("    {}  {}", color::cyan("as tool install ls"),   "安装 ls 工具");
-    println!("    {}  {}", color::cyan("as tool install ls uv"), "同时安装多个工具");
-    println!("    {}  {}", color::cyan("as tool list"),   "列出自研工具");
-    println!("    {}  {}", color::cyan("as tool remove ls"),   "移除 ls 工具");
-    println!("    {}  {}", color::cyan("as tool upgrade"),   "升级所有自研工具");
+
+    let tool_examples: &[(&str, &str)] = &[
+        ("as tool install ls",        "安装 ls 工具"),
+        ("as tool install ls uv",      "同时安装多个工具"),
+        ("as tool list",              "列出自研工具"),
+        ("as tool remove ls",         "移除 ls 工具"),
+        ("as tool upgrade",           "升级所有自研工具"),
+    ];
+
+    let max_w = tool_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(28);
+
+    for (cmd, desc) in tool_examples {
+        println!("    {}  {}",
+            pad(&color::cyan(cmd), max_w),
+            desc);
+    }
     println!();
     println!("  {}", color::gray("第三方软件请使用 as install 命令"));
 }

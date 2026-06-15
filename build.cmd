@@ -11,6 +11,7 @@ call cargo build -p as --release
 call cargo build -p e --release
 
 copy target\release\as.exe as.exe
+copy target\release\as.exe %USERPROFILE%\Desktop
 copy target\release\ls.exe ls.exe
 copy target\release\e.exe e.exe
 

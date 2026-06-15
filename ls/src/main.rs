@@ -193,21 +193,33 @@ fn print_short_help() {
     println!("    {} [{}]", green("ls"), gray("目录路径"));
     println!();
     println!("  {}", bold_yellow("选项:"));
-    println!("  {:<22} {}", cyan("-h, --help"),      gray("显示简洁帮助"));
-    println!("  {:<22} {}", cyan("-e, --examples"),   gray("显示所有选项示例"));
-    println!("  {:<22} {}", cyan("-v, --version"),    gray("显示版本信息"));
-    println!("  {:<22} {}", cyan("-n, --no-color"),   gray("不使用颜色输出"));
-    println!("  {:<22} {}", cyan("-s, --sort <排序>"), gray("排序: default name suffix create update"));
-    println!("  {:<22} {}", cyan("--exclude <后缀> ..."), gray("排除指定后缀"));
-    println!("  {:<22} {}", cyan("-i, --include <后缀> ..."), gray("只包含指定后缀"));
-    println!("  {:<22} {}", cyan("-f, --only-files"),  gray("只显示文件"));
-    println!("  {:<22} {}", cyan("-d, --only-dirs"),   gray("只显示目录"));
-    println!("  {:<22} {}", cyan("-a, --abs-path"),    gray("打印完整路径"));
-    println!("  {:<22} {}", cyan("-r, --right-align"), gray("右对齐文件名"));
-    println!("  {:<22} {}", cyan("-z, --size"),        gray("显示文件大小"));
-    println!("  {:<22} {}", cyan("-t[=N]"),           gray("树形显示（-t=3 指定深度）"));
-    println!("  {:<22} {}", cyan("--link <路径>"),     gray("检查链接信息"));
+
+    let opts: &[(&str, &str)] = &[
+        ("-h, --help",       "显示简洁帮助"),
+        ("-e, --examples",   "显示所有选项示例"),
+        ("-v, --version",    "显示版本信息"),
+        ("-n, --no-color",   "不使用颜色输出"),
+        ("-s, --sort <排序>", "排序: default name suffix create update"),
+        ("--exclude <后缀> ...", "排除指定后缀"),
+        ("-i, --include <后缀> ...", "只包含指定后缀"),
+        ("-f, --only-files",  "只显示文件"),
+        ("-d, --only-dirs",   "只显示目录"),
+        ("-a, --abs-path",    "打印完整路径"),
+        ("-r, --right-align", "右对齐文件名"),
+        ("-z, --size",        "显示文件大小"),
+        ("-t[=N]",           "树形显示（-t=3 指定深度）"),
+        ("--link <路径>",     "检查链接信息"),
+    ];
+
+    let max_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(22);
+
+    for (opt, desc) in opts {
+        println!("  {}  {}",
+            pad_left(&cyan(opt), max_w),
+            gray(desc));
+    }
     println!();
+
     println!("  {}  {}  {}",
         gray("提示:"),
         gray("查看完整示例请使用"),
@@ -223,25 +235,47 @@ fn print_examples_help() {
     println!("  {}", bold_cyan("ls — 轻量级目录列表工具"));
     println!();
     println!("  {}", bold_yellow("目录列表"));
-    println!("  {:<26} {}", cyan("ls"), gray("列出当前目录"));
-    println!("  {:<26} {}", cyan("ls PATH"), gray("列出指定目录"));
-    println!("  {:<26} {}", cyan("ls -t[=N]"), gray("树形显示（-t=3 指定深度）"));
-    println!("  {:<26} {}", cyan("ls --exclude .txt .md"), gray("排除指定后缀"));
-    println!("  {:<26} {}", cyan("ls -i .rs .py"), gray("只包含指定后缀"));
-    println!("  {:<26} {}", cyan("ls -a"), gray("显示完整路径"));
-    println!("  {:<26} {}", cyan("ls -r"), gray("右对齐文件名"));
-    println!("  {:<26} {}", cyan("ls -z"), gray("显示文件大小"));
-    println!("  {:<26} {}", cyan("ls -f"), gray("只显示文件"));
-    println!("  {:<26} {}", cyan("ls -d"), gray("只显示目录"));
-    println!("  {:<26} {}", cyan("ls -s name"), gray("按名称排序"));
-    println!("  {:<26} {}", cyan("ls -s suffix"), gray("按后缀排序"));
-    println!("  {:<26} {}", cyan("ls --link PATH"), gray("检查链接信息"));
-    println!("  {:<26} {}", cyan("ls -n"), gray("不使用颜色输出"));
+
+    let examples: &[(&str, &str)] = &[
+        ("ls",                  "列出当前目录"),
+        ("ls PATH",             "列出指定目录"),
+        ("ls -t[=N]",           "树形显示（-t=3 指定深度）"),
+        ("ls --exclude .txt .md", "排除指定后缀"),
+        ("ls -i .rs .py",       "只包含指定后缀"),
+        ("ls -a",               "显示完整路径"),
+        ("ls -r",               "右对齐文件名"),
+        ("ls -z",               "显示文件大小"),
+        ("ls -f",               "只显示文件"),
+        ("ls -d",               "只显示目录"),
+        ("ls -s name",          "按名称排序"),
+        ("ls -s suffix",        "按后缀排序"),
+        ("ls --link PATH",      "检查链接信息"),
+        ("ls -n",               "不使用颜色输出"),
+    ];
+
+    let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(26);
+
+    for (cmd, desc) in examples {
+        println!("  {}  {}",
+            pad_left(&cyan(cmd), max_w),
+            gray(desc));
+    }
     println!();
+
     println!("  {}", bold_yellow("环境变量/PATH（需安装 e 工具）"));
-    println!("  {:<26} {}", cyan("e -s"), gray("显示所有环境变量"));
-    println!("  {:<26} {}", cyan("e -p"), gray("显示 PATH"));
-    println!("  {:<26} {}", cyan("e -g"), gray("打开环境变量对话框"));
+    let env_examples: &[(&str, &str)] = &[
+        ("e -s", "显示所有环境变量"),
+        ("e -p", "显示 PATH"),
+        ("e -g", "打开环境变量对话框"),
+    ];
+
+    let max_w2 = env_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(10);
+
+    for (cmd, desc) in env_examples {
+        println!("  {}  {}",
+            pad_left(&cyan(cmd), max_w2),
+            gray(desc));
+    }
     println!();
 }
 
