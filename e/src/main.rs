@@ -55,6 +55,9 @@ enum Commands {
         /// 变量名左对齐
         #[arg(short = 'l', long = "left")]
         left: bool,
+        /// 按分号换行显示（不依赖终端宽度）
+        #[arg(short = 's', long = "semicolon")]
+        semicolon: bool,
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
@@ -95,12 +98,12 @@ fn main() {
 
     // 子命令优先
     match cli.command {
-        Some(Commands::Set { left: _, help: true }) => {
+        Some(Commands::Set { left: _, semicolon: _, help: true }) => {
             print_subcommand_help("set");
             return;
         }
-        Some(Commands::Set { left, help: false }) => {
-            show_env_vars(left, cli.no_color);
+        Some(Commands::Set { left, semicolon, help: false }) => {
+            show_env_vars(left, semicolon, cli.no_color);
             return;
         }
         Some(Commands::Path { help: true }) => {
@@ -174,7 +177,7 @@ fn open_env_dialog() {
 
 // ── 显示环境变量 ──────────────────────────────────
 
-fn show_env_vars(left_align: bool, no_color: bool) {
+fn show_env_vars(left_align: bool, semicolon: bool, no_color: bool) {
     let color_map = config::get_variable_color_map();
     let exclude_set = config::get_exclude_set();
     let mut env_vars: Vec<(String, String)> = std::env::vars().collect();
@@ -229,12 +232,25 @@ fn show_env_vars(left_align: bool, no_color: bool) {
         let avail = if term_w > prefix_indent { term_w - prefix_indent } else { 60 };
 
         // 分行输出
-        let lines = wrap_value(value, avail);
-        for (i, line) in lines.iter().enumerate() {
-            if i == 0 {
-                println!("{}{}", prefix, line);
-            } else {
-                println!("{}{}", indent, line);
+        if semicolon && value.contains(';') {
+            // 按分号逐段显示
+            let segments: Vec<&str> = value.split(';').filter(|s| !s.is_empty()).collect();
+            for (i, seg) in segments.iter().enumerate() {
+                let line = if i == segments.len() - 1 { seg.to_string() } else { format!("{};", seg) };
+                if i == 0 {
+                    println!("{}{}", prefix, line);
+                } else {
+                    println!("{}{}", indent, line);
+                }
+            }
+        } else {
+            let lines = wrap_value(value, avail);
+            for (i, line) in lines.iter().enumerate() {
+                if i == 0 {
+                    println!("{}{}", prefix, line);
+                } else {
+                    println!("{}{}", indent, line);
+                }
             }
         }
     }
@@ -453,6 +469,9 @@ fn print_subcommand_help(cmd: &str) {
                 pad_left(&cyan("-l, --left"), 16),
                 gray("变量名左对齐"));
             println!("  {}  {}",
+                pad_left(&cyan("-s, --semicolon"), 16),
+                gray("按分号逐行显示"));
+            println!("  {}  {}",
                 pad_left(&cyan("-n, --no-color"), 16),
                 gray("不使用颜色输出"));
         }
@@ -498,6 +517,7 @@ fn print_examples() {
     let env_examples: &[(&str, &str)] = &[
         ("e set", "显示所有环境变量"),
         ("e set -l", "左对齐变量名"),
+        ("e set -s", "按分号逐行显示"),
         ("e path", "显示 PATH"),
         ("e path -n", "不使用颜色输出"),
         ("e -g", "打开环境变量对话框"),
