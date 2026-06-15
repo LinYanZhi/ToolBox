@@ -18,6 +18,9 @@ pub struct TagDef {
     /// PROMPT 覆盖（可选）
     #[serde(default)]
     pub prompt: String,
+    /// 别名列表
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 impl Default for TagDef {
@@ -26,6 +29,7 @@ impl Default for TagDef {
             path: Vec::new(),
             var: HashMap::new(),
             prompt: String::new(),
+            aliases: Vec::new(),
         }
     }
 }
@@ -38,9 +42,15 @@ fn get_tags_dir() -> PathBuf {
     PathBuf::from(local).join("e").join("tags")
 }
 
+/// 公开访问 tags 目录路径
+pub fn tags_dir() -> PathBuf {
+    get_tags_dir()
+}
+
 fn tag_path(name: &str) -> PathBuf {
     get_tags_dir().join(format!("{}.yaml", name))
 }
+
 
 // ── CRUD ──────────────────────────────────
 
@@ -83,68 +93,95 @@ pub fn create_tag(name: &str) -> Result<PathBuf, String> {
         return Err(format!("tag '{}' 已存在", name));
     }
 
+    // 检查名称是否已被其他 tag 作为别名占用
+    if let Some((canonical, _)) = resolve_tag(name) {
+        return Err(format!("'{}' 已被 tag '{}' 的别名占用", name, canonical));
+    }
+
     let def = TagDef::default();
     let yaml = serde_yaml::to_string(&def).map_err(|e| format!("序列化失败: {}", e))?;
     std::fs::write(&path, &yaml).map_err(|e| format!("写入失败: {}", e))?;
     Ok(path)
 }
 
-/// 删除 tag
+/// 删除 tag（支持别名）
 pub fn remove_tag(name: &str) -> Result<(), String> {
     let path = tag_path(name);
-    if !path.exists() {
-        return Err(format!("tag '{}' 不存在", name));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("删除失败: {}", e))
+    } else if let Some((canonical, _)) = resolve_tag(name) {
+        let path = tag_path(&canonical);
+        std::fs::remove_file(&path).map_err(|e| format!("删除失败: {}", e))
+    } else {
+        Err(format!("tag '{}' 不存在", name))
     }
-    std::fs::remove_file(&path).map_err(|e| format!("删除失败: {}", e))
+}
+
+/// 根据名称或别名查找 tag，返回 (规范名, 配置)
+pub fn resolve_tag(query: &str) -> Option<(String, TagDef)> {
+    // 先直接按文件名匹配
+    if let Some(def) = load_tag(query) {
+        return Some((query.to_string(), def));
+    }
+    // 再扫描所有 tag 匹配别名
+    for name in list_tags() {
+        if let Some(def) = load_tag(&name) {
+            if def.aliases.iter().any(|a| a.eq_ignore_ascii_case(query)) {
+                return Some((name, def));
+            }
+        }
+    }
+    None
 }
 
 // ── 脚本生成 ──────────────────────────────────
 
-/// 组合多个 tag 生成 cmd 脚本
+/// 组合多个 tag 生成 cmd 一行命令
 pub fn generate_script(tags: &[String]) -> Result<String, String> {
     if tags.is_empty() {
         return Err("请指定至少一个 tag".into());
     }
 
     let mut defs = Vec::new();
+    let mut resolved_names = Vec::new();
     for name in tags {
-        let def = load_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+        let (canonical, def) = resolve_tag(name)
+            .ok_or_else(|| format!("tag 或别名 '{}' 不存在", name))?;
         defs.push(def);
+        resolved_names.push(canonical);
     }
 
-    let tag_label = tags.join("+");
+    let tag_label = resolved_names.join("+");
+    let mut parts: Vec<String> = Vec::new();
 
-    let mut lines: Vec<String> = Vec::new();
-    lines.push("@ECHO OFF".into());
-    lines.push(format!("REM e: 组合 tag: {}", tag_label));
-    lines.push(String::new());
-
-    // PATH 追加（后列出的 tag 优先，所以从后往前 prepend）
+    // PATH 前置（后列出的 tag 优先）— 合并为一条 SET，避免 %PATH% 重复展开
+    let mut all_paths: Vec<&str> = Vec::new();
     for def in defs.iter().rev() {
         for p in &def.path {
-            lines.push(format!("@SET \"PATH=%PATH%;{}\"", p));
+            all_paths.push(p);
         }
+    }
+    if !all_paths.is_empty() {
+        let joined = all_paths.join(";");
+        parts.push(format!("@SET \"PATH={};%PATH%\"", joined));
     }
 
     // 环境变量
     for def in &defs {
         for (k, v) in &def.var {
-            lines.push(format!("@SET \"{}={}\"", k, v));
+            parts.push(format!("@SET \"{}={}\"", k, v));
         }
     }
 
     // PROMPT = [tag1+tag2+...] $P$G
-    lines.push(format!("@SET \"PROMPT=[{}] $P$G\"", tag_label));
+    parts.push(format!("@SET \"PROMPT=[{}] $P$G\"", tag_label));
 
-    lines.push(String::new());
-    lines.push("@ECHO 环境已就绪，请按任意键退出 . . .".into());
-    lines.push("@PAUSE >NUL".into());
-
-    Ok(lines.join("\r\n"))
+    Ok(parts.join(" && "))
 }
 
 // ── 打印 ──────────────────────────────────
 
+/// 渲染 tag 列表，自适应终端宽度，丰富颜色，别名列
 pub fn print_tag_list() {
     let tags = list_tags();
     if tags.is_empty() {
@@ -155,64 +192,252 @@ pub fn print_tag_list() {
         return;
     }
 
-    let rows: Vec<(&str, usize, usize, Vec<String>)> = tags.iter().map(|name| {
-        let def = load_tag(name);
-        let paths = def.as_ref().map(|d| d.path.clone()).unwrap_or_default();
-        let vars = def.as_ref().map(|d| d.var.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
-        (name.as_str(), paths.len(), vars.len(), paths)
+    // 收集所有 tag 数据
+    struct TagRow {
+        name: String,
+        aliases: Vec<String>,
+        alias_label: String,    // 逗号分隔的别名文本
+        paths: Vec<String>,
+        vars: Vec<(String, String)>,
+    }
+
+    let rows: Vec<TagRow> = tags.iter().filter_map(|name| {
+        let def = load_tag(name)?;
+        let mut vars: Vec<(String, String)> = def.var.into_iter().collect();
+        vars.sort_by(|a, b| a.0.cmp(&b.0));
+        let alias_label = def.aliases.join(", ");
+        Some(TagRow {
+            name: name.clone(),
+            aliases: def.aliases,
+            alias_label,
+            paths: def.path,
+            vars,
+        })
     }).collect();
 
-    let max_name = rows.iter().map(|(n, _, _, _)| n.display_width()).max().unwrap_or(6);
-    let max_path_cnt = rows.iter().map(|(_, c, _, _)| c).max().unwrap_or(&1);
-    let path_w = format!("PATH:{}", max_path_cnt).len().max("PATH".len());
-    let max_var_cnt = rows.iter().map(|(_, _, c, _)| c).max().unwrap_or(&1);
-    let var_w = format!("变量:{}", max_var_cnt).len().max("变量".len());
+    let has_aliases = rows.iter().any(|r| !r.aliases.is_empty());
 
-    // 收集所有路径用于计算最大宽度
-    let max_path_display = rows.iter().flat_map(|(_, _, _, paths)| paths.iter()).map(|p| p.display_width()).max().unwrap_or(0);
-    let preview_w = max_path_display.min(60);
+    // ── 计算自然宽度 ──
 
-    let hdr_name = pad_left("名称", max_name);
-    let hdr_path = pad_left("PATH", path_w.max(4));
-    let hdr_var = pad_left("变量", var_w.max(4));
-    println!("  {}", bold_cyan(format!("{}  {}  {}  路径", hdr_name, hdr_path, hdr_var)));
-    let sep_name = format!("{:─>width$}", "", width = max_name + 2);
-    let sep_path = format!("{:─>width$}", "", width = path_w.max(4) + 1);
-    let sep_var = format!("{:─>width$}", "", width = var_w.max(4) + 1);
-    println!("  {}", gray(format!("{}  {}  {}  ────────────", sep_name, sep_path, sep_var)));
+    let term_w = terminal_width();
+    let indent = 2usize;
+    let gap = 2usize;
+    let indent_s = " ".repeat(indent);
+    let sep = " ".repeat(gap);
+
+    let name_nat = rows.iter().map(|r| r.name.display_width()).max().unwrap_or(6);
+    let alias_nat = if has_aliases {
+        rows.iter().map(|r| r.alias_label.display_width()).max().unwrap_or(0)
+    } else {
+        0
+    };
+    let path_nat = rows.iter().flat_map(|r| r.paths.iter()).map(|p| p.display_width()).max().unwrap_or(0);
+    let var_nat = rows.iter().flat_map(|r| r.vars.iter()).map(|(k, v)| format!("{}={}", k, v).display_width()).max().unwrap_or(0);
+
+    let col_count = if has_aliases { 4usize } else { 3usize };
+    let reserved = indent + gap * (col_count - 1);
+
+    // ── 自适应分配列宽 ──
+
+    let (name_w, alias_w, path_w, var_w) = if has_aliases {
+        let min_name = 6usize;
+        let min_alias = 4usize;
+        let min_path = 10usize;
+        let min_var = 8usize;
+        let total_nat = name_nat + alias_nat + path_nat + var_nat + reserved;
+
+        if total_nat <= term_w {
+            (name_nat.max(min_name), alias_nat.max(min_alias), path_nat.max(min_path), var_nat.max(min_var))
+        } else {
+            let available = term_w.saturating_sub(reserved);
+            let nw = name_nat.min(8).max(min_name);
+            let aw = alias_nat.min(10).max(min_alias);
+            let remain = available.saturating_sub(nw + aw);
+            // 路径:变量 = 6:4
+            let pw = (remain as f64 * 0.6).floor() as usize;
+            let vw = remain.saturating_sub(pw);
+            (nw, aw, pw.max(min_path), vw.max(min_var))
+        }
+    } else {
+        let min_name = 6usize;
+        let min_path = 10usize;
+        let min_var = 8usize;
+        let total_nat = name_nat + path_nat + var_nat + reserved;
+
+        if total_nat <= term_w {
+            (name_nat.max(min_name), 0, path_nat.max(min_path), var_nat.max(min_var))
+        } else {
+            let available = term_w.saturating_sub(reserved);
+            let nw = name_nat.min(8).max(min_name);
+            let remain = available.saturating_sub(nw);
+            let pw = (remain as f64 * 0.6).floor() as usize;
+            let vw = remain.saturating_sub(pw);
+            (nw, 0, pw.max(min_path), vw.max(min_var))
+        }
+    };
+
+    // ── 表头 ──
+
+    if has_aliases {
+        let h_n = pad_left("名称", name_w);
+        let h_a = pad_left("别名", alias_w);
+        let h_p = pad_left("路径", path_w);
+        let h_v = pad_left("变量", var_w);
+        println!("{}{}{}{}{}{}{}{}",
+            indent_s,
+            bold_cyan(&h_n), &sep,
+            bold_magenta(&h_a), &sep,
+            bold_green(&h_p), &sep,
+            bold_yellow(&h_v));
+
+        let s_n = "-".repeat(name_w);
+        let s_a = "-".repeat(alias_w);
+        let s_p = "-".repeat(path_w);
+        let s_v = "-".repeat(var_w);
+        println!("{}{}{}{}{}{}{}{}",
+            indent_s,
+            gray(&s_n), &sep, gray(&s_a), &sep, gray(&s_p), &sep, gray(&s_v));
+    } else {
+        let h_n = pad_left("名称", name_w);
+        let h_p = pad_left("路径", path_w);
+        let h_v = pad_left("变量", var_w);
+        println!("{}{}{}{}{}{}",
+            indent_s,
+            bold_cyan(&h_n), &sep,
+            bold_green(&h_p), &sep,
+            bold_yellow(&h_v));
+
+        let s_n = "-".repeat(name_w);
+        let s_p = "-".repeat(path_w);
+        let s_v = "-".repeat(var_w);
+        println!("{}{}{}{}{}{}",
+            indent_s,
+            gray(&s_n), &sep, gray(&s_p), &sep, gray(&s_v));
+    }
     println!();
 
-    for (name, pc, vc, paths) in &rows {
-        let path_str = if paths.is_empty() {
-            String::new()
-        } else {
-            let joined = paths.join("; ");
-            if joined.display_width() > preview_w {
-                let mut s = String::new();
-                let mut w = 0;
-                for p in paths {
-                    let add = if s.is_empty() { p.clone() } else { format!("; {}", p) };
-                    let add_w = add.display_width();
-                    if w + add_w > preview_w && !s.is_empty() { break; }
-                    s.push_str(&add);
-                    w += add_w;
-                }
-                s.push('…');
-                s
-            } else {
-                joined
-            }
-        };
+    // ── 数据行 ──
 
-        println!("  {}  {}  {}  {}",
-            pad_left(&cyan(name), max_name),
-            pad_left(&format!("{}", pc), path_w),
-            pad_left(&format!("{}", vc), var_w),
-            gray(path_str));
+    for r in &rows {
+        let max_lines = r.paths.len().max(r.vars.len()).max(r.aliases.len()).max(1);
+
+        for i in 0..max_lines {
+            // 名称列：首行显示
+            let name_str = if i == 0 {
+                cell_text(&r.name, name_w)
+            } else {
+                " ".repeat(name_w)
+            };
+
+            // 别名列
+            let alias_str = if has_aliases {
+                if i < r.aliases.len() {
+                    cell_text(&r.aliases[i], alias_w)
+                } else {
+                    " ".repeat(alias_w)
+                }
+            } else {
+                String::new()
+            };
+
+            // 路径列
+            let path_str = if i < r.paths.len() {
+                cell_text(&r.paths[i], path_w)
+            } else {
+                " ".repeat(path_w)
+            };
+
+            // 变量列
+            let var_str = if i < r.vars.len() {
+                let (k, v) = &r.vars[i];
+                cell_text(&format!("{}={}", k, v), var_w)
+            } else {
+                " ".repeat(var_w)
+            };
+
+            if has_aliases {
+                if i == 0 {
+                    println!("{}{}  {}  {}  {}",
+                        indent_s, cyan(&name_str),
+                        magenta(&alias_str), green(&path_str), yellow(&var_str));
+                } else {
+                    println!("{}{}  {}  {}  {}",
+                        indent_s, gray(&name_str),
+                        bright_magenta(&alias_str), bright_green(&path_str), bright_yellow(&var_str));
+                }
+            } else {
+                if i == 0 {
+                    println!("{}{}  {}  {}",
+                        indent_s, cyan(&name_str),
+                        green(&path_str), yellow(&var_str));
+                } else {
+                    println!("{}{}  {}  {}",
+                        indent_s, gray(&name_str),
+                        bright_green(&path_str), bright_yellow(&var_str));
+                }
+            }
+        }
     }
+
     println!();
     println!("  {}  {}", gray("组合:"), cyan("e gen <tag1> <tag2> ..."));
     println!("  {}  {}", gray("剪贴板:"), cyan("e gen --copy <tag1> <tag2> ..."));
     println!();
     println!("  {}", gray(format!("目录: {}", get_tags_dir().display())));
+}
+
+/// 单元格文本渲染：若内容能放入列宽则左对齐填充，否则截断加 ...
+fn cell_text(text: &str, col_w: usize) -> String {
+    let dw = text.display_width();
+    if dw <= col_w {
+        pad_left(text, col_w)
+    } else if col_w <= 3 {
+        text.to_string()
+    } else {
+        color::truncate(text, col_w)
+    }
+}
+
+/// 获取终端宽度（Windows API）
+fn terminal_width() -> usize {
+    #[repr(C)]
+    struct ConsoleScreenBufferInfo {
+        dw_size: [u16; 2],
+        dw_cursor: [u16; 2],
+        w_attrs: u16,
+        sr_window: [u16; 4],
+        dw_max: [u16; 2],
+    }
+
+    unsafe extern "system" {
+        fn GetStdHandle(id: u32) -> isize;
+        fn GetConsoleScreenBufferInfo(h: isize, info: *mut ConsoleScreenBufferInfo) -> i32;
+    }
+
+    unsafe {
+        let handle = GetStdHandle(0xFFFFFFF5u32); // STD_OUTPUT_HANDLE
+        if handle == -1 || handle == 0 {
+            return 120;
+        }
+        let mut info: ConsoleScreenBufferInfo = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(handle, &mut info) != 0 {
+            (info.sr_window[2] - info.sr_window[0] + 1).max(40) as usize
+        } else {
+            120
+        }
+    }
+}
+
+// ── 辅助工具 ─────────────────────────────────
+
+/// 批处理转义：% → %%
+#[allow(dead_code)]
+fn esc_bat(s: &str) -> String {
+    s.replace('%', "%%")
+}
+
+/// PowerShell 单引号转义：' → ''
+#[allow(dead_code)]
+fn esc_ps1(s: &str) -> String {
+    s.replace('\'', "''")
 }

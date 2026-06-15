@@ -28,9 +28,9 @@ struct Cli {
     #[arg(short = 'o', long = "open")]
     open: Option<String>,
 
-    /// 打开 Windows 环境变量对话框
-    #[arg(short = 'g', long = "gui")]
-    gui: bool,
+    /// 打开 Windows 环境变量对话框（user / admin）
+    #[arg(short = 'g', long = "gui", default_missing_value = "user", num_args = 0..=1, value_name = "模式")]
+    gui: Option<String>,
 
     /// 不使用颜色输出
     #[arg(short = 'n', long = "no-color", global = true)]
@@ -71,6 +71,9 @@ enum Commands {
     },
     /// 管理环境配置 tag
     Tag {
+        /// 在资源管理器中打开 tags 目录
+        #[arg(short = 'o', long = "open")]
+        open: bool,
         #[command(subcommand)]
         action: Option<TagCmd>,
     },
@@ -166,28 +169,32 @@ fn main() {
             show_path(cli.no_color);
             return;
         }
-        Some(Commands::Tag { action: Some(TagCmd::List { help: false }) }) => {
+        Some(Commands::Tag { open: true, action: None }) => {
+            cmd_tag_open_dir();
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::List { help: false }), .. }) => {
             activate::print_tag_list();
             return;
         }
-        Some(Commands::Tag { action: Some(TagCmd::List { help: true, .. }) }) => {
+        Some(Commands::Tag { action: Some(TagCmd::List { help: true, .. }), .. }) => {
             print_subcommand_help("tag");
             return;
         }
-        Some(Commands::Tag { action: Some(TagCmd::Create { name, help: false }) }) => {
+        Some(Commands::Tag { action: Some(TagCmd::Create { name, help: false }), .. }) => {
             cmd_tag_create(&name);
             return;
         }
-        Some(Commands::Tag { action: Some(TagCmd::Create { help: true, .. }) })
-        | Some(Commands::Tag { action: None }) => {
+        Some(Commands::Tag { action: Some(TagCmd::Create { help: true, .. }), .. })
+        | Some(Commands::Tag { open: false, action: None }) => {
             print_subcommand_help("tag");
             return;
         }
-        Some(Commands::Tag { action: Some(TagCmd::Remove { name, help: false }) }) => {
+        Some(Commands::Tag { action: Some(TagCmd::Remove { name, help: false }), .. }) => {
             cmd_tag_remove(&name);
             return;
         }
-        Some(Commands::Tag { action: Some(TagCmd::Remove { help: true, .. }) }) => {
+        Some(Commands::Tag { action: Some(TagCmd::Remove { help: true, .. }), .. }) => {
             print_subcommand_help("tag");
             return;
         }
@@ -222,8 +229,11 @@ fn main() {
     }
 
     // --gui: 环境变量对话框
-    if cli.gui {
-        open_env_dialog();
+    if let Some(mode) = &cli.gui {
+        match mode.as_str() {
+            "admin" | "root" => open_env_dialog_admin(),
+            _ => open_env_dialog(),
+        }
         return;
     }
 
@@ -272,10 +282,18 @@ fn open_in_explorer(raw: &str) {
     }
 }
 
-/// 打开 Windows 环境变量对话框
+/// 打开 Windows 环境变量对话框（用户模式）
 fn open_env_dialog() {
     let _ = Command::new("rundll32.exe")
         .args(["sysdm.cpl,EditEnvironmentVariables"])
+        .spawn();
+}
+
+/// 打开 Windows 环境变量对话框（管理员模式）
+fn open_env_dialog_admin() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Start-Process rundll32.exe -ArgumentList 'sysdm.cpl,EditEnvironmentVariables' -Verb RunAs"])
         .spawn();
 }
 
@@ -487,6 +505,13 @@ fn cmd_tag_remove(name: &str) {
     }
 }
 
+fn cmd_tag_open_dir() {
+    let dir = activate::tags_dir();
+    let _ = std::process::Command::new("explorer")
+        .arg(&*dir.to_string_lossy())
+        .spawn();
+}
+
 // ── 脚本生成 ──────────────────────────────────
 
 fn cmd_gen(names: &[String], copy: bool) {
@@ -499,20 +524,29 @@ fn cmd_gen(names: &[String], copy: bool) {
     match activate::generate_script(names) {
         Ok(script) => {
             if copy {
-                // 用管道方式传递给 PowerShell Set-Clipboard
-                let mut child = std::process::Command::new("powershell")
-                    .args(["-NoProfile", "-Command", "Set-Clipboard"])
+                // 用 clip.exe 写入剪贴板（Windows 内置，稳定可靠）
+                let mut child = std::process::Command::new("clip.exe")
                     .stdin(std::process::Stdio::piped())
                     .spawn();
-                if let Ok(ref mut c) = child {
-                    use std::io::Write;
-                    let _ = c.stdin.take().map(|mut s| s.write_all(script.as_bytes()));
-                    let _ = c.wait();
-                    println!("{} 脚本已复制到剪贴板", green("✓"));
-                    println!("{} 按 Ctrl+V 粘贴到终端执行", gray("提示:"));
-                } else {
-                    eprintln!("{} 剪贴板复制失败，直接输出脚本:", yellow("注意:"));
-                    println!("{}", script);
+                match child.as_mut() {
+                    Ok(c) => {
+                        use std::io::Write;
+                        let wrote = c.stdin.take()
+                            .map(|mut s| s.write_all(script.as_bytes()).is_ok())
+                            .unwrap_or(false);
+                        if !wrote {
+                            eprintln!("{} 剪贴板写入失败，直接输出脚本:", yellow("注意:"));
+                            println!("{}", script);
+                            return;
+                        }
+                        let _ = c.wait();
+                        println!("{} 命令已复制到剪贴板", green("✓"));
+                        println!("{} 按 Ctrl+V 粘贴到终端执行", gray("提示:"));
+                    }
+                    Err(_) => {
+                        eprintln!("{} 剪贴板复制失败，直接输出脚本:", yellow("注意:"));
+                        println!("{}", script);
+                    }
                 }
             } else {
                 println!("{}", script);
@@ -586,23 +620,17 @@ fn sanitize_path(raw: &str) -> String {
 // ── 帮助 ──────────────────────────────────
 
 fn print_short_help() {
-    println!("  {}", bold_cyan("e — 环境变量查看器 / 路径打开器"));
+    println!("  {} — {}", bold_cyan("e"), green("环境变量管理 + 路径打开器"));
     println!();
     println!("  {}", bold_yellow("用法:"));
-    println!("    {}        {}", green("e"), gray("显示帮助信息（默认）"));
-    println!("    {} [{}]", green("e"), gray("路径"));
-    println!("    {} {} {}", green("e"), cyan("set"),         gray("显示所有环境变量"));
-    println!("    {} {} {}", green("e"), cyan("path"),        gray("显示 PATH"));
-    println!("    {} {} {}", green("e"), cyan("tag"),         gray("管理 tag（list/create/remove）"));
-    println!("    {} {} {}", green("e"), cyan("gen"),         gray("组合 tag 生成 cmd 脚本"));
-    println!("    {} {}", green("e -g"),                      gray("打开环境变量对话框"));
+    println!("    {} {} {}", cyan("e"), green("<命令>"), gray("[参数]"));
     println!();
-    println!("  {}", bold_yellow("子命令:"));
+    println!("  {}", bold_yellow("命令:"));
 
     let cmds: &[(&str, &str)] = &[
         ("set",       "显示所有环境变量（带颜色）"),
         ("path",      "显示 PATH（带颜色）"),
-        ("tag",       "管理 tag（list/create/remove）"),
+        ("tag",       "管理 tag（list/create/remove；-o 打开目录）"),
         ("gen",       "组合 tag 生成 cmd 脚本"),
         ("config",    "显示/打开配置目录"),
     ];
@@ -618,15 +646,15 @@ fn print_short_help() {
 
     println!("  {}", bold_yellow("选项:"));
     let opts: &[(&str, &str)] = &[
-        ("-h, --help",      "显示简洁帮助"),
-        ("-e, --examples",  "显示所有选项示例"),
-        ("-v, --version",   "显示版本信息"),
-        ("-n, --no-color",  "不使用颜色输出"),
-        ("-g, --gui",       "打开环境变量对话框"),
+        ("-g, --gui [模式]", "打开环境变量对话框（user / admin / root，默认 user）"),
         ("-o, --open <路径>", "在资源管理器打开路径"),
+        ("-e, --examples",  "显示所有示例"),
+        ("-n, --no-color",  "不使用颜色输出"),
+        ("-h, --help",      "显示帮助"),
+        ("-v, --version",   "显示版本"),
     ];
 
-    let max_opt_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(22);
+    let max_opt_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(24);
 
     for (opt, desc) in opts {
         println!("  {}  {}",
@@ -637,11 +665,11 @@ fn print_short_help() {
 
     println!("  {}  {}  {}",
         gray("提示:"),
-        gray("查看子命令选项请使用"),
-        cyan("e <子命令> -h"));
+        gray("子命令帮助:"),
+        cyan("e <命令> -h"));
     println!("  {}  {}  {}",
         gray("提示:"),
-        gray("查看完整示例请使用"),
+        gray("完整示例:"),
         cyan("e -e"));
 }
 
@@ -781,7 +809,9 @@ fn print_examples() {
         ("e set -s", "按分号逐行显示"),
         ("e path", "显示 PATH"),
         ("e path -n", "不使用颜色输出"),
-        ("e -g", "打开环境变量对话框"),
+        ("e -g", "打开环境变量对话框（用户）"),
+        ("e -g admin", "以管理员打开环境变量对话框"),
+        ("e -g root", "以管理员打开环境变量对话框（同 admin）"),
     ];
 
     let max_w2 = env_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(20);
