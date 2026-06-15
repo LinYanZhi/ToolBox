@@ -1,3 +1,4 @@
+mod activate;
 mod config;
 
 use std::collections::HashMap;
@@ -68,6 +69,40 @@ enum Commands {
         #[arg(short = 'h', long = "help")]
         help: bool,
     },
+    /// 激活环境（输出 shell 脚本，请 eval 执行）
+    Activate {
+        /// 环境名称
+        name: String,
+        /// 输出 PowerShell 脚本（默认 cmd.exe）
+        #[arg(long = "ps1")]
+        ps1: bool,
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
+    /// 停用当前环境（输出恢复脚本）
+    Deactivate {
+        /// 输出 PowerShell 脚本（默认 cmd.exe）
+        #[arg(long = "ps1")]
+        ps1: bool,
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
+    /// 列出所有可用环境
+    List {
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
+    /// 创建新的环境定义（类 venv）
+    Venv {
+        /// 环境名称
+        name: String,
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
 }
 
 fn main() {
@@ -112,6 +147,38 @@ fn main() {
         }
         Some(Commands::Path { help: false }) => {
             show_path(cli.no_color);
+            return;
+        }
+        Some(Commands::Activate { name: _, ps1: _, help: true }) => {
+            print_subcommand_help("activate");
+            return;
+        }
+        Some(Commands::Activate { name, ps1, help: false }) => {
+            cmd_activate(&name, ps1);
+            return;
+        }
+        Some(Commands::Deactivate { ps1: _, help: true }) => {
+            print_subcommand_help("deactivate");
+            return;
+        }
+        Some(Commands::Deactivate { ps1, help: false }) => {
+            cmd_deactivate(ps1);
+            return;
+        }
+        Some(Commands::List { help: true }) => {
+            print_subcommand_help("list");
+            return;
+        }
+        Some(Commands::List { help: false }) => {
+            activate::print_env_list();
+            return;
+        }
+        Some(Commands::Venv { name: _, help: true }) => {
+            print_subcommand_help("venv");
+            return;
+        }
+        Some(Commands::Venv { name, help: false }) => {
+            cmd_venv(&name);
             return;
         }
         None => {}
@@ -363,6 +430,47 @@ fn get_matching_color(path: &str, color_map: &HashMap<String, String>) -> Option
     None
 }
 
+// ── 环境激活/停用 ──────────────────────────────────
+
+fn cmd_activate(name: &str, ps1: bool) {
+    let def = match activate::load_env(name) {
+        Some(d) => d,
+        None => {
+            eprintln!("{} 环境 '{}' 未找到", red("错误:"), name);
+            eprintln!("{} 使用 e list 查看可用环境", gray("提示:"));
+            return;
+        }
+    };
+
+    if ps1 {
+        activate::print_activate_ps1(&def, name);
+    } else {
+        activate::print_activate_cmd(&def, name);
+    }
+}
+
+fn cmd_deactivate(ps1: bool) {
+    if ps1 {
+        activate::print_deactivate_ps1();
+    } else {
+        activate::print_deactivate_cmd();
+    }
+}
+
+/// 创建新环境
+fn cmd_venv(name: &str) {
+    match activate::create_env(name) {
+        Ok(path) => {
+            println!("{} 环境 '{}' 已创建", green("✓"), cyan(name));
+            println!("{} 编辑文件以配置环境变量:", gray("请"));
+            println!("  {}", cyan(path.display().to_string()));
+        }
+        Err(e) => {
+            eprintln!("{} {}", red("错误:"), e);
+        }
+    }
+}
+
 // ── ANSI 着色 ──────────────────────────────────
 
 const ANSI_COLORS: &[(&str, &str)] = &[
@@ -406,18 +514,24 @@ fn print_short_help() {
     println!("  {}", bold_yellow("用法:"));
     println!("    {}        {}", green("e"), gray("显示帮助信息（默认）"));
     println!("    {} [{}]", green("e"), gray("路径"));
-    println!("    {} {} {}", green("e"), cyan("set"),   gray("显示所有环境变量"));
-    println!("    {} {} {}", green("e"), cyan("path"),  gray("显示 PATH"));
-    println!("    {} {}", green("e -g"),                gray("打开环境变量对话框"));
+    println!("    {} {} {}", green("e"), cyan("set"),         gray("显示所有环境变量"));
+    println!("    {} {} {}", green("e"), cyan("path"),        gray("显示 PATH"));
+    println!("    {} {} {}", green("e"), cyan("activate"),    gray("激活环境"));
+    println!("    {} {} {}", green("e"), cyan("deactivate"),  gray("恢复环境"));
+    println!("    {} {}", green("e -g"),                      gray("打开环境变量对话框"));
     println!();
     println!("  {}", bold_yellow("子命令:"));
 
     let cmds: &[(&str, &str)] = &[
-        ("set",  "显示所有环境变量（带颜色）"),
-        ("path", "显示 PATH（带颜色）"),
+        ("set",       "显示所有环境变量（带颜色）"),
+        ("path",      "显示 PATH（带颜色）"),
+        ("activate",  "激活环境（输出 shell 脚本）"),
+        ("deactivate","恢复环境（输出恢复脚本）"),
+        ("list",      "列出可用环境"),
+        ("venv",      "创建新环境定义"),
     ];
 
-    let max_w = cmds.iter().map(|(c, _)| c.display_width()).max().unwrap_or(6);
+    let max_w = cmds.iter().map(|(c, _)| c.display_width()).max().unwrap_or(12);
 
     for (cmd, desc) in cmds {
         println!("    {}  {}",
@@ -486,6 +600,51 @@ fn print_subcommand_help(cmd: &str) {
                 pad_left(&cyan("-n, --no-color"), 16),
                 gray("不使用颜色输出"));
         }
+        "activate" => {
+            println!("  {} — {}", bold_cyan("e activate"), green("激活环境"));
+            println!();
+            println!("  {}", bold_yellow("用法:"));
+            println!("    {} {} {}  {}", green("e"), cyan("activate"), gray("<环境名>"), gray("(输出 cmd.exe 脚本)"));
+            println!("    {} {} {} {}  {}", green("e"), cyan("activate"), gray("<环境名>"), cyan("--ps1"), gray("(输出 PowerShell 脚本)"));
+            println!();
+            println!("  {}", bold_yellow("说明:"));
+            println!("  {} 输出 shell 脚本到 stdout，请在终端中 eval 执行", gray(""));
+            println!("  {} PowerShell: {}  {}", gray("•"), cyan("e activate home | iex"), gray(""));
+            println!("  {} Cmd: {}  {}", gray("•"), cyan("e activate home > %TEMP%\\act.bat && call %TEMP%\\act.bat"), gray(""));
+        }
+        "deactivate" => {
+            println!("  {} — {}", bold_cyan("e deactivate"), green("恢复环境"));
+            println!();
+            println!("  {}", bold_yellow("用法:"));
+            println!("    {} {}  {}", green("e"), cyan("deactivate"), gray("(输出 cmd.exe 恢复脚本)"));
+            println!("    {} {} {}  {}", green("e"), cyan("deactivate"), cyan("--ps1"), gray("(输出 PowerShell 恢复脚本)"));
+            println!();
+            println!("  {}", bold_yellow("说明:"));
+            println!("  {} 恢复到 activate 前的环境状态", "");
+            println!("  {} PowerShell: {}  {}", gray("•"), cyan("e deactivate | iex"), gray(""));
+            println!("  {} Cmd: {}  {}", gray("•"), cyan("e deactivate > %TEMP%\\deact.bat && call %TEMP%\\deact.bat"), gray(""));
+        }
+        "list" => {
+            println!("  {} — {}", bold_cyan("e list"), green("列出可用环境"));
+            println!();
+            println!("  {}", bold_yellow("用法:"));
+            println!("    {} {}", green("e list"), gray(""));
+            println!();
+            println!("  {}", bold_yellow("说明:"));
+            println!("  {} 环境定义文件放在 e.exe 同级的 envs/ 目录下", gray(""));
+            println!("  {} 格式: {}  {}", gray("•"), gray("<名称>.yaml"), gray(""));
+        }
+        "venv" => {
+            println!("  {} — {}", bold_cyan("e venv"), green("创建新环境定义"));
+            println!();
+            println!("  {}", bold_yellow("用法:"));
+            println!("    {} {} {}", green("e"), cyan("venv"), gray("<环境名>"));
+            println!();
+            println!("  {}", bold_yellow("说明:"));
+            println!("  {} 创建一个环境定义文件（YAML），编辑后可配置", gray(""));
+            println!("  {} 变量、PROMPT、PATH 前插路径", gray(""));
+            println!("  {} 创建后使用 e activate <环境名> 激活", gray(""));
+        }
         _ => {}
     }
 }
@@ -530,6 +689,50 @@ fn print_examples() {
             pad_left(&cyan(cmd), max_w2),
             gray(desc));
     }
+    println!();
+
+    println!("  {}", bold_yellow("环境管理（类 venv）"));
+
+    let act_examples: &[(&str, &str)] = &[
+        ("e list", "列出可用环境"),
+        ("e activate home", "激活 home 环境（输出 cmd 脚本）"),
+        ("e activate home --ps1", "激活 home 环境（输出 PowerShell 脚本）"),
+        ("e deactivate", "恢复环境（输出 cmd 脚本）"),
+        ("e deactivate --ps1", "恢复环境（输出 PowerShell 脚本）"),
+    ];
+
+    let max_w3 = act_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(34);
+
+    for (cmd, desc) in act_examples {
+        println!("  {}  {}",
+            pad_left(&cyan(cmd), max_w3),
+            gray(desc));
+    }
+    println!();
+
+    println!("  {}", bold_yellow("使用方式:"));
+    println!("  {}  {}  {}", gray("PowerShell:"), cyan("e activate home | iex"), gray(""));
+    println!("  {}  {}  {}", gray("Cmd:"), cyan("e activate home > %TEMP%\\act.bat && call %TEMP%\\act.bat"), gray(""));
+    println!();
+
+    println!("  {}", bold_yellow("创建新环境 (venv):"));
+
+    let venv_examples: &[(&str, &str)] = &[
+        ("e venv myenv", "创建名为 myenv 的环境定义"),
+    ];
+
+    let max_w4 = venv_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(18);
+
+    for (cmd, desc) in venv_examples {
+        println!("  {}  {}",
+            pad_left(&cyan(cmd), max_w4),
+            gray(desc));
+    }
+    println!();
+
+    println!("  {}", bold_yellow("文件存储:"));
+    println!("  {}  {}", gray("环境定义:"), cyan(format!("e.exe 同级 envs\\ 或 %APPDATA%\\e\\envs\\")));
+    println!("  {}  {}", gray("状态快照:"), cyan("%TEMP%\\e-state-<PID>.json（每个会话独立）"));
     println!();
 
     println!("  {}", bold_yellow("配置文件"));

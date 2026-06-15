@@ -272,6 +272,7 @@ dependencies = [
  "clap",
  "color",
  "serde",
+ "serde_json",
  "serde_yaml",
 ]
 
