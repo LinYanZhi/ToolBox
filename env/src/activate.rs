@@ -99,9 +99,127 @@ pub fn create_tag(name: &str) -> Result<PathBuf, String> {
     }
 
     let def = TagDef::default();
-    let yaml = serde_yaml::to_string(&def).map_err(|e| format!("序列化失败: {}", e))?;
-    std::fs::write(&path, &yaml).map_err(|e| format!("写入失败: {}", e))?;
+    save_tag_at_path(&path, &def)?;
     Ok(path)
+}
+
+/// 保存 TagDef 到指定路径
+fn save_tag_at_path(path: &std::path::Path, def: &TagDef) -> Result<(), String> {
+    let yaml = serde_yaml::to_string(def).map_err(|e| format!("序列化失败: {}", e))?;
+    std::fs::write(path, &yaml).map_err(|e| format!("写入失败: {}", e))?;
+    Ok(())
+}
+
+/// 保存 TagDef（根据名称定位文件）
+fn save_tag(name: &str, def: &TagDef) -> Result<(), String> {
+    let (canonical, _) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    save_tag_at_path(&tag_path(&canonical), def)
+}
+
+// ── 路径编辑 ──────────────────────────────────
+
+/// 为 tag 添加一个 PATH 目录
+pub fn tag_add_path(name: &str, path_to_add: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    def.path.push(path_to_add.to_string());
+    save_tag(&canonical, &def)
+}
+
+/// 从 tag 移除一个 PATH 目录（按索引）
+pub fn tag_remove_path(name: &str, index: usize) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    if index >= def.path.len() {
+        return Err(format!("索引越界: 共有 {} 条路径，索引 0..{}", def.path.len(), def.path.len().saturating_sub(1)));
+    }
+    let removed = def.path.remove(index);
+    save_tag(&canonical, &def)?;
+    println!("{} 已移除路径 [{}]: {}", green("✓"), index, removed);
+    Ok(())
+}
+
+// ── 变量编辑 ──────────────────────────────────
+
+/// 为 tag 设置一个环境变量（新增或修改）
+pub fn tag_set_var(name: &str, key: &str, value: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    let old = def.var.insert(key.to_string(), value.to_string());
+    save_tag(&canonical, &def)?;
+    if old.is_some() {
+        println!("{} 已修改变量 {}={} (原值: {})", green("✓"), key, value, old.unwrap());
+    } else {
+        println!("{} 已添加变量 {}={}", green("✓"), key, value);
+    }
+    Ok(())
+}
+
+/// 从 tag 移除一个环境变量
+pub fn tag_remove_var(name: &str, key: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    if def.var.remove(key).is_some() {
+        save_tag(&canonical, &def)?;
+        println!("{} 已移除变量 {}", green("✓"), key);
+        Ok(())
+    } else {
+        Err(format!("tag '{}' 中不存在变量 '{}'", canonical, key))
+    }
+}
+
+// ── PROMPT 编辑 ──────────────────────────────────
+
+/// 设置 tag 的 PROMPT
+pub fn tag_set_prompt(name: &str, value: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    def.prompt = value.to_string();
+    save_tag(&canonical, &def)?;
+    println!("{} PROMPT 已设置为: {}", green("✓"), value);
+    Ok(())
+}
+
+/// 清除 tag 的 PROMPT
+pub fn tag_clear_prompt(name: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    def.prompt.clear();
+    save_tag(&canonical, &def)?;
+    println!("{} PROMPT 已清除", green("✓"));
+    Ok(())
+}
+
+// ── 别名编辑 ──────────────────────────────────
+
+/// 为 tag 添加别名
+pub fn tag_add_alias(name: &str, alias: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+
+    // 检查别名是否已被占用
+    if let Some((existing, _)) = resolve_tag(alias) {
+        if existing != canonical {
+            return Err(format!("'{}' 已被 tag '{}' 作为别名或名称占用", alias, existing));
+        }
+    }
+
+    if def.aliases.iter().any(|a| a.eq_ignore_ascii_case(alias)) {
+        return Err(format!("别名 '{}' 已存在", alias));
+    }
+
+    def.aliases.push(alias.to_string());
+    save_tag(&canonical, &def)?;
+    println!("{} 已添加别名: {}", green("✓"), alias);
+    Ok(())
+}
+
+/// 从 tag 移除别名
+pub fn tag_remove_alias(name: &str, alias: &str) -> Result<(), String> {
+    let (canonical, mut def) = resolve_tag(name).ok_or_else(|| format!("tag '{}' 不存在", name))?;
+    let pos = def.aliases.iter().position(|a| a.eq_ignore_ascii_case(alias));
+    match pos {
+        Some(i) => {
+            def.aliases.remove(i);
+            save_tag(&canonical, &def)?;
+            println!("{} 已移除别名: {}", green("✓"), alias);
+            Ok(())
+        }
+        None => Err(format!("tag '{}' 中没有别名 '{}'", canonical, alias)),
+    }
 }
 
 /// 删除 tag（支持别名）

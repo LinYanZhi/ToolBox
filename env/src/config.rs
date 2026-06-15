@@ -27,52 +27,63 @@ fn invert_map(input: &HashMap<String, Vec<String>>) -> HashMap<String, String> {
     result
 }
 
-/// 内置默认环境变量配色
+/// 内置默认环境变量配色（参照 ss.yaml）
 fn default_variable_colors() -> HashMap<String, String> {
     let mut m = HashMap::new();
-    m.insert("PATH".into(), "cyan".into());
-    m.insert("PWD".into(), "cyan".into());
-    m.insert("OLDPWD".into(), "cyan".into());
-    m.insert("HOME".into(), "cyan".into());
-    m.insert("USERPROFILE".into(), "cyan".into());
-    m.insert("USERNAME".into(), "green".into());
-    m.insert("USER".into(), "green".into());
-    m.insert("COMPUTERNAME".into(), "green".into());
-    m.insert("HOSTNAME".into(), "green".into());
-    m.insert("SystemRoot".into(), "blue".into());
-    m.insert("WINDIR".into(), "blue".into());
-    m.insert("ProgramFiles".into(), "blue".into());
-    m.insert("ProgramFiles(x86)".into(), "blue".into());
-    m.insert("ProgramData".into(), "blue".into());
-    m.insert("ALLUSERSPROFILE".into(), "blue".into());
-    m.insert("TEMP".into(), "yellow".into());
-    m.insert("TMP".into(), "yellow".into());
-    m.insert("JAVA_HOME".into(), "red".into());
-    m.insert("GOROOT".into(), "red".into());
-    m.insert("RUSTUP_HOME".into(), "red".into());
-    m.insert("CARGO_HOME".into(), "red".into());
-    m.insert("SHELL".into(), "purple".into());
-    m.insert("EDITOR".into(), "purple".into());
-    m.insert("VISUAL".into(), "purple".into());
-    m.insert("TERM".into(), "lightblue".into());
+    m.insert("SYSTEMDRIVE".into(), "gray".into());
+    m.insert("SYSTEMROOT".into(), "gray".into());
+    m.insert("TEMP".into(), "gray".into());
+    m.insert("TMP".into(), "gray".into());
+    m.insert("USERNAME".into(), "gray".into());
+    m.insert("USERPROFILE".into(), "gray".into());
+    m.insert("COMSPEC".into(), "gray".into());
+    m.insert("PROMPT".into(), "gray".into());
+    m.insert("CONDA_HOME".into(), "green".into());
+    m.insert("MYSQL_HOME".into(), "lightblue".into());
+    m.insert("NVM_HOME".into(), "lightcyan".into());
+    m.insert("NVM_SYMLINK".into(), "lightcyan".into());
+    m.insert("ENV".into(), "purple".into());
+    m.insert("ENV_PATH".into(), "purple".into());
+    m.insert("KMP_DUPLICATE_LIB_OK".into(), "purple".into());
+    m.insert("REDIS_HOME".into(), "red".into());
+    m.insert("PYTHON_HOME".into(), "lightyellow".into());
+    m.insert("JAVA_HOME".into(), "blue".into());
+    m.insert("GOPATH".into(), "blue".into());
+    m.insert("SHADOWBOT_CULTURE".into(), "lightred".into());
+    m.insert("SHADOWBOT_ROOT_X64".into(), "lightred".into());
+    m.insert("RUSTUP_UPDATE_ROOT".into(), "lightpurple".into());
+    m.insert("RUSTUP_DIST_SERVER".into(), "lightpurple".into());
     m
 }
 
-/// 内置默认 PATH 路径配色
+/// 内置默认 PATH 路径配色（参照 pp.yaml）
 fn default_path_colors() -> HashMap<String, String> {
     let mut m = HashMap::new();
-    m.insert("*aminos*".into(), "cyan".into());
-    m.insert("*\\.cargo\\*".into(), "cyan".into());
-    m.insert("*\\.tool\\*".into(), "cyan".into());
-    m.insert("*\\Python\\*".into(), "green".into());
-    m.insert("*\\nodejs\\*".into(), "green".into());
-    m.insert("*\\Git\\*".into(), "lightred".into());
-    m.insert("*\\Java\\*".into(), "red".into());
-    m.insert("*\\Go\\*".into(), "red".into());
-    m.insert("*\\System32\\*".into(), "blue".into());
-    m.insert("*\\Windows\\*".into(), "blue".into());
-    m.insert("*\\Program Files*".into(), "blue".into());
-    m.insert("*\\AppData\\*".into(), "gray".into());
+    // 系统
+    m.insert("C:\\Windows*".into(), "gray".into());
+    // 我的脚本
+    m.insert("*\\Notepad_file\\*".into(), "lightgreen".into());
+    // Git / WindowsApps
+    m.insert("*\\Program Files\\Git\\cmd".into(), "yellow".into());
+    m.insert("*\\AppData\\Local\\Microsoft\\WindowsApps".into(), "yellow".into());
+    // Python
+    m.insert("*\\Scripts".into(), "lightyellow".into());
+    m.insert("*\\AppData\\Local\\Programs\\Python\\*".into(), "lightyellow".into());
+    // Conda
+    m.insert("*\\Anaconda3\\envs\\*".into(), "green".into());
+    m.insert("*\\Anaconda3\\condabin".into(), "green".into());
+    m.insert("*\\miniconda3\\condabin".into(), "green".into());
+    // Nvm
+    m.insert("*\\AppData\\Roaming\\nvm".into(), "lightcyan".into());
+    m.insert("*\\AppData\\Local\\nvm".into(), "lightcyan".into());
+    // Node
+    m.insert("C:\\Program Files\\nodejs".into(), "cyan".into());
+    m.insert("*\\nvm_nodejs".into(), "cyan".into());
+    m.insert("*\\nvm\\*".into(), "cyan".into());
+    // MySQL
+    m.insert("*\\mysql-8.0.35-winx64\\bin".into(), "lightblue".into());
+    // 影刀
+    m.insert("*\\Program Files\\ShadowBot".into(), "lightred".into());
     m
 }
 
@@ -91,9 +102,110 @@ pub fn get_config_dir() -> PathBuf {
     PathBuf::from(local).join("e")
 }
 
-/// 获取 e.yaml 路径（统一在 %LOCALAPPDATA%\e\e.yaml）
-fn get_config_path() -> PathBuf {
+/// 生成默认配置的 YAML 内容
+fn generate_default_yaml() -> String {
+    r#"# e 配色配置
+# 首次运行时自动生成，可自由修改
+# 格式: 颜色名: [变量名列表]
+
+# e set 环境变量配色
+variables:
+  gray:
+    - SYSTEMDRIVE
+    - SYSTEMROOT
+    - TEMP
+    - TMP
+    - USERNAME
+    - USERPROFILE
+    - COMSPEC
+    - PROMPT
+  green:
+    - CONDA_HOME
+  lightblue:
+    - MYSQL_HOME
+  lightcyan:
+    - NVM_HOME
+    - NVM_SYMLINK
+  purple:
+    - ENV
+    - ENV_PATH
+    - KMP_DUPLICATE_LIB_OK
+  red:
+    - REDIS_HOME
+  lightyellow:
+    - PYTHON_HOME
+  blue:
+    - JAVA_HOME
+    - GOPATH
+  lightred:
+    - SHADOWBOT_CULTURE
+    - SHADOWBOT_ROOT_X64
+  lightpurple:
+    - RUSTUP_UPDATE_ROOT
+    - RUSTUP_DIST_SERVER
+
+# e path PATH 路径配色
+paths:
+  gray:
+    - "C:\\Windows*"
+  lightgreen:
+    - "*\\Notepad_file\\*"
+  yellow:
+    - "*\\Program Files\\Git\\cmd"
+    - "*\\AppData\\Local\\Microsoft\\WindowsApps"
+  lightyellow:
+    - "*\\Scripts"
+    - "*\\AppData\\Local\\Programs\\Python\\*"
+  green:
+    - "*\\Anaconda3\\envs\\*"
+    - "*\\Anaconda3\\condabin"
+    - "*\\miniconda3\\condabin"
+  lightcyan:
+    - "*\\AppData\\Roaming\\nvm"
+    - "*\\AppData\\Local\\nvm"
+  cyan:
+    - "C:\\Program Files\\nodejs"
+    - "*\\nvm_nodejs"
+    - "*\\nvm\\*"
+  lightblue:
+    - "*\\mysql-8.0.35-winx64\\bin"
+  lightred:
+    - "*\\Program Files\\ShadowBot"
+"#.to_string()
+}
+
+/// 获取配置文件路径
+pub fn get_config_path() -> PathBuf {
+    get_config_path_inner()
+}
+
+fn get_config_path_inner() -> PathBuf {
     get_config_dir().join("e.yaml")
+}
+
+/// 确保配置文件存在，不存在则创建默认配置
+pub fn ensure_config() -> PathBuf {
+    let path = get_config_path_inner();
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let yaml = generate_default_yaml();
+        let _ = std::fs::write(&path, &yaml);
+    }
+    path
+}
+
+/// 清除配置文件，下次运行时自动重新创建默认配置
+/// 返回 true 表示确实删除了文件
+pub fn clear_config() -> bool {
+    let path = get_config_path_inner();
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+        true
+    } else {
+        false
+    }
 }
 
 /// 加载 e.yaml
@@ -101,7 +213,16 @@ fn load_config() -> EConfig {
     let path = get_config_path();
     match std::fs::read_to_string(&path) {
         Ok(content) => serde_yaml::from_str(&content).unwrap_or_default(),
-        Err(_) => EConfig::default(),
+        Err(_) => {
+            // 文件不存在，创建默认配置并告知用户
+            let created = ensure_config();
+            eprintln!("{} 已创建默认配置文件: {}", color::yellow("注意:"), created.display());
+            // 重新读取
+            std::fs::read_to_string(&created)
+                .ok()
+                .and_then(|c| serde_yaml::from_str(&c).ok())
+                .unwrap_or_default()
+        }
     }
 }
 

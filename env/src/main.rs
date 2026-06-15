@@ -93,6 +93,9 @@ enum Commands {
         /// 在资源管理器中打开
         #[arg(short = 'o', long = "open")]
         open: bool,
+        /// 清除配置文件，恢复默认配色
+        #[arg(long = "clear", conflicts_with = "open")]
+        clear: bool,
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
@@ -122,6 +125,69 @@ enum TagCmd {
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
+    },
+    /// 编辑 tag（在记事本中打开 YAML 文件）
+    Edit {
+        /// tag 名称
+        name: String,
+    },
+    /// 为 tag 添加 PATH 目录
+    #[command(name = "path-add")]
+    PathAdd {
+        /// tag 名称
+        tag: String,
+        /// 要添加的路径
+        path: String,
+    },
+    /// 从 tag 移除 PATH 目录（按索引）
+    #[command(name = "path-remove")]
+    PathRemove {
+        /// tag 名称
+        tag: String,
+        /// 路径索引（从 0 开始）
+        index: usize,
+    },
+    /// 设置（新增或修改）tag 的环境变量
+    #[command(name = "var-set")]
+    VarSet {
+        /// tag 名称
+        tag: String,
+        /// 变量名
+        name: String,
+        /// 变量值
+        value: String,
+    },
+    /// 从 tag 移除环境变量
+    #[command(name = "var-remove")]
+    VarRemove {
+        /// tag 名称
+        tag: String,
+        /// 变量名
+        name: String,
+    },
+    /// 设置 tag 的 PROMPT（留空则清除）
+    #[command(name = "prompt")]
+    Prompt {
+        /// tag 名称
+        tag: String,
+        /// PROMPT 值，留空则清除
+        value: Option<String>,
+    },
+    /// 为 tag 添加别名
+    #[command(name = "alias-add")]
+    AliasAdd {
+        /// tag 名称
+        tag: String,
+        /// 别名
+        alias: String,
+    },
+    /// 从 tag 移除别名
+    #[command(name = "alias-remove")]
+    AliasRemove {
+        /// tag 名称
+        tag: String,
+        /// 别名
+        alias: String,
     },
 }
 
@@ -198,6 +264,38 @@ fn main() {
             print_subcommand_help("tag");
             return;
         }
+        Some(Commands::Tag { action: Some(TagCmd::Edit { name }), .. }) => {
+            cmd_tag_edit(&name);
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::PathAdd { tag, path }), .. }) => {
+            cmd_tag_path_add(&tag, &path);
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::PathRemove { tag, index }), .. }) => {
+            cmd_tag_path_remove(&tag, index);
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::VarSet { tag, name, value }), .. }) => {
+            cmd_tag_var_set(&tag, &name, &value);
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::VarRemove { tag, name }), .. }) => {
+            cmd_tag_var_remove(&tag, &name);
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::Prompt { tag, value }), .. }) => {
+            cmd_tag_prompt(&tag, value.as_deref());
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::AliasAdd { tag, alias }), .. }) => {
+            cmd_tag_alias_add(&tag, &alias);
+            return;
+        }
+        Some(Commands::Tag { action: Some(TagCmd::AliasRemove { tag, alias }), .. }) => {
+            cmd_tag_alias_remove(&tag, &alias);
+            return;
+        }
         Some(Commands::Gen { help: true, .. }) => {
             print_subcommand_help("gen");
             return;
@@ -206,15 +304,24 @@ fn main() {
             cmd_gen(&names, copy);
             return;
         }
-        Some(Commands::Config { open: true, help: false }) => {
+        Some(Commands::Config { open: true, clear: false, help: false }) => {
             cmd_config(true);
             return;
         }
-        Some(Commands::Config { open: _, help: true }) => {
+        Some(Commands::Config { open: false, clear: true, help: false }) => {
+            cmd_config_clear();
+            return;
+        }
+        Some(Commands::Config { open: _, clear: _, help: true }) => {
             print_subcommand_help("config");
             return;
         }
-        Some(Commands::Config { open: false, help: false }) => {
+        Some(Commands::Config { open: false, clear: false, help: false }) => {
+            cmd_config(false);
+            return;
+        }
+        // open 和 clear 有 conflicts_with，实际不会到达，但编译器需要全覆盖
+        Some(Commands::Config { .. }) => {
             cmd_config(false);
             return;
         }
@@ -512,6 +619,83 @@ fn cmd_tag_open_dir() {
         .spawn();
 }
 
+/// 在记事本中打开 tag YAML 文件编辑
+fn cmd_tag_edit(name: &str) {
+    match activate::resolve_tag(name) {
+        Some((canonical, _)) => {
+            let path = activate::tags_dir().join(format!("{}.yaml", canonical));
+            let _ = std::process::Command::new("notepad")
+                .arg(&*path.to_string_lossy())
+                .spawn();
+            println!("{} 已用记事本打开 tag '{}'", green("✓"), cyan(&canonical));
+            println!("{} 保存后关闭记事本即可生效", gray("提示:"));
+        }
+        None => eprintln!("{} tag '{}' 不存在", red("错误:"), name),
+    }
+}
+
+/// 为 tag 添加 PATH 目录
+fn cmd_tag_path_add(tag: &str, path: &str) {
+    match activate::tag_add_path(tag, path) {
+        Ok(()) => println!("{} 已为 tag '{}' 添加路径: {}", green("✓"), cyan(tag), path),
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
+
+/// 从 tag 移除 PATH 目录
+fn cmd_tag_path_remove(tag: &str, index: usize) {
+    match activate::tag_remove_path(tag, index) {
+        Ok(()) => println!("{} 已从 tag '{}' 移除索引为 [{}] 的路径", green("✓"), cyan(tag), index),
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
+
+/// 设置 tag 的环境变量
+fn cmd_tag_var_set(tag: &str, name: &str, value: &str) {
+    match activate::tag_set_var(tag, name, value) {
+        Ok(()) => {}
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
+
+/// 移除 tag 的环境变量
+fn cmd_tag_var_remove(tag: &str, name: &str) {
+    match activate::tag_remove_var(tag, name) {
+        Ok(()) => {}
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
+
+/// 设置或清除 tag 的 PROMPT
+fn cmd_tag_prompt(tag: &str, value: Option<&str>) {
+    match value {
+        Some(v) if !v.is_empty() => match activate::tag_set_prompt(tag, v) {
+            Ok(()) => {}
+            Err(e) => eprintln!("{} {}", red("错误:"), e),
+        },
+        _ => match activate::tag_clear_prompt(tag) {
+            Ok(()) => {}
+            Err(e) => eprintln!("{} {}", red("错误:"), e),
+        },
+    }
+}
+
+/// 为 tag 添加别名
+fn cmd_tag_alias_add(tag: &str, alias: &str) {
+    match activate::tag_add_alias(tag, alias) {
+        Ok(()) => {}
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
+
+/// 从 tag 移除别名
+fn cmd_tag_alias_remove(tag: &str, alias: &str) {
+    match activate::tag_remove_alias(tag, alias) {
+        Ok(()) => {}
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
+
 // ── 脚本生成 ──────────────────────────────────
 
 fn cmd_gen(names: &[String], copy: bool) {
@@ -558,8 +742,9 @@ fn cmd_gen(names: &[String], copy: bool) {
 
 /// 显示/打开配置目录
 fn cmd_config(open: bool) {
-    let cfg_dir = config::get_config_dir();
-    let cfg_file = cfg_dir.join("e.yaml");
+    // 确保配置文件存在（首次自动创建默认配置）
+    let cfg_file = config::ensure_config();
+    let cfg_dir = cfg_file.parent().unwrap_or(&cfg_file).to_path_buf();
     let envs_dir = cfg_dir.join("envs");
 
     if open {
@@ -580,6 +765,16 @@ fn cmd_config(open: bool) {
     println!("    {}    {}", pad_left(&cyan("环境定义"), 16), gray(&*envs_dir.to_string_lossy()));
     println!();
     println!("  {}  {}", gray("打开目录:"), cyan("e config -o"));
+    println!("  {}  {}", gray("清除配置:"), cyan("e config --clear"));
+}
+
+/// 清除配置文件，恢复默认配色
+fn cmd_config_clear() {
+    if config::clear_config() {
+        println!("{} 配色配置已清除，下次运行将自动恢复为默认配置", green("✓"));
+    } else {
+        println!("{} 当前没有配置文件，无需清除", gray("•"));
+    }
 }
 
 // ── ANSI 着色 ──────────────────────────────────
@@ -714,20 +909,44 @@ fn print_subcommand_help(cmd: &str) {
             println!("  {} — {}", bold_cyan("e tag"), green("管理环境配置 tag"));
             println!();
             println!("  {}", bold_yellow("子命令:"));
-            println!("    {}  {}", pad_left(&cyan("list"), 20), gray("列出所有 tag"));
-            println!("    {}  {}", pad_left(&cyan("create <名称>"), 20), gray("创建一个新的 tag（默认空配置）"));
-            println!("    {}  {}", pad_left(&cyan("remove <名称>"), 20), gray("删除一个 tag"));
+            println!("    {}  {}", pad_left(&cyan("list"), 28), gray("列出所有 tag"));
+            println!("    {}  {}", pad_left(&cyan("create <名称>"), 28), gray("创建一个新的 tag"));
+            println!("    {}  {}", pad_left(&cyan("remove <名称>"), 28), gray("删除一个 tag"));
+            println!("    {}  {}", pad_left(&cyan("edit <名称>"), 28), gray("在记事本中打开 tag 文件编辑"));
+            println!("    {}  {}", pad_left(&cyan("path-add <tag> <路径>"), 28), gray("添加 PATH 目录"));
+            println!("    {}  {}", pad_left(&cyan("path-remove <tag> <索引>"), 28), gray("按索引移除 PATH 目录"));
+            println!("    {}  {}", pad_left(&cyan("var-set <tag> <名称> <值>"), 28), gray("设置环境变量（新增或修改）"));
+            println!("    {}  {}", pad_left(&cyan("var-remove <tag> <名称>"), 28), gray("移除环境变量"));
+            println!("    {}  {}", pad_left(&cyan("prompt <tag> [值]"), 28), gray("设置 PROMPT（留空则清除）"));
+            println!("    {}  {}", pad_left(&cyan("alias-add <tag> <别名>"), 28), gray("添加别名"));
+            println!("    {}  {}", pad_left(&cyan("alias-remove <tag> <别名>"), 28), gray("移除别名"));
             println!();
             println!("  {}", bold_yellow("说明:"));
             println!("  {} 每个 tag 是一个 yaml 文件，可配置：", gray(""));
             println!("    {}  path: PATH 目录列表", gray("•"));
             println!("    {}  var:  环境变量", gray("•"));
             println!("    {}  prompt: PROMPT 覆盖（可选）", gray("•"));
+            println!("    {}  aliases: 别名列表", gray("•"));
             println!();
             println!("  {}", bold_yellow("示例:"));
-            println!("    {}  {}", gray("e tag create python"), gray(""));
-            println!("    {}  {}", gray("e tag create git"), gray(""));
-            println!("    {}  {}", gray("notepad %LOCALAPPDATA%\\e\\tags\\python.yaml"), gray(""));
+            let ex_cmds: &[&str] = &[
+                "e tag create python",
+                "e tag path-add python <路径>",
+                "e tag var-set python <名称> <值>",
+                "e tag path-remove python <索引>",
+                "e tag var-remove python <名称>",
+                "e tag alias-add python <别名>",
+                "e tag prompt python <值>",
+            ];
+            let ex_w = ex_cmds.iter().map(|s| s.display_width()).max().unwrap_or(40);
+            for cmd in ex_cmds {
+                let colored = cmd.replace("<路径>", "\x1b[36m<路径>\x1b[0m")
+                    .replace("<名称>", "\x1b[36m<名称>\x1b[0m")
+                    .replace("<值>", "\x1b[36m<值>\x1b[0m")
+                    .replace("<索引>", "\x1b[36m<索引>\x1b[0m")
+                    .replace("<别名>", "\x1b[36m<别名>\x1b[0m");
+                println!("    {}  {}", pad_left(&colored, ex_w), gray(""));
+            }
             println!();
             println!("  {}", gray(format!("目录: %LOCALAPPDATA%\\e\\tags\\")));
         }

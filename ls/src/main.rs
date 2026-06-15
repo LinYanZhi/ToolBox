@@ -55,6 +55,16 @@ struct Cli {
     #[arg(long = "link")]
     link: Option<String>,
 
+    /// 显示配置文件路径
+    #[arg(long = "config")]
+    config: bool,
+    /// 在资源管理器中打开配置目录
+    #[arg(long = "config-open")]
+    config_open: bool,
+    /// 清除配置文件，恢复默认配色
+    #[arg(long = "config-clear")]
+    config_clear: bool,
+
     #[arg(short = 'h', long = "help")]
     help: bool,
 
@@ -107,9 +117,32 @@ fn main() {
         return;
     }
 
-    // 加载配置
+    // 配置管理（--config / --config-open / --config-clear）
+    if cli.config {
+        let path = config::ensure_config();
+        println!("{}", path.display());
+        return;
+    }
+    if cli.config_open {
+        let dir = config::get_config_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::process::Command::new("explorer")
+            .arg(&*dir.to_string_lossy())
+            .spawn();
+        return;
+    }
+    if cli.config_clear {
+        if config::clear_config() {
+            println!("{} 配置文件已清除，下次运行将自动恢复为默认配置", green("✓"));
+        } else {
+            println!("{} 当前没有配置文件，无需清除", gray("•"));
+        }
+        return;
+    }
+
+    // 加载配置（优先读取 YAML 文件，不存在则自动创建）
     config::ColorConfig::init();
-    let color_config = config::ColorConfig::default();
+    let color_config = config::ColorConfig::load();
     let formatter = Formatter::new(color_config, cli.no_color);
 
     if let Some(link_path) = &cli.link {
@@ -209,9 +242,12 @@ fn print_short_help() {
         ("-z, --size",        "显示文件大小"),
         ("-t[=N]",           "树形显示（-t=3 指定深度）"),
         ("--link <路径>",     "检查链接信息"),
+        ("--config",          "显示配置文件路径"),
+        ("--config-open",     "在资源管理器中打开配置目录"),
+        ("--config-clear",    "清除配置文件，恢复默认配色"),
     ];
 
-    let max_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(22);
+    let max_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(24);
 
     for (opt, desc) in opts {
         println!("  {}  {}",
@@ -251,9 +287,12 @@ fn print_examples_help() {
         ("ls -s suffix",        "按后缀排序"),
         ("ls --link PATH",      "检查链接信息"),
         ("ls -n",               "不使用颜色输出"),
+        ("ls --config",         "显示配置文件路径"),
+        ("ls --config-open",    "打开配置目录"),
+        ("ls --config-clear",   "清除配置文件"),
     ];
 
-    let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(26);
+    let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(28);
 
     for (cmd, desc) in examples {
         println!("  {}  {}",
