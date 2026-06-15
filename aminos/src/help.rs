@@ -24,7 +24,7 @@ pub const ROOT_COMMANDS: &[CmdHelp] = &[
     CmdHelp { name: "list",      desc: "列出可用软件及安装状态",                 style: color::BOLD_CYAN },
     CmdHelp { name: "uninstall", desc: "卸载指定软件",                           style: color::BOLD_RED },
     CmdHelp { name: "upgrade",   desc: "升级已安装的软件",                       style: color::BOLD_MAGENTA },
-    CmdHelp { name: "env",       desc: "管理 as 环境（源、缓存、下载引擎）",   style: color::BRIGHT_CYAN },
+    CmdHelp { name: "config",   desc: "管理 as 环境和配置（路径/缓存/源/下载器）",   style: color::BRIGHT_CYAN },
     CmdHelp { name: "self",      desc: "管理 as 自身（初始化、更新）",           style: color::BRIGHT_GREEN },
     CmdHelp { name: "tool",      desc: "管理自研工具（已安装的 as 工具集）",     style: color::BRIGHT_YELLOW },
 ];
@@ -70,25 +70,27 @@ pub fn print_root_help() {
     println!("    {} 查看示例请使用 {}as -e{}", color::gray("•"), color::cyan(""), color::gray(""));
 }
 
-/// 打印 as env 子命令帮助
-pub fn print_env_help() {
+/// 打印 as config 子命令帮助
+pub fn print_config_help() {
     println!();
-    println!("  {} — {}", color::bold_cyan("as env"), color::green("管理 as 环境（源、缓存、下载引擎）"));
+    println!("  {} — {}", color::bold_cyan("as config"), color::green("管理 as 环境和配置"));
     println!();
     println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan("as env"), color::green("<子命令>"), color::gray("[参数]"));
+    println!("    {} {} {}", color::cyan("as config"), color::green("<子命令>"), color::gray("[参数]"));
     println!();
     println!("  {}", color::bold_yellow("子命令:"));
 
-    let env_subcmds: &[(&str, &str)] = &[
+    let subcmds: &[(&str, &str)] = &[
+        ("path",       "显示/打开配置目录"),
         ("cache",      "管理下载缓存"),
         ("source",     "管理软件源定义"),
+        ("speedtest",  "测速所有下载源"),
         ("downloader", "管理下载引擎后端"),
     ];
 
-    let max_w = env_subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(12);
+    let max_w = subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(12);
 
-    for (name, desc) in env_subcmds {
+    for (name, desc) in subcmds {
         println!("    {}  {}",
             pad(&color::cyan(name), max_w),
             desc);
@@ -96,17 +98,72 @@ pub fn print_env_help() {
     println!();
      println!("  {}", color::bold_yellow("示例:"));
 
-    let env_examples: &[(&str, &str)] = &[
-        ("as env cache",         "查看缓存文件"),
-        ("as env source update", "更新软件源"),
-        ("as env downloader list", "列出下载后端"),
+    let examples: &[(&str, &str)] = &[
+        ("as config path",          "查看所有数据目录位置"),
+        ("as config path -o",       "在资源管理器中打开配置目录"),
+        ("as config cache",         "查看缓存文件"),
+        ("as config cache --clear", "清除所有缓存"),
+        ("as config source update", "更新软件源"),
+        ("as config speedtest",     "测速下载源"),
+        ("as config downloader list", "列出下载后端"),
     ];
 
-    let max_w = env_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(26);
+    let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(32);
 
-    for (cmd, desc) in env_examples {
+    for (cmd, desc) in examples {
         println!("    {}  {}",
             pad(&color::cyan(cmd), max_w),
+            desc);
+    }
+}
+
+/// 打印 as config source 子命令帮助
+pub fn print_source_help() {
+    println!();
+    println!("  {} — {}", color::bold_cyan("as config source"), color::green("管理软件源定义"));
+    println!();
+    println!("  {}", color::bold_yellow("用法:"));
+    println!("    {} {} {}", color::cyan("as config source"), color::green("<子命令>"), color::gray("[参数]"));
+    println!();
+    println!("  {}", color::bold_yellow("子命令:"));
+
+    let subcmds: &[(&str, &str)] = &[
+        ("update",           "从远程仓库下载最新源定义"),
+        ("path",             "显示源定义目录路径"),
+        ("path -o",          "在资源管理器中打开源目录"),
+    ];
+
+    let max_w = subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(10);
+
+    for (name, desc) in subcmds {
+        println!("    {}  {}",
+            pad(&color::cyan(name), max_w),
+            desc);
+    }
+}
+
+/// 打印 as config downloader 子命令帮助
+pub fn print_downloader_help() {
+    println!();
+    println!("  {} — {}", color::bold_cyan("as config downloader"), color::green("管理下载引擎后端"));
+    println!();
+    println!("  {}", color::bold_yellow("用法:"));
+    println!("    {} {} {}", color::cyan("as config downloader"), color::green("<子命令>"), color::gray("[参数]"));
+    println!();
+    println!("  {}", color::bold_yellow("子命令:"));
+
+    let subcmds: &[(&str, &str)] = &[
+        ("list",               "列出所有下载后端及启用状态"),
+        ("set <名称> on|off",   "启用或禁用一个后端"),
+        ("config",             "显示配置文件路径"),
+        ("config -o",          "在资源管理器中打开配置目录"),
+    ];
+
+    let max_w = subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(24);
+
+    for (name, desc) in subcmds {
+        println!("    {}  {}",
+            pad(&color::cyan(name), max_w),
             desc);
     }
 }
@@ -258,26 +315,31 @@ pub fn run_example() {
             ("as upgrade --check", "仅检查更新，不下载不安装"),
             ("as upgrade --renew", "强制重新下载（即使版本相同）"),
         ]),
-        ("env cache", "管理下载缓存", &[
-            ("as env cache", "查看缓存文件列表和一致性"),
-            ("as env cache --clear", "清除所有缓存文件"),
-            ("as env cache --open", "在资源管理器中打开缓存目录"),
+        ("config cache", "管理下载缓存", &[
+            ("as config cache", "查看缓存文件列表和一致性"),
+            ("as config cache --clear", "清除所有缓存文件"),
+            ("as config cache --open", "在资源管理器中打开缓存目录"),
         ]),
-        ("env source", "管理软件源定义", &[
-            ("as env source update", "从远程仓库下载最新源定义"),
-            ("as env source path", "显示源定义目录路径"),
-            ("as env source path --open", "在资源管理器中打开源目录"),
-            ("as env source dirs", "显示所有数据目录位置"),
-            ("as env source speedtest", "对所有软件的所有源测速"),
-            ("as env source speedtest 7zip", "仅对指定软件的源测速"),
-            ("as env source speedtest -S", "以软件为单位统计可用性"),
+        ("config path", "显示/打开配置目录", &[
+            ("as config path", "显示所有数据目录位置"),
+            ("as config path -o", "在资源管理器中打开配置目录"),
         ]),
-        ("env downloader", "管理下载引擎后端", &[
-            ("as env downloader list", "列出所有下载后端及启用状态"),
-            ("as env downloader set curl on", "启用 curl 后端"),
-            ("as env downloader set curl off", "禁用 curl 后端"),
-            ("as env downloader config", "显示配置文件路径"),
-            ("as env downloader config --open", "在资源管理器中打开配置目录"),
+        ("config source", "管理软件源定义", &[
+            ("as config source update", "从远程仓库下载最新源定义"),
+            ("as config source path", "显示源定义目录路径"),
+            ("as config source path -o", "在资源管理器中打开源目录"),
+        ]),
+        ("config speedtest", "测速所有下载源", &[
+            ("as config speedtest", "对所有软件的所有源测速"),
+            ("as config speedtest 7zip", "仅对指定软件的源测速"),
+            ("as config speedtest -S", "以软件为单位统计可用性"),
+        ]),
+        ("config downloader", "管理下载引擎后端", &[
+            ("as config downloader list", "列出所有下载后端及启用状态"),
+            ("as config downloader set curl on", "启用 curl 后端"),
+            ("as config downloader set curl off", "禁用 curl 后端"),
+            ("as config downloader config", "显示配置文件路径"),
+            ("as config downloader config -o", "在资源管理器中打开配置目录"),
         ]),
         ("self init", "初始化 as 环境", &[
             ("as self init", "创建 tools/bin 并注册到用户 PATH"),

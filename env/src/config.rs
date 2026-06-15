@@ -85,13 +85,15 @@ fn merge_maps(defaults: HashMap<String, String>, overrides: HashMap<String, Stri
     merged
 }
 
-/// 获取 e.yaml 路径（exe 同级）
+/// 获取配置目录路径（%LOCALAPPDATA%\e\）
+pub fn get_config_dir() -> PathBuf {
+    let local = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
+    PathBuf::from(local).join("e")
+}
+
+/// 获取 e.yaml 路径（统一在 %LOCALAPPDATA%\e\e.yaml）
 fn get_config_path() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        exe.parent().unwrap_or(std::path::Path::new(".")).join("e.yaml")
-    } else {
-        PathBuf::from("e.yaml")
-    }
+    get_config_dir().join("e.yaml")
 }
 
 /// 加载 e.yaml

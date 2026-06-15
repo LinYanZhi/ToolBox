@@ -1,6 +1,6 @@
 use color;
 
-use crate::{paths, software, speedtest};
+use crate::{paths, software};
 
 pub fn run_source(action: crate::SourceCmd) -> anyhow::Result<()> {
     match action {
@@ -15,12 +15,6 @@ pub fn run_source(action: crate::SourceCmd) -> anyhow::Result<()> {
             } else {
                 println!("{}", dir.display());
             }
-        }
-        crate::SourceCmd::Dirs { open } => {
-            return run_dirs(open);
-        }
-        crate::SourceCmd::Speedtest { name, software: by_software } => {
-            return speedtest::speedtest(&name, by_software);
         }
     }
     Ok(())

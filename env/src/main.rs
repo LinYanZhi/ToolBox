@@ -103,6 +103,15 @@ enum Commands {
         #[arg(short = 'h', long = "help")]
         help: bool,
     },
+    /// 显示/打开配置目录（%LOCALAPPDATA%\e\）
+    Config {
+        /// 在资源管理器中打开
+        #[arg(short = 'o', long = "open")]
+        open: bool,
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
 }
 
 fn main() {
@@ -179,6 +188,18 @@ fn main() {
         }
         Some(Commands::Venv { name, help: false }) => {
             cmd_venv(&name);
+            return;
+        }
+        Some(Commands::Config { open: true, help: false }) => {
+            cmd_config(true);
+            return;
+        }
+        Some(Commands::Config { open: _, help: true }) => {
+            print_subcommand_help("config");
+            return;
+        }
+        Some(Commands::Config { open: false, help: false }) => {
+            cmd_config(false);
             return;
         }
         None => {}
@@ -471,6 +492,32 @@ fn cmd_venv(name: &str) {
     }
 }
 
+/// 显示/打开配置目录
+fn cmd_config(open: bool) {
+    let cfg_dir = config::get_config_dir();
+    let cfg_file = cfg_dir.join("e.yaml");
+    let envs_dir = cfg_dir.join("envs");
+
+    if open {
+        // 确保目录存在
+        let _ = std::fs::create_dir_all(&cfg_dir);
+        let _ = std::fs::create_dir_all(&envs_dir);
+        let _ = std::process::Command::new("explorer")
+            .arg(&*cfg_dir.to_string_lossy())
+            .spawn();
+        return;
+    }
+
+    println!("  {}", bold_cyan("e 配置目录:"));
+    println!("    {}", cyan(&*cfg_dir.to_string_lossy()));
+    println!();
+    println!("  {}", bold_yellow("文件:"));
+    println!("    {}    {}", pad_left(&cyan("配色配置"), 16), gray(&*cfg_file.to_string_lossy()));
+    println!("    {}    {}", pad_left(&cyan("环境定义"), 16), gray(&*envs_dir.to_string_lossy()));
+    println!();
+    println!("  {}  {}", gray("打开目录:"), cyan("e config -o"));
+}
+
 // ── ANSI 着色 ──────────────────────────────────
 
 const ANSI_COLORS: &[(&str, &str)] = &[
@@ -529,6 +576,7 @@ fn print_short_help() {
         ("deactivate","恢复环境（输出恢复脚本）"),
         ("list",      "列出可用环境"),
         ("venv",      "创建新环境定义"),
+        ("config",    "显示/打开配置目录"),
     ];
 
     let max_w = cmds.iter().map(|(c, _)| c.display_width()).max().unwrap_or(12);
@@ -645,6 +693,18 @@ fn print_subcommand_help(cmd: &str) {
             println!("  {} 变量、PROMPT、PATH 前插路径", gray(""));
             println!("  {} 创建后使用 e activate <环境名> 激活", gray(""));
         }
+        "config" => {
+            println!("  {} — {}", bold_cyan("e config"), green("显示/打开配置目录"));
+            println!();
+            println!("  {}", bold_yellow("用法:"));
+            println!("    {} {}  {}", green("e"), cyan("config"), gray("(显示配置目录路径)"));
+            println!("    {} {} {}  {}", green("e"), cyan("config"), cyan("-o"), gray("(在资源管理器中打开)"));
+            println!();
+            println!("  {}", bold_yellow("说明:"));
+            println!("  {} 配置目录: {}  {}", gray("•"), cyan("%LOCALAPPDATA%\\e\\"), gray(""));
+            println!("  {} 配色配置: {}  {}", gray("•"), cyan("e.yaml"), gray(""));
+            println!("  {} 环境定义: {}  {}", gray("•"), cyan("envs\\"), gray(""));
+        }
         _ => {}
     }
 }
@@ -731,7 +791,7 @@ fn print_examples() {
     println!();
 
     println!("  {}", bold_yellow("文件存储:"));
-    println!("  {}  {}", gray("环境定义:"), cyan(format!("e.exe 同级 envs\\ 或 %APPDATA%\\e\\envs\\")));
+    println!("  {}  {}", gray("配置/环境定义:"), cyan("%LOCALAPPDATA%\\e\\"));
     println!("  {}  {}", gray("状态快照:"), cyan("%TEMP%\\e-state-<PID>.json（每个会话独立）"));
     println!();
 

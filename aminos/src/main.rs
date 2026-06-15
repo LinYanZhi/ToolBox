@@ -1,5 +1,5 @@
 mod cmd_cache;
-mod cmd_env;
+mod cmd_config;
 mod cmd_downloader;
 mod cmd_info;
 mod cmd_init;
@@ -130,10 +130,10 @@ enum Command {
         renew: bool,
     },
     /// 管理 as 环境（源、缓存、下载引擎）
-    #[command(name = "env", help_template = HELP_TEMPLATE_SUBCMDS)]
-    Env {
+    #[command(name = "config", help_template = HELP_TEMPLATE_SUBCMDS)]
+    Config {
         #[command(subcommand)]
-        action: Option<EnvCmd>,
+        action: Option<ConfigCmd>,
     },
     /// 管理 as 自身（初始化、更新）
     #[command(name = "self", help_template = HELP_TEMPLATE_SUBCMDS)]
@@ -150,7 +150,14 @@ Tool {
 }
 
 #[derive(Subcommand)]
-pub enum EnvCmd {
+pub enum ConfigCmd {
+    /// 显示/打开配置目录（数据根目录一览）
+    #[command(name = "path", help_template = HELP_TEMPLATE_OPTIONS)]
+    Path {
+        /// 在资源管理器中打开
+        #[arg(short, long)]
+        open: bool,
+    },
     /// 管理下载缓存
     #[command(name = "cache", help_template = HELP_TEMPLATE_OPTIONS)]
     Cache {
@@ -165,24 +172,23 @@ pub enum EnvCmd {
     #[command(name = "source", help_template = HELP_TEMPLATE_SUBCMDS)]
     Source {
         #[command(subcommand)]
-        action: SourceCmd,
+        action: Option<SourceCmd>,
+    },
+    /// 测速所有下载源
+    #[command(name = "speedtest", help_template = HELP_TEMPLATE_OPTIONS)]
+    Speedtest {
+        /// 可选：仅测速指定软件
+        name: Vec<String>,
+        /// 以软件为单位统计（任一源可用即为通）
+        #[arg(short = 'S', long = "software")]
+        software: bool,
     },
     /// 管理下载引擎后端
     #[command(name = "downloader", help_template = HELP_TEMPLATE_SUBCMDS)]
     Downloader {
         #[command(subcommand)]
-        action: DownloaderCmd,
+        action: Option<DownloaderCmd>,
     },
-}
-
-#[derive(Subcommand)]
-pub enum SelfCmd {
-    /// 初始化 as 环境（创建 tools/bin 并注册到 PATH）
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Init,
-    /// 更新 as 自身到最新版本
-    #[command(name = "update", help_template = HELP_TEMPLATE_OPTIONS)]
-    Update,
 }
 
 #[derive(Subcommand)]
@@ -197,22 +203,16 @@ pub enum SourceCmd {
         #[arg(short, long)]
         open: bool,
     },
-    /// 显示所有数据目录位置
+}
+
+#[derive(Subcommand)]
+pub enum SelfCmd {
+    /// 初始化 as 环境（创建 tools/bin 并注册到 PATH）
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Dirs {
-        /// 在资源管理器中打开数据目录
-        #[arg(short, long)]
-        open: bool,
-    },
-    /// 测速所有下载源
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Speedtest {
-        /// 可选：仅测速指定软件
-        name: Vec<String>,
-        /// 以软件为单位统计（任一源可用即为通）
-        #[arg(short = 'S', long = "software")]
-        software: bool,
-    },
+    Init,
+    /// 更新 as 自身到最新版本
+    #[command(name = "update", help_template = HELP_TEMPLATE_OPTIONS)]
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -329,10 +329,10 @@ fn main() {
             let opts = UpgradeOpts::new(names, check, renew);
             let _ = run(|| cmd_upgrade::run_upgrade(opts));
         }
-        Some(Command::Env { action }) => {
+        Some(Command::Config { action }) => {
             match action {
-                Some(cmd) => { let _ = run(|| cmd_env::run_env(cmd)); }
-                None => help::print_env_help(),
+                Some(cmd) => { let _ = run(|| cmd_config::run_config(cmd)); }
+                None => help::print_config_help(),
             }
         }
         Some(Command::SelfMgmt { action }) => {

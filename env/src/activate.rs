@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use color::*;
 
@@ -72,16 +72,10 @@ fn get_session_id() -> u32 {
 
 // ── 环境定义目录 ──────────────────────────────────
 
-/// 获取环境定义目录（优先 exe 同级，回退 %APPDATA%\e\envs\）
+/// 获取环境定义目录（统一在 %LOCALAPPDATA%\e\envs\）
 pub fn get_envs_dir() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        let local = exe.parent().unwrap_or(Path::new(".")).join("envs");
-        if local.exists() {
-            return local;
-        }
-    }
-    let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    PathBuf::from(appdata).join("e").join("envs")
+    let local = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
+    PathBuf::from(local).join("e").join("envs")
 }
 
 /// 列出所有可用环境名
@@ -340,8 +334,9 @@ pub fn print_env_list() {
     if envs.is_empty() {
         println!("  {} 在 {} 下没有找到环境定义", gray("•"), gray(envs_dir.display().to_string()));
         println!("  {} 使用 e venv <环境名> 创建一个", gray("•"));
+        println!("  {} 使用 e config 查看配置目录", gray("•"));
         println!();
-        println!("  {}", gray(format!("存储位置: {}", envs_dir.display())));
+        println!("  {}", gray(format!("位置: {}", envs_dir.display())));
         return;
     }
 
