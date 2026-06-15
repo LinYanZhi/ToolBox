@@ -69,30 +69,18 @@ enum Commands {
         #[arg(short = 'h', long = "help")]
         help: bool,
     },
-    /// 激活环境（生成 .bat 和 .ps1 脚本到 %LOCALAPPDATA%\e\）
-    Activate {
-        /// 环境名称
-        name: String,
-        /// 显示该子命令帮助
-        #[arg(short = 'h', long = "help")]
-        help: bool,
+    /// 管理环境配置 tag
+    Tag {
+        #[command(subcommand)]
+        action: Option<TagCmd>,
     },
-    /// 停用当前环境（显示停用脚本路径）
-    Deactivate {
-        /// 显示该子命令帮助
-        #[arg(short = 'h', long = "help")]
-        help: bool,
-    },
-    /// 列出所有可用环境
-    List {
-        /// 显示该子命令帮助
-        #[arg(short = 'h', long = "help")]
-        help: bool,
-    },
-    /// 创建新的环境定义（类 venv）
-    Venv {
-        /// 环境名称
-        name: String,
+    /// 组合多个 tag 生成 cmd 脚本
+    Gen {
+        /// 复制到剪贴板
+        #[arg(short = 'c', long = "copy")]
+        copy: bool,
+        /// tag 名称（至少一个）
+        names: Vec<String>,
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
@@ -102,6 +90,32 @@ enum Commands {
         /// 在资源管理器中打开
         #[arg(short = 'o', long = "open")]
         open: bool,
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TagCmd {
+    /// 列出所有 tag
+    List {
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
+    /// 创建一个新的 tag
+    Create {
+        /// tag 名称
+        name: String,
+        /// 显示该子命令帮助
+        #[arg(short = 'h', long = "help")]
+        help: bool,
+    },
+    /// 删除一个 tag
+    Remove {
+        /// tag 名称
+        name: String,
         /// 显示该子命令帮助
         #[arg(short = 'h', long = "help")]
         help: bool,
@@ -152,36 +166,37 @@ fn main() {
             show_path(cli.no_color);
             return;
         }
-        Some(Commands::Activate { name: _, help: true }) => {
-            print_subcommand_help("activate");
+        Some(Commands::Tag { action: Some(TagCmd::List { help: false }) }) => {
+            activate::print_tag_list();
             return;
         }
-        Some(Commands::Activate { name, help: false }) => {
-            cmd_activate(&name);
+        Some(Commands::Tag { action: Some(TagCmd::List { help: true, .. }) }) => {
+            print_subcommand_help("tag");
             return;
         }
-        Some(Commands::Deactivate { help: true }) => {
-            print_subcommand_help("deactivate");
+        Some(Commands::Tag { action: Some(TagCmd::Create { name, help: false }) }) => {
+            cmd_tag_create(&name);
             return;
         }
-        Some(Commands::Deactivate { help: false }) => {
-            cmd_deactivate();
+        Some(Commands::Tag { action: Some(TagCmd::Create { help: true, .. }) })
+        | Some(Commands::Tag { action: None }) => {
+            print_subcommand_help("tag");
             return;
         }
-        Some(Commands::List { help: true }) => {
-            print_subcommand_help("list");
+        Some(Commands::Tag { action: Some(TagCmd::Remove { name, help: false }) }) => {
+            cmd_tag_remove(&name);
             return;
         }
-        Some(Commands::List { help: false }) => {
-            activate::print_env_list();
+        Some(Commands::Tag { action: Some(TagCmd::Remove { help: true, .. }) }) => {
+            print_subcommand_help("tag");
             return;
         }
-        Some(Commands::Venv { name: _, help: true }) => {
-            print_subcommand_help("venv");
+        Some(Commands::Gen { help: true, .. }) => {
+            print_subcommand_help("gen");
             return;
         }
-        Some(Commands::Venv { name, help: false }) => {
-            cmd_venv(&name);
+        Some(Commands::Gen { names, copy, help: false }) => {
+            cmd_gen(&names, copy);
             return;
         }
         Some(Commands::Config { open: true, help: false }) => {
@@ -196,7 +211,14 @@ fn main() {
             cmd_config(false);
             return;
         }
-        None => {}
+        None => {
+            // 用户可能打了旧的 e list，重定向
+            if cli.path.as_deref() == Some("list") {
+                println!("{} e list 已改为 e tag list", yellow("注意:"));
+                println!("{} 请使用: {}", gray(""), cyan("e tag list"));
+                return;
+            }
+        }
     }
 
     // --gui: 环境变量对话框
@@ -445,91 +467,58 @@ fn get_matching_color(path: &str, color_map: &HashMap<String, String>) -> Option
     None
 }
 
-// ── 环境激活/停用 ──────────────────────────────────
+// ── Tag 管理 ──────────────────────────────────
 
-fn cmd_activate(name: &str) {
-    let def = match activate::load_env(name) {
-        Some(d) => d,
-        None => {
-            eprintln!("{} 环境 '{}' 未找到", red("错误:"), name);
-            eprintln!("{} 使用 e list 查看可用环境", gray("提示:"));
-            return;
+fn cmd_tag_create(name: &str) {
+    match activate::create_tag(name) {
+        Ok(path) => {
+            println!("{} tag '{}' 已创建", green("✓"), cyan(name));
+            println!("{} 编辑文件添加 PATH 目录和环境变量:", gray("请"));
+            println!("  {}", cyan(path.to_string_lossy()));
         }
-    };
-
-    match activate::write_activate_scripts(&def, name) {
-        Ok(()) => {
-            let scripts_dir = std::env::var("LOCALAPPDATA")
-                .map(|p| std::path::PathBuf::from(p).join("e"))
-                .unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let bat = scripts_dir.join(format!("activate-{}.bat", name));
-            let ps1 = scripts_dir.join(format!("Activate-{}.ps1", name));
-
-            println!("{} 环境 '{}' 的激活脚本已生成", green("✓"), cyan(name));
-            println!();
-            println!("  {}", bold_yellow("运行以下脚本激活:"));
-            println!("    {}  {}", green("cmd.exe:"),       cyan(bat.to_string_lossy()));
-            println!("    {}  {}", green("PowerShell:"),    cyan(ps1.to_string_lossy()));
-            println!();
-            println!("  {}", bold_yellow("停用环境:"));
-            println!("    {}  {}", green("cmd.exe:"),       cyan(scripts_dir.join(format!("deactivate-{}.bat", name)).to_string_lossy()));
-            println!("    {}  {}", green("PowerShell:"),    cyan(scripts_dir.join(format!("Deactivate-{}.ps1", name)).to_string_lossy()));
-        }
-        Err(e) => {
-            eprintln!("{} {}", red("错误:"), e);
-        }
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
     }
 }
 
-fn cmd_deactivate() {
-    let scripts_dir = std::env::var("LOCALAPPDATA")
-        .map(|p| std::path::PathBuf::from(p).join("e"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+fn cmd_tag_remove(name: &str) {
+    match activate::remove_tag(name) {
+        Ok(()) => println!("{} tag '{}' 已删除", green("✓"), cyan(name)),
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
+    }
+}
 
-    // 列出所有可用的停用脚本
-    let mut found = false;
-    if let Ok(entries) = std::fs::read_dir(&scripts_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                if name.starts_with("deactivate-") {
-                    let _env_name = name.trim_start_matches("deactivate-");
-                    if !found {
-                        println!("{} 可用的停用脚本:", green("✓"));
-                        found = true;
-                    }
-                    println!("  {} {}",
-                        gray("•"),
-                        cyan(path.to_string_lossy()));
-                    if let Some(ext) = path.extension() {
-                        if ext == "bat" {
-                            println!("    {} 运行: {}", gray("cmd.exe:"), gray(format!("call \"{}\"", path.to_string_lossy())));
-                        } else if ext == "ps1" {
-                            println!("    {} 运行: {}", gray("PowerShell:"), gray(format!(". '{}'", path.to_string_lossy())));
-                        }
-                    }
+// ── 脚本生成 ──────────────────────────────────
+
+fn cmd_gen(names: &[String], copy: bool) {
+    if names.is_empty() {
+        eprintln!("{} 请指定至少一个 tag", yellow("注意:"));
+        eprintln!("{} e gen python git mysql", gray("示例:"));
+        return;
+    }
+
+    match activate::generate_script(names) {
+        Ok(script) => {
+            if copy {
+                // 用管道方式传递给 PowerShell Set-Clipboard
+                let mut child = std::process::Command::new("powershell")
+                    .args(["-NoProfile", "-Command", "Set-Clipboard"])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn();
+                if let Ok(ref mut c) = child {
+                    use std::io::Write;
+                    let _ = c.stdin.take().map(|mut s| s.write_all(script.as_bytes()));
+                    let _ = c.wait();
+                    println!("{} 脚本已复制到剪贴板", green("✓"));
+                    println!("{} 按 Ctrl+V 粘贴到终端执行", gray("提示:"));
+                } else {
+                    eprintln!("{} 剪贴板复制失败，直接输出脚本:", yellow("注意:"));
+                    println!("{}", script);
                 }
+            } else {
+                println!("{}", script);
             }
         }
-    }
-
-    if !found {
-        eprintln!("{} 没有找到停用脚本", yellow("注意:"));
-        eprintln!("{} 请先运行 e activate <环境名> 生成脚本", gray("提示:"));
-    }
-}
-
-/// 创建新环境
-fn cmd_venv(name: &str) {
-    match activate::create_env(name) {
-        Ok(path) => {
-            println!("{} 环境 '{}' 已创建", green("✓"), cyan(name));
-            println!("{} 编辑文件以配置环境变量:", gray("请"));
-            println!("  {}", cyan(path.display().to_string()));
-        }
-        Err(e) => {
-            eprintln!("{} {}", red("错误:"), e);
-        }
+        Err(e) => eprintln!("{} {}", red("错误:"), e),
     }
 }
 
@@ -604,8 +593,8 @@ fn print_short_help() {
     println!("    {} [{}]", green("e"), gray("路径"));
     println!("    {} {} {}", green("e"), cyan("set"),         gray("显示所有环境变量"));
     println!("    {} {} {}", green("e"), cyan("path"),        gray("显示 PATH"));
-    println!("    {} {} {}", green("e"), cyan("activate"),    gray("生成激活/停用脚本"));
-    println!("    {} {} {}", green("e"), cyan("deactivate"),  gray("列出停用脚本路径"));
+    println!("    {} {} {}", green("e"), cyan("tag"),         gray("管理 tag（list/create/remove）"));
+    println!("    {} {} {}", green("e"), cyan("gen"),         gray("组合 tag 生成 cmd 脚本"));
     println!("    {} {}", green("e -g"),                      gray("打开环境变量对话框"));
     println!();
     println!("  {}", bold_yellow("子命令:"));
@@ -613,10 +602,8 @@ fn print_short_help() {
     let cmds: &[(&str, &str)] = &[
         ("set",       "显示所有环境变量（带颜色）"),
         ("path",      "显示 PATH（带颜色）"),
-        ("activate",  "生成激活/停用脚本"),
-        ("deactivate","列出停用脚本路径"),
-        ("list",      "列出可用环境"),
-        ("venv",      "创建新环境定义"),
+        ("tag",       "管理 tag（list/create/remove）"),
+        ("gen",       "组合 tag 生成 cmd 脚本"),
         ("config",    "显示/打开配置目录"),
     ];
 
@@ -689,56 +676,64 @@ fn print_subcommand_help(cmd: &str) {
                 pad_left(&cyan("-n, --no-color"), 16),
                 gray("不使用颜色输出"));
         }
-        "activate" => {
-            println!("  {} — {}", bold_cyan("e activate"), green("生成激活脚本"));
+        "activate" | "deactivate" => {
+            println!("  {} — {}", bold_cyan(format!("e {}", cmd)), green(""));
             println!();
-            println!("  {}", bold_yellow("用法:"));
-            println!("    {} {} {}", green("e"), cyan("activate"), gray("<环境名>"));
-            println!();
-            println!("  {}", bold_yellow("说明:"));
-            println!("  {} 在 %LOCALAPPDATA%\\e\\ 目录下生成激活/停用脚本", gray(""));
-            println!("  {} 生成的文件:", gray(""));
-            println!("    {}  {}", cyan("•"), cyan("activate-<环境名>.bat"));
-            println!("    {}  {}", cyan("•"), cyan("Activate-<环境名>.ps1"));
-            println!("    {}  {}", cyan("•"), cyan("deactivate-<环境名>.bat"));
-            println!("    {}  {}", cyan("•"), cyan("Deactivate-<环境名>.ps1"));
-            println!();
-            println!("  {}", bold_yellow("使用方式:"));
-            println!("  {}  {}  {}", gray("cmd.exe:"),      gray("先运行 e activate <环境名>，再运行 activate-<环境名>.bat"), gray(""));
-            println!("  {}  {}  {}", gray("PowerShell:"),   gray("先运行 e activate <环境名>，再运行 .\\Activate-<环境名>.ps1"), gray(""));
-            println!("  {}  {}  {}", gray("停用:"),         gray("运行 deactivate-<环境名>.bat 或 Deactivate-<环境名>.ps1"), gray(""));
+            println!("  {} 此命令已移除", bold_yellow("说明:"));
+            println!("  {} 请使用 e tag create <名称> 创建 tag，然后用 e gen 生成脚本", gray(""));
         }
-        "deactivate" => {
-            println!("  {} — {}", bold_cyan("e deactivate"), green("列出可用的停用脚本路径"));
+        "tag" => {
+            println!("  {} — {}", bold_cyan("e tag"), green("管理环境配置 tag"));
             println!();
-            println!("  {}", bold_yellow("用法:"));
-            println!("    {} {}", green("e deactivate"), gray(""));
+            println!("  {}", bold_yellow("子命令:"));
+            println!("    {}  {}", pad_left(&cyan("list"), 20), gray("列出所有 tag"));
+            println!("    {}  {}", pad_left(&cyan("create <名称>"), 20), gray("创建一个新的 tag（默认空配置）"));
+            println!("    {}  {}", pad_left(&cyan("remove <名称>"), 20), gray("删除一个 tag"));
             println!();
             println!("  {}", bold_yellow("说明:"));
-            println!("  {} 显示所有已生成停用脚本的路径", gray(""));
-            println!("  {} 运行对应脚本即可恢复到激活前的环境状态", gray(""));
-            println!("  {} 如果还没有停用脚本，请先运行 e activate <环境名>", gray(""));
+            println!("  {} 每个 tag 是一个 yaml 文件，可配置：", gray(""));
+            println!("    {}  path: PATH 目录列表", gray("•"));
+            println!("    {}  var:  环境变量", gray("•"));
+            println!("    {}  prompt: PROMPT 覆盖（可选）", gray("•"));
+            println!();
+            println!("  {}", bold_yellow("示例:"));
+            println!("    {}  {}", gray("e tag create python"), gray(""));
+            println!("    {}  {}", gray("e tag create git"), gray(""));
+            println!("    {}  {}", gray("notepad %LOCALAPPDATA%\\e\\tags\\python.yaml"), gray(""));
+            println!();
+            println!("  {}", gray(format!("目录: %LOCALAPPDATA%\\e\\tags\\")));
+        }
+        "gen" => {
+            println!("  {} — {}", bold_cyan("e gen"), green("组合多个 tag 生成 cmd 脚本"));
+            println!();
+            println!("  {}", bold_yellow("用法:"));
+            println!("    {} {} {} {}  {}", green("e"), cyan("gen"), gray("<tag1>"), gray("<tag2>"), gray("..."));
+            println!("    {} {} {} {} {}  {}", green("e"), cyan("gen"), cyan("--copy"), gray("<tag1>"), gray("<tag2>"), gray("..."));
+            println!();
+            println!("  {}", bold_yellow("选项:"));
+            println!("  {}  {}", pad_left(&cyan("-c, --copy"), 16), gray("复制到剪贴板而非输出到终端"));
+            println!();
+            println!("  {}", bold_yellow("说明:"));
+            println!("  {} 合并指定 tag 的配置，生成 cmd 脚本", gray(""));
+            println!("  {} 脚本包含 PATH 追加、环境变量设置", gray(""));
+            println!("  {} tag 顺序决定优先级：后列出的优先", gray(""));
+            println!();
+            println!("  {}", bold_yellow("示例:"));
+            println!("    {}  {}", gray("e gen python git"), gray(""));
+            println!("    {}  {}", gray("e gen --copy python"), gray(""));
+            println!("    {}  {}", gray("e gen python git mysql"), gray(""));
+            println!("    {}  {}", gray("复制后直接粘贴到终端执行"), gray(""));
         }
         "list" => {
-            println!("  {} — {}", bold_cyan("e list"), green("列出可用环境"));
+            println!("  {} — {}", bold_cyan("e list"), green("列出所有 tag"));
             println!();
-            println!("  {}", bold_yellow("用法:"));
-            println!("    {} {}", green("e list"), gray(""));
-            println!();
-            println!("  {}", bold_yellow("说明:"));
-            println!("  {} 环境定义文件放在 e.exe 同级的 envs/ 目录下", gray(""));
-            println!("  {} 格式: {}  {}", gray("•"), gray("<名称>.yaml"), gray(""));
-        }
-        "venv" => {
-            println!("  {} — {}", bold_cyan("e venv"), green("创建新环境定义"));
-            println!();
-            println!("  {}", bold_yellow("用法:"));
-            println!("    {} {} {}", green("e"), cyan("venv"), gray("<环境名>"));
+            println!("  {} 此命令已改为 e tag list", bold_yellow("注意:"));
+            println!("  {} 请使用: {}", gray(""), cyan("e tag list"));
             println!();
             println!("  {}", bold_yellow("说明:"));
-            println!("  {} 创建一个环境定义文件（YAML），编辑后可配置", gray(""));
-            println!("  {} 变量、PROMPT、PATH 前插路径", gray(""));
-            println!("  {} 创建后使用 e activate <环境名> 激活", gray(""));
+            println!("  {} 显示 %LOCALAPPDATA%\\e\\tags\\ 下的所有 tag", gray(""));
+            println!("  {} 每个 tag 包含 PATH 目录列表和环境变量", gray(""));
+            println!("  {} 使用 e gen 组合多个 tag 生成脚本", gray(""));
         }
         "config" => {
             println!("  {} — {}", bold_cyan("e config"), green("显示/打开配置目录"));
@@ -750,7 +745,7 @@ fn print_subcommand_help(cmd: &str) {
             println!("  {}", bold_yellow("说明:"));
             println!("  {} 配置目录: {}  {}", gray("•"), cyan("%LOCALAPPDATA%\\e\\"), gray(""));
             println!("  {} 配色配置: {}  {}", gray("•"), cyan("e.yaml"), gray(""));
-            println!("  {} 环境定义: {}  {}", gray("•"), cyan("envs\\"), gray(""));
+            println!("  {} tag 目录: {}  {}", gray("•"), cyan("tags\\"), gray(""));
         }
         _ => {}
     }
@@ -798,15 +793,15 @@ fn print_examples() {
     }
     println!();
 
-    println!("  {}", bold_yellow("环境管理（类 venv）"));
+    println!("  {}", bold_yellow("Tag 管理"));
 
     let act_examples: &[(&str, &str)] = &[
-        ("e list", "列出可用环境"),
-        ("e activate home", "生成 home 环境的激活/停用脚本"),
-        ("e deactivate", "列出已生成的停用脚本"),
+        ("e tag list", "列出所有 tag"),
+        ("e tag create python", "创建 python tag"),
+        ("e tag remove python", "删除 python tag"),
     ];
 
-    let max_w3 = act_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(34);
+    let max_w3 = act_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(26);
 
     for (cmd, desc) in act_examples {
         println!("  {}  {}",
@@ -815,30 +810,30 @@ fn print_examples() {
     }
     println!();
 
-    println!("  {}", bold_yellow("使用方式:"));
-    println!("  {}  {}  {}", gray("cmd.exe:"),      gray("activate-home.bat"), gray(""));
-    println!("  {}  {}  {}", gray("PowerShell:"),   gray(".\\Activate-home.ps1"), gray(""));
-    println!("  {}  {}  {}", gray("停用:"),         gray("deactivate-home.bat"), gray(""));
-    println!();
+    println!("  {}", bold_yellow("脚本生成"));
 
-    println!("  {}", bold_yellow("创建新环境 (venv):"));
-
-    let venv_examples: &[(&str, &str)] = &[
-        ("e venv myenv", "创建名为 myenv 的环境定义"),
+    let gen_examples: &[(&str, &str)] = &[
+        ("e gen python git", "组合 python + git 生成 cmd 脚本"),
+        ("e gen --copy python", "生成并复制到剪贴板"),
+        ("e gen python git mysql", "组合多个 tag"),
     ];
 
-    let max_w4 = venv_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(18);
+    let max_w4 = gen_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(30);
 
-    for (cmd, desc) in venv_examples {
+    for (cmd, desc) in gen_examples {
         println!("  {}  {}",
             pad_left(&cyan(cmd), max_w4),
             gray(desc));
     }
     println!();
 
-    println!("  {}", bold_yellow("文件存储:"));
-    println!("  {}  {}", gray("配置/环境定义:"), cyan("%LOCALAPPDATA%\\e\\"));
-    println!("  {}  {}", gray("激活/停用脚本:"), cyan("%LOCALAPPDATA%\\e\\activate-<环境名>.bat / .ps1"));
+    println!("  {}", bold_yellow("使用方式:"));
+    println!("    {}  {}", gray("1."), gray("e gen python git --copy"));
+    println!("    {}  {}", gray("2."), gray("Ctrl+V 粘贴到 cmd 终端执行"));
+    println!();
+
+    println!("  {}", bold_yellow("配置文件:"));
+    println!("  {}  {}", gray("tag 目录:"), cyan("%LOCALAPPDATA%\\e\\tags\\"));
     println!();
 
     println!("  {}", bold_yellow("配置文件"));
