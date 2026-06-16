@@ -10,7 +10,6 @@ pub const LIST:     &str = "as list";
 pub const UNINSTALL:&str = "as uninstall";
 pub const UPGRADE:  &str = "as upgrade";
 pub const CONFIG:   &str = "as config";
-pub const SELF:     &str = "as self";
 pub const TOOL:     &str = "as tool";
 
 // ── config 子命令 ──────────────────────────────
@@ -28,13 +27,9 @@ pub const CONFIG_DOWNLOADER_LIST:  &str = "as config downloader list";
 pub const CONFIG_DOWNLOADER_CONFIG: &str = "as config downloader config";
 pub const CONFIG_DOWNLOADER_CONFIG_OPEN: &str = "as config downloader config --open";
 
-// ── self 子命令 ────────────────────────────────
-
-pub const SELF_INIT:   &str = "as self init";
-pub const SELF_UPDATE: &str = "as self update";
-
 // ── tool 子命令 ────────────────────────────────
 
+pub const TOOL_INIT:    &str = "as tool init";
 pub const TOOL_INSTALL: &str = "as tool install";
 pub const TOOL_REMOVE:  &str = "as tool remove";
 pub const TOOL_LIST:    &str = "as tool list";
@@ -42,6 +37,5 @@ pub const TOOL_UPGRADE: &str = "as tool upgrade";
 
 // ── 快捷的通用提示 ─────────────────────────────
 
-pub const SELF_INIT_HINT: &str = "as self init";
 pub const SOURCE_UPDATE_HINT: &str = "as config source update";
 pub const DOWNLOADER_SET: &str = "as downloader set";

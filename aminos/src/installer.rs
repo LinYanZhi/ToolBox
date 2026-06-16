@@ -324,7 +324,7 @@ fn install_self_tool(
             println!("    {}", color::bold_green(&format!("set PATH={};%PATH%", bin_path)));
         }
     } else {
-        println!("  {} 请先运行 {} 将 tools/bin 加入 PATH", name, color::cyan(cmd_names::SELF_INIT_HINT));
+        println!("  {} 请先运行 {} 将 tools/bin 加入 PATH", name, color::cyan(cmd_names::TOOL_INIT));
     }
 
     Ok(())

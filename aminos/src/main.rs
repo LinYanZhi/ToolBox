@@ -6,7 +6,6 @@ mod cmd_init;
 mod cmd_install;
 mod cmd_list;
 mod cmd_names;
-mod cmd_self;
 mod cmd_self_update;
 mod cmd_source;
 mod cmd_tool;
@@ -136,18 +135,12 @@ enum Command {
         #[command(subcommand)]
         action: Option<ConfigCmd>,
     },
-    /// 管理 as 自身（初始化、更新）
-    #[command(name = "self", help_template = HELP_TEMPLATE_SUBCMDS)]
-    SelfMgmt {
+    /// 管理自研工具（安装、升级、列出、移除、初始化环境）
+    #[command(help_template = HELP_TEMPLATE_SUBCMDS)]
+    Tool {
         #[command(subcommand)]
-        action: Option<SelfCmd>,
+        action: Option<ToolCmd>,
     },
-    /// 管理自研工具（安装、升级、列出、移除）
-#[command(help_template = HELP_TEMPLATE_SUBCMDS)]
-Tool {
-    #[command(subcommand)]
-    action: Option<ToolCmd>,
-},
 }
 
 #[derive(Subcommand)]
@@ -207,17 +200,10 @@ pub enum SourceCmd {
 }
 
 #[derive(Subcommand)]
-pub enum SelfCmd {
+pub enum ToolCmd {
     /// 初始化 as 环境（创建 tools/bin 并注册到 PATH）
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Init,
-    /// 更新 as 自身到最新版本
-    #[command(name = "update", help_template = HELP_TEMPLATE_OPTIONS)]
-    Update,
-}
-
-#[derive(Subcommand)]
-pub enum ToolCmd {
     /// 安装自研工具
     #[command(help_template = HELP_TEMPLATE_OPTIONS)]
     Install {
@@ -336,21 +322,23 @@ fn main() {
                 None => help::print_config_help(),
             }
         }
-        Some(Command::SelfMgmt { action }) => {
-            match action {
-                Some(cmd) => { let _ = run(|| cmd_self::run_self(cmd)); }
-                None => help::print_self_help(),
-            }
-        }
         Some(Command::Tool { action }) => {
             match action {
+                Some(ToolCmd::Init) => {
+                    let _ = run(|| cmd_init::run_init());
+                }
                 Some(ToolCmd::Install { names, version, renew, download_only }) => {
                     let opts = ToolInstallOpts::new(names, version, renew, download_only);
                     let _ = run(|| cmd_tool::run_install(opts));
                 }
                 Some(ToolCmd::Upgrade { names, check, renew }) => {
-                    let opts = ToolUpgradeOpts::new(names, check, renew);
-                    let _ = run(|| cmd_tool::run_upgrade(opts));
+                    // 特例：as tool upgrade as → 更新 as 自身
+                    if names.len() == 1 && names[0].to_lowercase() == "as" {
+                        let _ = run(|| cmd_self_update::run_self_update());
+                    } else {
+                        let opts = ToolUpgradeOpts::new(names, check, renew);
+                        let _ = run(|| cmd_tool::run_upgrade(opts));
+                    }
                 }
                 Some(ToolCmd::List) => {
                     let _ = run(|| cmd_tool::run_list());

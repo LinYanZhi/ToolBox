@@ -26,8 +26,7 @@ pub const ROOT_COMMANDS: &[CmdHelp] = &[
     CmdHelp { name: "uninstall", desc: "卸载指定软件",                           style: color::BOLD_RED },
     CmdHelp { name: "upgrade",   desc: "升级已安装的软件",                       style: color::BOLD_MAGENTA },
     CmdHelp { name: "config",   desc: "管理 as 环境和配置（路径/缓存/源/下载器）",   style: color::BRIGHT_CYAN },
-    CmdHelp { name: "self",      desc: "管理 as 自身（初始化、更新）",           style: color::BRIGHT_GREEN },
-    CmdHelp { name: "tool",      desc: "管理自研工具（已安装的 as 工具集）",     style: color::BRIGHT_YELLOW },
+    CmdHelp { name: "tool",      desc: "管理自研工具（初始化/安装/升级/列出/移除）", style: color::BRIGHT_YELLOW },
 ];
 
 /// 打印根命令帮助
@@ -170,45 +169,6 @@ pub fn print_downloader_help() {
     }
 }
 
-/// 打印 as self 子命令帮助
-pub fn print_self_help() {
-    println!();
-    println!("  {} — {}", color::bold_cyan(cmd_names::SELF), color::green("管理 as 自身"));
-    println!();
-    println!("  {}", color::bold_yellow("用法:"));
-    println!("    {} {} {}", color::cyan(cmd_names::SELF), color::green("<子命令>"), color::gray("[参数]"));
-    println!();
-    println!("  {}", color::bold_yellow("子命令:"));
-
-    let self_subcmds: &[(&str, &str)] = &[
-        ("init",   "初始化 as 环境（创建 tools/bin 并注册到 PATH）"),
-        ("update", "更新 as 自身到最新版本"),
-    ];
-
-    let max_w = self_subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(8);
-
-    for (name, desc) in self_subcmds {
-        println!("    {}  {}",
-            pad(&color::cyan(name), max_w),
-            desc);
-    }
-    println!();
-    println!("  {}", color::bold_yellow("示例:"));
-
-    let self_examples = vec![
-        (cmd_names::SELF_INIT.to_string(),   "初始化环境"),
-        (cmd_names::SELF_UPDATE.to_string(), "更新自身"),
-    ];
-
-    let max_w = self_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(20);
-
-    for (cmd, desc) in &self_examples {
-        println!("    {}  {}",
-            pad(&color::cyan(cmd), max_w),
-            desc);
-    }
-}
-
 /// 打印 as tool 子命令帮助
 pub fn print_tool_help() {
     println!();
@@ -220,10 +180,11 @@ pub fn print_tool_help() {
     println!("  {}", color::bold_yellow("子命令:"));
 
     let tool_subcmds: &[(&str, &str)] = &[
-        ("install", "安装/更新自研工具（从 source/tools/ 读取）"),
-        ("upgrade", "升级所有已安装的自研工具"),
-        ("list",    "列出所有可用自研工具及安装状态"),
-        ("remove",  "移除一个自研工具"),
+        ("init",     "初始化 as 环境（创建 tools/bin 并注册到 PATH）"),
+        ("install",  "安装/更新自研工具（从 source/tools/ 读取）"),
+        ("upgrade",  "升级所有已安装的自研工具（as tool upgrade as 更新 as 自身）"),
+        ("list",     "列出所有可用自研工具及安装状态"),
+        ("remove",   "移除一个自研工具"),
     ];
 
     let max_w = tool_subcmds.iter().map(|(n, _)| n.display_width()).max().unwrap_or(10);
@@ -237,11 +198,13 @@ pub fn print_tool_help() {
     println!("  {}", color::bold_yellow("示例:"));
 
     let tool_examples = vec![
+        (cmd_names::TOOL_INIT.to_string(),   "初始化环境，将 tools/bin 加入 PATH"),
         (format!("{} ls", cmd_names::TOOL_INSTALL), "安装 ls 工具"),
         (format!("{} ls uv", cmd_names::TOOL_INSTALL), "同时安装多个工具"),
         (cmd_names::TOOL_LIST.to_string(), "列出自研工具"),
         (format!("{} ls", cmd_names::TOOL_REMOVE), "移除 ls 工具"),
         (cmd_names::TOOL_UPGRADE.to_string(), "升级所有自研工具"),
+        (format!("{} as", cmd_names::TOOL_UPGRADE), "升级 as 自身"),
     ];
 
     let max_w = tool_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(32);
@@ -374,22 +337,24 @@ pub fn run_example() {
             ],
         },
         Group {
-            cmd: "self init".into(), desc: "初始化 as 环境",
+            cmd: "tool init".into(), desc: "初始化 as 环境",
             entries: vec![
-                (cmd_names::SELF_INIT.to_string(), "创建 tools/bin 并注册到用户 PATH"),
+                (cmd_names::TOOL_INIT.to_string(), "创建 tools/bin 并注册到用户 PATH"),
             ],
         },
         Group {
-            cmd: "self update".into(), desc: "更新 as 自身",
+            cmd: "tool upgrade as".into(), desc: "更新 as 自身",
             entries: vec![
-                (cmd_names::SELF_UPDATE.to_string(), "下载最新版 as 并热替换"),
+                (format!("{} as", cmd_names::TOOL_UPGRADE), "下载最新版 as 并热替换"),
             ],
         },
         Group {
             cmd: "tool".into(), desc: "管理自研工具",
             entries: vec![
+                (cmd_names::TOOL_INIT.to_string(), "初始化 as 环境"),
                 (cmd_names::TOOL_LIST.to_string(), "列出已安装的自研工具"),
                 (format!("{} ls", cmd_names::TOOL_REMOVE), "移除自研工具 ls"),
+                (format!("{} as", cmd_names::TOOL_UPGRADE), "升级 as 自身"),
             ],
         },
     ];
