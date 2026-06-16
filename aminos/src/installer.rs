@@ -69,11 +69,6 @@ fn label_of_type(itype: &str) -> String {
     }
 }
 
-pub fn install_software(name: &str, opts: &opts::InstallOpts) -> anyhow::Result<()> {
-    let sd = software::read_software_def(name)?;
-    install_software_by_def(name, &sd, opts)
-}
-
 /// 安装第三方软件（使用预读取的 SoftwareDef，供 cmd_install 直接调用）
 pub fn install_software_by_def(name: &str, sd: &software::SoftwareDef, opts: &opts::InstallOpts) -> anyhow::Result<()> {
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };

@@ -1,7 +1,7 @@
 use crate::{paths, pe_version, software, cmd_names};
 use color::{self, DisplayWidth, format_size, pad_left as pad, truncate};
 
-pub fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
+pub fn run_cache(_list: bool, clear: bool, open: bool) -> anyhow::Result<()> {
     let downloads = paths::downloads_dir();
 
     if open {
@@ -18,7 +18,7 @@ pub fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
         return clear_cache(&downloads);
     }
 
-    // List cached files
+    // list mode
     if !downloads.is_dir() || downloads.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
         println!("暂无已下载的缓存文件。\n  目录: {}", downloads.display());
         return Ok(());
@@ -93,8 +93,8 @@ pub fn run_cache(clear: bool, open: bool) -> anyhow::Result<()> {
 
     println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size))));
 
-    println!("{}", color::gray(format!("  {}  清除缓存", cmd_names::CONFIG_CACHE_CLEAR)));
-    println!("{}", color::gray(format!("  {}   在资源管理器中打开", cmd_names::CONFIG_CACHE_OPEN)));
+    println!("{}", color::gray(format!("  {} -c  清除缓存", cmd_names::CACHE)));
+    println!("{}", color::gray(format!("  {} -o   在资源管理器中打开", cmd_names::CACHE)));
     Ok(())
 }
 

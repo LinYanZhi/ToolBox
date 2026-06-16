@@ -75,7 +75,7 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     let source = paths::apps_source_dir();
     if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
         println!("{}", color::yellow("  未找到源定义。首次使用请运行:"));
-        println!("  {}\n", cmd_names::CONFIG_SOURCE_UPDATE);
+        println!("  {}\n", cmd_names::SOURCE_UPDATE_HINT);
         return Ok(());
     }
 
@@ -162,8 +162,10 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     }
 
     // ── 筛选 ──
-    if opts.install_only { rows.retain(|r| r.2 == "已安装"); }
-    if opts.missing      { rows.retain(|r| r.2 == "未安装"); }
+    // 默认仅显示已安装；-a/--all 显示全部
+    if !opts.all {
+        rows.retain(|r| r.2 == "已安装");
+    }
     if opts.downloaded   { rows.retain(|r| r.4 == "已下载"); }
     if opts.downloading  { rows.retain(|r| r.4 == "下载中"); }
     if opts.no_download  { rows.retain(|r| r.4 == "未下载"); }

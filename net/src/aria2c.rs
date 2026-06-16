@@ -151,6 +151,9 @@ fn run_aria2c(
                         ctx.bar.set_length(total);
                     }
                     ctx.bar.set_position(cur);
+                    if total > 0 {
+                        ctx.bar.set_prefix(crate::download::format_decimal_progress(cur, total));
+                    }
                 }
             }
         }

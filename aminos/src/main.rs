@@ -1,5 +1,5 @@
 mod cmd_cache;
-mod cmd_config;
+mod cmd_download;
 mod cmd_downloader;
 mod cmd_info;
 mod cmd_init;
@@ -10,7 +10,6 @@ mod cmd_self_update;
 mod cmd_source;
 mod cmd_tool;
 mod cmd_uninstall;
-mod cmd_upgrade;
 mod downloader;
 mod helpers;
 mod help;
@@ -22,332 +21,365 @@ mod registry;
 mod software;
 mod speedtest;
 
-use clap::{Parser, Subcommand};
+use cli::{App, CommandDef, ArgDef, ExampleGroup, ParseResult, ParsedArgs};
 
-use help::{HELP_STYLES, HELP_TEMPLATE_OPTIONS, HELP_TEMPLATE_SUBCMDS, print_clap_error, print_root_help, run_example, run};
-use opts::{InstallOpts, ListOpts, ToolInstallOpts, ToolUpgradeOpts, UninstallOpts, UpgradeOpts};
+use opts::{DownloadOpts, InstallOpts, ListOpts, ToolAddOpts, UninstallOpts};
 
-/// AminOS - lightweight software package manager
-#[derive(Parser)]
-#[command(
-    name = "as",
-    version,
-    about,
-    color = clap::ColorChoice::Always,
-    styles = HELP_STYLES,
-    disable_help_subcommand = true,
-    long_about = None,
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-
-    /// 显示所有命令的示例用法
-    #[arg(short = 'e', long = "example")]
-    example: bool,
+fn build_app() -> App {
+    App::new("as", "轻量级 Windows 软件包管理器", "0.0.1")
+        .command(
+            CommandDef::new("install", "安装指定软件")
+                .category("软件管理")
+                .arg(ArgDef::positional("names", true, "软件名称（可同时指定多个）"))
+                .arg(ArgDef::string(Some('v'), "version", "指定版本号"))
+                .arg(ArgDef::flag(Some('g'), "gui", "使用图形界面安装（不静默）"))
+                .arg(ArgDef::flag(Some('r'), "renew", "强制重新下载"))
+                .arg(ArgDef::flag(Some('d'), "download-only", "仅下载，不安装"))
+                .arg(ArgDef::string(None, "type", "安装类型：portable 或 installer"))
+                .arg(ArgDef::flag(None, "upgrade", "检测更新，卸载旧版后安装新版"))
+        )
+        .command(
+            CommandDef::new("list", "列出已安装的软件")
+                .run_on_empty()
+                .category("软件管理")
+                .arg(ArgDef::flag(Some('a'), "all", "显示全部（已安装 + 源中可用）"))
+                .arg(ArgDef::string(Some('f'), "filter", "按分类过滤"))
+                .arg(ArgDef::string(Some('s'), "search", "搜索软件名、别名或描述"))
+                .arg(ArgDef::flag(Some('d'), "downloaded", "仅显示已下载"))
+                .arg(ArgDef::flag(None, "downloading", "仅显示下载中"))
+                .arg(ArgDef::flag(None, "no-download", "仅显示未下载"))
+                .arg(ArgDef::flag(Some('g'), "group", "按分类分组显示"))
+                .arg(ArgDef::flag(None, "categories", "显示所有分类概览"))
+        )
+        .command(
+            CommandDef::new("info", "查看软件详细信息")
+                .category("软件管理")
+                .arg(ArgDef::positional("name", true, "软件名称"))
+                .arg(ArgDef::flag(Some('u'), "urls", "显示所有下载地址"))
+        )
+        .command(
+            CommandDef::new("download", "下载软件或文件")
+                .category("软件管理")
+                .arg(ArgDef::positional("targets", false, "软件名称或下载链接"))
+                .arg(ArgDef::flag(Some('o'), "open", "打开下载目录"))
+                .arg(ArgDef::string(None, "target", "下载到指定目录"))
+        )
+        .command(
+            CommandDef::new("uninstall", "卸载指定软件")
+                .category("软件管理")
+                .arg(ArgDef::positional("names", true, "软件名称（可同时指定多个）"))
+                .arg(ArgDef::flag(Some('g'), "gui", "使用图形界面卸载"))
+                .arg(ArgDef::flag(Some('f'), "force", "强制删除（跳过卸载器）"))
+        )
+        .command(
+            CommandDef::new("cache", "管理下载缓存")
+                .category("配置管理")
+                .arg(ArgDef::flag(None, "list", "列出缓存文件（默认行为）"))
+                .arg(ArgDef::flag(Some('c'), "clear", "清除所有缓存"))
+                .arg(ArgDef::flag(Some('o'), "open", "在资源管理器中打开缓存目录"))
+        )
+        .command(
+            CommandDef::new("source", "管理软件源")
+                .category("配置管理")
+                .arg(ArgDef::flag(Some('u'), "update", "更新所有源"))
+                .arg(ArgDef::flag(Some('c'), "clear", "清空所有源"))
+                .arg(ArgDef::flag(Some('o'), "open", "在资源管理器中打开源目录"))
+                .arg(ArgDef::flag(None, "speedtest", "对源进行测速"))
+                .arg(ArgDef::string(None, "name", "测速时指定软件[可选]"))
+                .arg(ArgDef::flag(Some('S'), "software", "测速时以软件为单位统计"))
+        )
+        .command(
+            CommandDef::new("downloader", "管理下载引擎后端")
+                .category("配置管理")
+                .arg(ArgDef::flag(None, "list", "列出所有下载后端"))
+                .arg(ArgDef::flag(Some('o'), "open", "在资源管理器中打开配置目录"))
+                .arg(ArgDef::positional("args", false, "子命令: set <名称> on|off"))
+        )
+        .command(
+            CommandDef::new("tool", "管理自研工具（init/add/list/remove）")
+                .category("工具管理")
+                .subcommand(
+                    CommandDef::new("init", "初始化环境（默认打印 PATH 提示，-g 写入注册表）")
+                        .arg(ArgDef::flag(Some('g'), "global", "写入用户 PATH 注册表"))
+                )
+                .subcommand(
+                    CommandDef::new("add", "安装/升级自研工具（--upgrade 升级模式）")
+                        .arg(ArgDef::positional("names", true, "工具名称（可同时指定多个）"))
+                        .arg(ArgDef::string(Some('v'), "version", "指定版本号"))
+                        .arg(ArgDef::flag(Some('r'), "renew", "强制重新下载"))
+                        .arg(ArgDef::flag(Some('d'), "download-only", "仅下载，不安装"))
+                        .arg(ArgDef::flag(None, "upgrade", "升级模式"))
+                )
+                .subcommand(
+                    CommandDef::new("list", "列出已安装的自研工具")
+                )
+                .subcommand(
+                    CommandDef::new("remove", "移除一个自研工具")
+                        .arg(ArgDef::positional("name", true, "工具名称"))
+                )
+        )
 }
 
-#[derive(Subcommand)]
-enum Command {
-    /// 安装指定软件
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Install {
-        /// 软件名称（可同时指定多个）
-        #[arg(required = true)]
-        names: Vec<String>,
-        /// 指定版本号
-        #[arg(short, long)]
-        version: Option<String>,
-        /// 使用图形界面安装（不静默）
-        #[arg(short = 'g', long)]
-        gui: bool,
-        /// 强制重新下载
-        #[arg(short = 'r', long)]
-        renew: bool,
-        /// 仅下载，不安装
-        #[arg(short = 'd', long = "download-only")]
-        download_only: bool,
-        /// 安装类型：portable（便携版）或 installer（安装版）
-        #[arg(long = "type", value_parser = clap::builder::PossibleValuesParser::new(["portable", "installer"]))]
-        inst_type: Option<String>,
-    },
-    /// 列出可用软件及安装状态
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    List {
-        /// 按分类过滤（as list --categories 查看可用分类）
-        #[arg(short, long)]
-        filter: Option<String>,
-        /// 仅显示已安装
-        #[arg(long = "installed", short = 'i', conflicts_with = "missing")]
-        install_only: bool,
-        /// 仅显示未安装
-        #[arg(long = "not-installed", short = 'm', conflicts_with = "install_only")]
-        missing: bool,
-        /// 搜索软件名、别名或描述
-        #[arg(short = 's', long = "search")]
-        search: Option<String>,
-        /// 仅显示已下载
-        #[arg(short = 'd', long, conflicts_with_all = &["downloading", "no_download"])]
-        downloaded: bool,
-        /// 仅显示下载中
-        #[arg(long, conflicts_with_all = &["downloaded", "no_download"])]
-        downloading: bool,
-        /// 仅显示未下载
-        #[arg(long = "no-download", conflicts_with_all = &["downloaded", "downloading"])]
-        no_download: bool,
-        /// 按分类分组显示
-        #[arg(short = 'g', long)]
-        group: bool,
-        /// 显示所有分类概览
-        #[arg(long)]
-        categories: bool,
-        /// 查看软件详细信息（as info 的替代）
-        #[arg(long)]
-        info: Option<String>,
-    },
-    /// 卸载指定软件
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Uninstall {
-        #[arg(required = true)]
-        names: Vec<String>,
-        /// 使用图形界面卸载
-        #[arg(short = 'g', long)]
-        gui: bool,
-        /// 强制删除
-        #[arg(short, long)]
-        force: bool,
-    },
-    /// 升级所有已安装的软件
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Upgrade {
-        /// 可选：仅升级指定软件（不指定则全部升级）
-        names: Vec<String>,
-        /// 仅检查更新，不下也不装
-        #[arg(short, long, conflicts_with = "renew")]
-        check: bool,
-        /// 强制重新下载（即使版本相同）
-        #[arg(long, conflicts_with = "check")]
-        renew: bool,
-    },
-    /// 管理 as 环境（源、缓存、下载引擎）
-    #[command(name = "config", help_template = HELP_TEMPLATE_SUBCMDS)]
-    Config {
-        #[command(subcommand)]
-        action: Option<ConfigCmd>,
-    },
-    /// 管理自研工具（安装、升级、列出、移除、初始化环境）
-    #[command(help_template = HELP_TEMPLATE_SUBCMDS)]
-    Tool {
-        #[command(subcommand)]
-        action: Option<ToolCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum ConfigCmd {
-    /// 显示/打开配置目录（数据根目录一览）
-    #[command(name = "path", help_template = HELP_TEMPLATE_OPTIONS)]
-    Path {
-        /// 在资源管理器中打开
-        #[arg(short, long)]
-        open: bool,
-    },
-    /// 管理下载缓存
-    #[command(name = "cache", help_template = HELP_TEMPLATE_OPTIONS)]
-    Cache {
-        /// 清除所有缓存文件
-        #[arg(short, long, conflicts_with = "open")]
-        clear: bool,
-        /// 在资源管理器中打开缓存目录
-        #[arg(short, long, conflicts_with = "clear")]
-        open: bool,
-    },
-    /// 管理软件源定义
-    #[command(name = "source", help_template = HELP_TEMPLATE_SUBCMDS)]
-    Source {
-        #[command(subcommand)]
-        action: Option<SourceCmd>,
-    },
-    /// 测速所有下载源
-    #[command(name = "speedtest", help_template = HELP_TEMPLATE_OPTIONS)]
-    Speedtest {
-        /// 可选：仅测速指定软件
-        name: Vec<String>,
-        /// 以软件为单位统计（任一源可用即为通）
-        #[arg(short = 'S', long = "software")]
-        software: bool,
-    },
-    /// 管理下载引擎后端
-    #[command(name = "downloader", help_template = HELP_TEMPLATE_SUBCMDS)]
-    Downloader {
-        #[command(subcommand)]
-        action: Option<DownloaderCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum SourceCmd {
-    /// 从远程仓库下载最新源定义（同时更新软件源和工具源）
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Update,
-    /// 显示当前源目录路径
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Path {
-        /// 在资源管理器中打开
-        #[arg(short, long)]
-        open: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum ToolCmd {
-    /// 初始化 as 环境（创建 tools/bin 并注册到 PATH）
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Init,
-    /// 安装自研工具
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Install {
-        /// 工具名称（可同时指定多个）
-        #[arg(required = true)]
-        names: Vec<String>,
-        /// 指定版本号
-        #[arg(short, long)]
-        version: Option<String>,
-        /// 强制重新下载
-        #[arg(short = 'r', long)]
-        renew: bool,
-        /// 仅下载，不安装
-        #[arg(short = 'd', long = "download-only")]
-        download_only: bool,
-    },
-    /// 升级自研工具
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Upgrade {
-        /// 可选：仅升级指定工具（不指定则全部升级）
-        names: Vec<String>,
-        /// 仅检查更新，不下也不装
-        #[arg(short, long, conflicts_with = "renew")]
-        check: bool,
-        /// 强制重新下载（即使版本相同）
-        #[arg(long, conflicts_with = "check")]
-        renew: bool,
-    },
-    /// 列出已安装的自研工具
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    List,
-    /// 移除一个自研工具
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Remove {
-        /// 工具名称
-        #[arg(required = true)]
-        name: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum DownloaderCmd {
-    /// 列出所有下载后端及其启用状态
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    List,
-    /// 启用或禁用一个后端
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Set {
-        /// 后端名称（如 curl, RustRange, Aria2c）
-        name: String,
-        /// on 或 off
-        state: String,
-    },
-    /// 显示或打开配置文件
-    #[command(help_template = HELP_TEMPLATE_OPTIONS)]
-    Config {
-        /// 在资源管理器中打开配置目录
-        #[arg(short, long)]
-        open: bool,
-    },
+fn examples() -> Vec<ExampleGroup> {
+    vec![
+        ExampleGroup {
+            command: "install",
+            description: "安装指定软件",
+            entries: vec![
+                ("as install 7zip".into(), "安装 7-Zip（最新版）"),
+                ("as install vscode python git".into(), "同时安装多个软件"),
+                ("as install 7zip -v 1.0.0".into(), "安装指定版本"),
+                ("as install 7zip --gui".into(), "使用图形界面向导安装"),
+                ("as install 7zip --renew".into(), "强制重新下载并安装"),
+                ("as install 7zip --download-only".into(), "仅下载，不安装"),
+                ("as install 7zip --type portable".into(), "指定安装类型为便携版"),
+                ("as install 7zip --upgrade".into(), "检测更新，卸载旧版后安装新版"),
+            ],
+        },
+        ExampleGroup {
+            command: "list",
+            description: "列出已安装的软件",
+            entries: vec![
+                ("as list".into(), "仅列出已安装的软件"),
+                ("as list -a".into(), "列出全部（已安装 + 源中可用）"),
+                ("as list -g".into(), "按分类分组显示"),
+                ("as list --categories".into(), "查看分类概览"),
+                ("as list -s 压缩".into(), "搜索名称、别名或描述"),
+                ("as list -f 开发工具".into(), "按分类过滤"),
+            ],
+        },
+        ExampleGroup {
+            command: "info",
+            description: "查看软件详细信息",
+            entries: vec![
+                ("as info 7zip".into(), "查看 7-Zip 的详细信息"),
+                ("as info 7zip --urls".into(), "查看 7-Zip 所有下载地址"),
+            ],
+        },
+        ExampleGroup {
+            command: "download",
+            description: "下载软件或文件",
+            entries: vec![
+                ("as download 7zip".into(), "通过软件名称下载最新版"),
+                ("as download <url>".into(), "通过链接直接下载文件"),
+                ("as download -o".into(), "打开下载目录"),
+                ("as download <url> --target ./tmp".into(), "下载到指定目录"),
+            ],
+        },
+        ExampleGroup {
+            command: "uninstall",
+            description: "卸载指定软件",
+            entries: vec![
+                ("as uninstall 7zip".into(), "静默卸载 7-Zip"),
+                ("as uninstall vscode python".into(), "同时卸载多个软件"),
+                ("as uninstall 7zip --gui".into(), "使用图形界面卸载向导"),
+                ("as uninstall 7zip --force".into(), "强制删除（跳过卸载器）"),
+            ],
+        },
+        ExampleGroup {
+            command: "cache",
+            description: "管理下载缓存",
+            entries: vec![
+                ("as cache".into(), "列出缓存文件"),
+                ("as cache -c".into(), "清除所有缓存"),
+                ("as cache -o".into(), "打开缓存目录"),
+            ],
+        },
+        ExampleGroup {
+            command: "source",
+            description: "管理软件源",
+            entries: vec![
+                ("as source -u".into(), "更新所有源"),
+                ("as source --speedtest".into(), "测速所有源"),
+                ("as source -o".into(), "打开源目录"),
+                ("as source -c".into(), "清空所有源"),
+            ],
+        },
+        ExampleGroup {
+            command: "downloader",
+            description: "管理下载引擎后端",
+            entries: vec![
+                ("as downloader --list".into(), "列出所有后端"),
+                ("as downloader set curl on".into(), "启用 curl"),
+                ("as downloader set curl off".into(), "禁用 curl"),
+                ("as downloader -o".into(), "打开配置目录"),
+            ],
+        },
+        ExampleGroup {
+            command: "tool init",
+            description: "初始化 as 环境",
+            entries: vec![
+                ("as tool init".into(), "打印 tools/bin 加入 PATH 的配置提示"),
+                ("as tool init -g".into(), "写入用户 PATH 注册表"),
+            ],
+        },
+        ExampleGroup {
+            command: "tool add",
+            description: "安装/升级自研工具",
+            entries: vec![
+                ("as tool add ls".into(), "安装 ls 工具"),
+                ("as tool add ls --upgrade".into(), "升级 ls 工具"),
+                ("as tool add as --upgrade".into(), "升级 as 自身"),
+            ],
+        },
+        ExampleGroup {
+            command: "tool",
+            description: "管理自研工具",
+            entries: vec![
+                ("as tool init".into(), "初始化环境"),
+                ("as tool list".into(), "列出自研工具"),
+                ("as tool remove ls".into(), "移除 ls 工具"),
+            ],
+        },
+    ]
 }
 
 fn main() {
     color::enable_ansi();
+    net::backend::set_tools_bin_dir(paths::tools_bin_dir());
 
-    // 拦截根级 --help，走自定义渲染（不经过 clap，避免干扰子命令的 -h）
-    let args: Vec<String> = std::env::args().collect();
-    let first_arg = args.get(1).map(|s| s.as_str());
-    let is_root_help = first_arg.map_or(false, |a| a == "-h" || a == "--help");
-    if is_root_help {
-        print_root_help();
+    let app = build_app();
+    let raw_args: Vec<String> = std::env::args().collect();
+
+    // 处理 -e/--example
+    if raw_args.iter().any(|a| a == "-e" || a == "--example") {
+        app.print_examples(&examples());
         return;
     }
 
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
+    // 处理 -V/--version
+    if raw_args.iter().any(|a| a == "-V" || a == "--version") {
+        println!("as {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    // 解析命令
+    let args: Vec<String> = raw_args.into_iter().skip(1).collect();
+
+    match app.parse(&args) {
+        Ok(ParseResult::Executed(parsed, cmd)) => {
+            if parsed.subcommand_path.is_empty() {
+                dispatch_root(&parsed, cmd, &app);
+            } else {
+                dispatch_sub(&parsed, cmd, &app);
+            }
+        }
+        Ok(ParseResult::ShowHelp(cmd, path)) => {
+            app.print_command_help(cmd, &path);
+        }
         Err(e) => {
-            print_clap_error(e);
-            return;
+            app.print_error(&e);
         }
-    };
-    // 设置工具二进制目录（供下载后端检测 aria2c 等工具）
-    net::backend::set_tools_bin_dir(paths::tools_bin_dir());
-    match cli.command {
-        None => {
-            if cli.example {
-                run_example();
-                return;
-            }
-            print_root_help();
+    }
+}
+
+fn dispatch_root(parsed: &ParsedArgs, cmd: &cli::CommandDef, app: &App) {
+    match parsed.command.as_str() {
+        "install" => {
+            let names = parsed.all().to_vec();
+            let version = parsed.get_string("version").map(|s| s.to_string());
+            let gui = parsed.flag("gui");
+            let renew = parsed.flag("renew");
+            let download_only = parsed.flag("download-only");
+            let inst_type = parsed.get_string("type").map(|s| s.to_string());
+            let upgrade = parsed.flag("upgrade");
+            let opts = InstallOpts::new(names, version, gui, renew, download_only, inst_type, upgrade);
+            let _ = help::run(|| cmd_install::run_install(opts));
         }
-        Some(Command::Install { names, version, gui, renew, download_only, inst_type }) => {
-            let opts = InstallOpts::new(names, version, gui, renew, download_only, inst_type);
-            let _ = run(|| cmd_install::run_install(opts));
+        "list" => {
+            let all = parsed.flag("all");
+            let filter = parsed.get_string("filter").map(|s| s.to_string());
+            let search = parsed.get_string("search").map(|s| s.to_string());
+            let downloaded = parsed.flag("downloaded");
+            let downloading = parsed.flag("downloading");
+            let no_download = parsed.flag("no-download");
+            let group = parsed.flag("group");
+            let categories = parsed.flag("categories");
+            let opts = ListOpts::new(all, filter, search, downloaded, downloading, no_download, group, categories);
+            let _ = help::run(|| cmd_list::run_list(opts));
         }
-        Some(Command::List { filter, install_only, missing, search, downloaded, downloading, no_download, group, categories, info }) => {
-            // --info 优先级最高：查看软件详情
-            if let Some(name) = info {
-                let _ = run(|| cmd_info::run_info(&name, false));
-                return;
-            }
-            let opts = ListOpts::new(filter, install_only, missing, search, downloaded, downloading, no_download, group, categories, info);
-            let _ = run(|| cmd_list::run_list(opts));
+        "info" => {
+            let name = parsed.first().unwrap_or("");
+            let urls = parsed.flag("urls");
+            let _ = help::run(|| cmd_info::run_info(name, urls));
         }
-        Some(Command::Uninstall { names, gui, force }) => {
+        "download" => {
+            let targets = parsed.all().to_vec();
+            let open = parsed.flag("open");
+            let target_dir = parsed.get_string("target").map(|s| s.to_string());
+            let opts = DownloadOpts::new(targets, open, target_dir);
+            let _ = help::run(|| cmd_download::run_download(opts));
+        }
+        "uninstall" => {
+            let names = parsed.all().to_vec();
+            let gui = parsed.flag("gui");
+            let force = parsed.flag("force");
             let opts = UninstallOpts::new(names, gui, force);
-            let _ = run(|| cmd_uninstall::run_uninstall(opts));
+            let _ = help::run(|| cmd_uninstall::run_uninstall(opts));
         }
-        Some(Command::Upgrade { names, check, renew }) => {
-            let opts = UpgradeOpts::new(names, check, renew);
-            let _ = run(|| cmd_upgrade::run_upgrade(opts));
+        "cache" => {
+            let list = parsed.flag("list");
+            let clear = parsed.flag("clear");
+            let open = parsed.flag("open");
+            let _ = help::run(|| cmd_cache::run_cache(list, clear, open));
         }
-        Some(Command::Config { action }) => {
-            match action {
-                Some(cmd) => { let _ = run(|| cmd_config::run_config(cmd)); }
-                None => help::print_config_help(),
+        "source" => {
+            let update = parsed.flag("update");
+            let clear = parsed.flag("clear");
+            let open = parsed.flag("open");
+            let speedtest = parsed.flag("speedtest");
+            let names = parsed.get_string("name").map(|s| vec![s.to_string()]).unwrap_or_default();
+            let software_flag = parsed.flag("software");
+            let _ = help::run(|| cmd_source::run_source(update, clear, open, speedtest, names, software_flag));
+        }
+        "downloader" => {
+            let list = parsed.flag("list");
+            let open = parsed.flag("open");
+            let args = parsed.all();
+            let set = if args.len() >= 3 && args[0] == "set" {
+                Some(vec![args[1].clone(), args[2].clone()])
+            } else {
+                None
+            };
+            let _ = help::run(|| cmd_downloader::run_downloader(list, set, open));
+        }
+        "tool" => {
+            // tool without subcommand → show subcommand help
+            app.print_command_help(cmd, &[]);
+        }
+        _ => {}
+    }
+}
+
+fn dispatch_sub(parsed: &ParsedArgs, _cmd: &cli::CommandDef, _app: &App) {
+    let parent = parsed.subcommand_path.first().map(|s| s.as_str()).unwrap_or("");
+    match (parent, parsed.command.as_str()) {
+        ("tool", "init") => {
+            let global = parsed.flag("global");
+            let _ = help::run(|| cmd_init::run_init(global));
+        }
+        ("tool", "add") => {
+            let names = parsed.all().to_vec();
+            let version = parsed.get_string("version").map(|s| s.to_string());
+            let renew = parsed.flag("renew");
+            let download_only = parsed.flag("download-only");
+            let upgrade = parsed.flag("upgrade");
+
+            // 特例：as tool add as --upgrade → 更新 as 自身
+            if upgrade && names.len() == 1 && names[0].to_lowercase() == "as" {
+                let _ = help::run(|| cmd_self_update::run_self_update());
+            } else {
+                let opts = ToolAddOpts::new(names, version, renew, download_only, upgrade);
+                let _ = help::run(|| cmd_tool::run_add(opts));
             }
         }
-        Some(Command::Tool { action }) => {
-            match action {
-                Some(ToolCmd::Init) => {
-                    let _ = run(|| cmd_init::run_init());
-                }
-                Some(ToolCmd::Install { names, version, renew, download_only }) => {
-                    let opts = ToolInstallOpts::new(names, version, renew, download_only);
-                    let _ = run(|| cmd_tool::run_install(opts));
-                }
-                Some(ToolCmd::Upgrade { names, check, renew }) => {
-                    // 特例：as tool upgrade as → 更新 as 自身
-                    if names.len() == 1 && names[0].to_lowercase() == "as" {
-                        let _ = run(|| cmd_self_update::run_self_update());
-                    } else {
-                        let opts = ToolUpgradeOpts::new(names, check, renew);
-                        let _ = run(|| cmd_tool::run_upgrade(opts));
-                    }
-                }
-                Some(ToolCmd::List) => {
-                    let _ = run(|| cmd_tool::run_list());
-                }
-                Some(ToolCmd::Remove { name }) => {
-                    let _ = run(|| cmd_tool::run_remove(&name));
-                }
-                None => help::print_tool_help(),
-            }
+        ("tool", "list") => {
+            let _ = help::run(|| cmd_tool::run_list());
         }
+        ("tool", "remove") => {
+            let name = parsed.first().unwrap_or("");
+            let _ = help::run(|| cmd_tool::run_remove(name));
+        }
+        _ => {}
     }
 }

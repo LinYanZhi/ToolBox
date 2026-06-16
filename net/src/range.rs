@@ -101,7 +101,7 @@ pub fn parallel_download(
         let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
-                .template("{msg:.green} [{bar:30.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, {eta})")
+                .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta:.yellow}")
                 .unwrap()
                 .progress_chars("━━━"),
         );
@@ -133,6 +133,7 @@ pub fn parallel_download(
                     pb_clone.set_status("下载中");
                 }
                 bar.set_position(cur);
+                bar.set_prefix(crate::download::format_decimal_progress(cur, total_size));
                 if cur >= total_size {
                     break;
                 }
@@ -368,7 +369,7 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
         let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
-                .template("{msg:.green} [{bar:30.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, {eta})")
+                .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta:.yellow}")
                 .unwrap()
                 .progress_chars("━━━"),
         );

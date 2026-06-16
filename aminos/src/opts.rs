@@ -13,10 +13,13 @@ pub struct InstallOpts {
     pub download_only: bool,
     /// 安装类型：Some("portable") 或 Some("installer")，None 为交互选择
     pub inst_type: Option<String>,
+    /// 升级模式：检测更新，卸载旧版后安装新版
+    pub upgrade: bool,
 }
 
 impl InstallOpts {
-    pub fn new(names: Vec<String>, version: Option<String>, gui: bool, renew: bool, download_only: bool, inst_type: Option<String>) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(names: Vec<String>, version: Option<String>, gui: bool, renew: bool, download_only: bool, inst_type: Option<String>, upgrade: bool) -> Self {
         Self {
             names,
             version: version.unwrap_or_default(),
@@ -24,6 +27,7 @@ impl InstallOpts {
             renew,
             download_only,
             inst_type,
+            upgrade,
         }
     }
 }
@@ -31,12 +35,10 @@ impl InstallOpts {
 /// 列表显示选项
 #[derive(Debug, Clone)]
 pub struct ListOpts {
+    /// 显示全部（已安装 + 源中可用）
+    pub all: bool,
     /// 按分类过滤
     pub filter: Option<String>,
-    /// 仅显示已安装
-    pub install_only: bool,
-    /// 仅显示未安装
-    pub missing: bool,
     /// 搜索关键字
     pub search: Option<String>,
     /// 仅显示已下载
@@ -49,36 +51,29 @@ pub struct ListOpts {
     pub group: bool,
     /// 显示所有分类概览
     pub categories: bool,
-    /// 查看软件详细信息（替换原 as info 命令）
-    #[allow(dead_code)]
-    pub info: Option<String>,
 }
 
 impl ListOpts {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        all: bool,
         filter: Option<String>,
-        install_only: bool,
-        missing: bool,
         search: Option<String>,
         downloaded: bool,
         downloading: bool,
         no_download: bool,
         group: bool,
         categories: bool,
-        info: Option<String>,
     ) -> Self {
         Self {
+            all,
             filter,
-            install_only,
-            missing,
             search,
             downloaded,
             downloading,
             no_download,
             group,
             categories,
-            info,
         }
     }
 }
@@ -100,26 +95,26 @@ impl UninstallOpts {
     }
 }
 
-/// 升级选项
+/// 下载选项
 #[derive(Debug, Clone)]
-pub struct UpgradeOpts {
-    /// 可选：仅升级指定软件（空则全部升级）
-    pub names: Vec<String>,
-    /// 仅检查更新，不下也不装
-    pub check: bool,
-    /// 强制重新下载（即使版本相同）
-    pub renew: bool,
+pub struct DownloadOpts {
+    /// 软件名称或 URL
+    pub targets: Vec<String>,
+    /// 打开下载目录
+    pub open: bool,
+    /// 下载到指定目录
+    pub target_dir: Option<String>,
 }
 
-impl UpgradeOpts {
-    pub fn new(names: Vec<String>, check: bool, renew: bool) -> Self {
-        Self { names, check, renew }
+impl DownloadOpts {
+    pub fn new(targets: Vec<String>, open: bool, target_dir: Option<String>) -> Self {
+        Self { targets, open, target_dir }
     }
 }
 
-/// 自研工具安装选项
+/// 自研工具添加选项
 #[derive(Debug, Clone)]
-pub struct ToolInstallOpts {
+pub struct ToolAddOpts {
     /// 工具名称列表
     pub names: Vec<String>,
     /// 指定版本号（空字符串表示默认）
@@ -128,32 +123,18 @@ pub struct ToolInstallOpts {
     pub renew: bool,
     /// 仅下载，不安装
     pub download_only: bool,
+    /// 升级模式
+    pub upgrade: bool,
 }
 
-impl ToolInstallOpts {
-    pub fn new(names: Vec<String>, version: Option<String>, renew: bool, download_only: bool) -> Self {
+impl ToolAddOpts {
+    pub fn new(names: Vec<String>, version: Option<String>, renew: bool, download_only: bool, upgrade: bool) -> Self {
         Self {
             names,
             version: version.unwrap_or_default(),
             renew,
             download_only,
+            upgrade,
         }
-    }
-}
-
-/// 自研工具升级选项
-#[derive(Debug, Clone)]
-pub struct ToolUpgradeOpts {
-    /// 可选：仅升级指定工具（空则全部升级）
-    pub names: Vec<String>,
-    /// 仅检查更新
-    pub check: bool,
-    /// 强制重新下载（即使版本相同）
-    pub renew: bool,
-}
-
-impl ToolUpgradeOpts {
-    pub fn new(names: Vec<String>, check: bool, renew: bool) -> Self {
-        Self { names, check, renew }
     }
 }

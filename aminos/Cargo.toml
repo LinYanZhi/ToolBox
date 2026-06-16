@@ -4,11 +4,11 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 indicatif = "0.17"
+cli = { path = "../cli" }
 color = { path = "../color" }
 config = { path = "../config" }
 net = { path = "../net" }

@@ -84,7 +84,7 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
 
     println!();
     println!("  {}", color::gray(format!("配置文件: {}", net::config::config_file_path().to_string_lossy())));
-    println!("  {}", color::gray(format!("{}  --open  在资源管理器中打开", cmd_names::CONFIG_DOWNLOADER_CONFIG)));
+    println!("  {}", color::gray(format!("as downloader -o  在资源管理器中打开")));
     println!();
     Ok(())
 }
@@ -129,12 +129,12 @@ pub fn run_downloader_config(open: bool) -> anyhow::Result<()> {
     println!("    {}", color::gray("目录:"));
     println!("      {}", dir.display());
     println!();
-    println!("    {}", color::gray(format!("{}  --open  在资源管理器中打开", cmd_names::CONFIG_DOWNLOADER_CONFIG)));
+    println!("    {}", color::gray(format!("as downloader -o  在资源管理器中打开")));
     println!();
 
     if !path.is_file() {
         println!("    {} 配置文件不存在，将使用默认配置运行。", color::yellow("提示:"));
-        println!("    运行 {} 可创建默认配置文件。", color::cyan(cmd_names::CONFIG_DOWNLOADER_LIST));
+        println!("    运行 {} 可创建默认配置文件。", color::cyan(cmd_names::DOWNLOADER_LIST));
         println!();
     }
 

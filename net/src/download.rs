@@ -69,9 +69,28 @@ const C_BOLD: &str = "\x1b[1m";
 const C_RED: &str = "\x1b[31m";
 const C_GREEN: &str = "\x1b[32m";
 const C_YELLOW: &str = "\x1b[33m";
-const C_MAGENTA: &str = "\x1b[35m";
+const C_BRIGHT_MAGENTA: &str = "\x1b[95m";
 const C_CYAN: &str = "\x1b[36m";
 const C_GREY: &str = "\x1b[90m";
+
+/// 格式化下载进度为 "cur/total UNIT"（1 位小数，十进制，无末尾零）。
+/// 例: "12.5/12.5 MB"，"1.2/1.2 GB"
+pub(crate) fn format_decimal_progress(cur: u64, total: u64) -> String {
+    let (cur_f, total_f, unit) = if total >= 1_000_000_000 {
+        (cur as f64 / 1_000_000_000.0, total as f64 / 1_000_000_000.0, "GB")
+    } else if total >= 1_000_000 {
+        (cur as f64 / 1_000_000.0, total as f64 / 1_000_000.0, "MB")
+    } else if total >= 1_000 {
+        (cur as f64 / 1_000.0, total as f64 / 1_000.0, "KB")
+    } else {
+        (cur as f64, total as f64, "B")
+    };
+    let fmt = |v: f64| -> String {
+        let s = format!("{:.1}", v);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    format!("{}/{} {}", fmt(cur_f), fmt(total_f), unit)
+}
 
 /// 全局进度条管理器，确保同一时间多个进度条不会在终端打架。
 pub(crate) fn progress() -> &'static MultiProgress {
@@ -296,7 +315,7 @@ impl ProgressCtx {
 fn colored_thread(t: &str) -> String {
     match t {
         "多线程" => format!("{}{}{}", C_CYAN, pad_display(t, 8), C_RESET),
-        "单线程" => format!("{}{}{}", C_MAGENTA, pad_display(t, 8), C_RESET),
+        "单线程" => format!("{}{}{}", C_BRIGHT_MAGENTA, pad_display(t, 8), C_RESET),
         _ => pad_display(t, 8),
     }
 }
@@ -385,7 +404,7 @@ pub fn download_with_fallback(
 
     // ── 进度条模板 ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{msg} [{bar:18.green/white}] {bytes:.green}/{total_bytes:.green} ({bytes_per_sec:.green}, +{elapsed_precise:.cyan} / -{eta:.yellow})")
+        .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta:.yellow}")
         .unwrap()
         .progress_chars("━━━");
     let untracked_style = indicatif::ProgressStyle::default_bar()
@@ -509,12 +528,7 @@ pub fn download_with_fallback(
                             .set_status("✓ 完成");
                         let _ = tx.send((url.clone(), file_size, tmp_path.clone()));
                     }
-                    Err(e) => {
-                        let emsg = format!("{}", e);
-                        let short = if emsg.chars().count() > 6 {
-                            let truncated: String = emsg.chars().take(6).collect();
-                            format!("{}…", truncated)
-                        } else { emsg };
+                    Err(_) => {
                         if someone_won.load(Ordering::Relaxed) {
                             if tmp_path.is_file() {
                                 let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
@@ -528,7 +542,7 @@ pub fn download_with_fallback(
                                 .set_status("✗ 已取消");
                         } else {
                             ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                                .set_status(&format!("✗ {}", short));
+                                .set_status("✗ 失败");
                         }
                         let _ = std::fs::remove_file(&tmp_path);
                     }
@@ -552,6 +566,7 @@ pub fn download_with_fallback(
                     }
                     if CTRL_C_PRESSED.load(Ordering::Relaxed) {
                         for c in &cancel_handles { c.cancel(); }
+                        progress().clear().ok();
                         break Err(anyhow::anyhow!("用户取消 (Ctrl+C)"));
                     }
                     if round_start.elapsed() < grace_period { continue; }
@@ -598,7 +613,7 @@ pub fn download_with_fallback(
                     for b in &bar_grid[later_abi] {
                         let msg = b.bar.message();
                         if !msg.contains('✓') && !msg.contains('✗') {
-                            b.set_status("✗ 已跳过");
+                            b.set_status("✗ 已取消");
                             if tracked { b.bar.abandon(); }
                         }
                     }
@@ -642,8 +657,10 @@ pub fn download_with_fallback(
     let _ = std::fs::remove_file(target_path);
     cleanup_strategy_temp(target_path);
     if CTRL_C_PRESSED.load(Ordering::Relaxed) {
+        progress().clear().ok();
         bail!("用户取消 (Ctrl+C)");
     }
+    progress().clear().ok();
     bail!("下载失败: {}", last_error.as_deref().unwrap_or("未知错误"));
 }
 
@@ -802,6 +819,9 @@ pub(crate) fn download_with_ureq(
             cancel.mark_progress();
             if let Some(ref pb) = pb {
                 pb.inc(n as u64);
+                if total > 0 {
+                    pb.set_prefix(crate::download::format_decimal_progress(pb.position(), total));
+                }
             }
         }
 
