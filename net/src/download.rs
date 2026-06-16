@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use indicatif::MultiProgress;
 
 use crate::backend::DownloadBackend;
@@ -14,54 +14,6 @@ use crate::agent::{AgentConfig, Fingerprint};
 use crate::verify::verify_downloaded_file;
 
 const CHUNK: usize = 64 * 1024;
-
-/// 最大并行下载组合数，防止 URL × 策略组合爆炸。
-const MAX_CONCURRENT_COMBOS: usize = 16;
-
-/// 并发许可池 — 限制同时运行的下载线程数量。
-///
-/// 每个线程在开始下载前 `try_acquire()` 等待许可，下载完成后自动归还。
-/// 线程在等待期间每 500ms 检查一次取消状态，避免被阻塞后无法响应取消。
-struct PermitPool {
-    inner: Arc<(Mutex<usize>, Condvar)>,
-    max: usize,
-}
-
-impl PermitPool {
-    fn new(max: usize) -> Self {
-        Self { inner: Arc::new((Mutex::new(0usize), Condvar::new())), max }
-    }
-
-    /// 尝试获取一个许可，最长等待 `timeout` 时间。
-    /// 返回 `None` 表示超时（调用方应检查取消状态后重试）。
-    fn try_acquire(&self, timeout: Duration) -> Option<PermitGuard> {
-        let (lock, cvar) = &*self.inner;
-        let mut count = lock.lock().unwrap();
-        let deadline = Instant::now() + timeout;
-        while *count >= self.max {
-            let now = Instant::now();
-            if now >= deadline {
-                return None;
-            }
-            count = cvar.wait_timeout(count, deadline - now).unwrap().0;
-        }
-        *count += 1;
-        Some(PermitGuard { inner: Arc::clone(&self.inner) })
-    }
-}
-
-struct PermitGuard {
-    inner: Arc<(Mutex<usize>, Condvar)>,
-}
-
-impl Drop for PermitGuard {
-    fn drop(&mut self) {
-        let (lock, cvar) = &*self.inner;
-        let mut count = lock.lock().unwrap();
-        *count = count.saturating_sub(1);
-        cvar.notify_one();
-    }
-}
 
 // ── ANSI 颜色常量（用于进度条表格） ──
 const C_RESET: &str = "\x1b[0m";
@@ -361,12 +313,10 @@ fn install_ctrlc_handler() {
     });
 }
 
-/// 并行下载：逐策略顺序回退，同策略地址并行。
+/// pip 风格下载：逐后端顺序尝试，同一后端的 URL 逐个重试。
 ///
-/// 设计原则：避免策略间互相抢带宽。
-/// 先尝试最快的策略（RustRange/aria2c/ureq）并行下载所有 URL，
-/// 所有 URL 都用同一策略失败后才切换到下一个策略。
-/// 临时文件命名 `{target}.s{strat_idx}_{url_idx}.tmp`。
+/// 每个后端尝试时显示一个独立进度条，完成后输出一行摘要。
+/// 当前端全部 URL 失败后才切换到下一个后端。
 pub fn download_with_fallback(
     urls: &[String],
     target_path: &Path,
@@ -381,286 +331,127 @@ pub fn download_with_fallback(
     }
 
     // ── 确定后端列表：配置文件优先 ──
-    let (backends, max_concurrent, verify_enabled) = {
+    let (backends, verify_enabled) = {
         let file_cfg = crate::config::DownloaderConfig::load();
-        // 如果配置文件存在且解析成功（backends 非空），则用它
         if !file_cfg.backends.is_empty() && config_file_exists() {
-            let names: Vec<&str> = file_cfg.backends.iter().map(|b| b.id()).collect();
-            let backends: Vec<Box<dyn DownloadBackend>> = file_cfg.backends.into_iter().collect();
-            eprintln!("    {}>>{} {} 个地址 × {} 个后端（配置: {}）",
-                C_GREEN, C_RESET, urls.len(), backends.len(), names.join(", "));
-            (backends, file_cfg.max_concurrent, file_cfg.verify)
+            (file_cfg.backends, file_cfg.verify)
         } else {
-            // 配置文件不存在 → 从旧 config 参数转换
-            let backends = backends_from_config(config);
-            eprintln!("    {}>>{} {} 个地址 × {} 个后端（默认）",
-                C_GREEN, C_RESET, urls.len(), backends.len());
-            (backends, MAX_CONCURRENT_COMBOS, config.verify)
+            (backends_from_config(config), config.verify)
         }
     };
 
-    // 开始前清理上一次残留的临时文件
-    cleanup_strategy_temp(target_path);
+    // 清理上次残留的临时文件
+    let _ = std::fs::remove_file(target_path.with_extension("tmp"));
 
-    // ── 进度条模板 ──
+    // ── 进度条模板（仅 tracked 后端使用） ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta:.yellow}")
+        .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {elapsed_precise}")
         .unwrap()
         .progress_chars("━━━");
-    let untracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{msg}")
-        .unwrap();
-
-    let mut last_error: Option<String> = None;
-    let backends = Arc::new(backends);
+    // 自报速度的后端（aria2c），去掉 decimal_bytes_per_sec 避免速度重复
+    let tracked_style_nospeed = indicatif::ProgressStyle::default_bar()
+        .template("{msg} {bar:26.green/white} {prefix:.green} {elapsed_precise}")
+        .unwrap()
+        .progress_chars("━━━");
 
     // ── 筛选可用后端 ──
-    let available: Vec<(usize, &Box<dyn DownloadBackend>)> = (0..backends.len())
-        .filter_map(|i| {
-            if backends[i].health_check() { Some((i, &backends[i])) } else { None }
-        })
+    let available: Vec<Box<dyn DownloadBackend>> = backends.into_iter()
+        .filter(|b| b.health_check())
         .collect();
 
     if available.is_empty() {
         bail!("没有可用的下载后端");
     }
 
-    eprintln!();
+    let mut last_error: Option<String> = None;
 
-    // ── 预分配所有进度条（固定行位置，永不移动） ──
-    // bar_grid[abi][ui] = 第 abi 个可用后端的第 ui 个 URL 的进度条
-    let mut bar_grid: Vec<Vec<ProgressCtx>> = Vec::with_capacity(available.len());
-    for (_, be) in &available {
-        let t = be.tracked();
-        let mut row = Vec::with_capacity(urls.len());
-        for _ in 0..urls.len() {
-            let bar = progress().add(indicatif::ProgressBar::new(1));
-            if t { bar.set_style(tracked_style.clone()); }
-            else { bar.set_style(untracked_style.clone()); }
-            let ctx = ProgressCtx::new(bar, be.display_name(), be.thread_label());
-            ctx.set_status("等待中");
-            row.push(ctx);
+    // ── 逐后端顺序尝试 ──
+    for backend in &available {
+        if CTRL_C_PRESSED.load(Ordering::Relaxed) {
+            bail!("用户取消 (Ctrl+C)");
         }
-        bar_grid.push(row);
-    }
 
-    // ── 逐后端顺序尝试（每行位置固定） ──
-    for abi in 0..available.len() {
-        let (orig_idx, _be) = &available[abi];
-        let backend = &backends[*orig_idx];
         let sname = backend.display_name();
         let tracked = backend.tracked();
 
-        // 激活当前行
-        let bars: Vec<ProgressCtx> = bar_grid[abi].iter().map(|b| b.clone()).collect();
-        for b in &bars { b.set_status("运行中"); }
+        // 创建一个进度条（注册到 MultiProgress 确保渲染）
+        let bar = progress().add(indicatif::ProgressBar::new(1));
+        if tracked {
+            // aria2c 自报速度，用无 speed 模板避免重复
+            if backend.id() == "aria2c" {
+                bar.set_style(tracked_style_nospeed.clone());
+            } else {
+                bar.set_style(tracked_style.clone());
+            }
+        }
+        let ctx = ProgressCtx::new(bar, sname, backend.thread_label());
+        let cancel = Cancel::new();
 
-        let someone_won = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = std::sync::mpsc::channel::<(String, u64, PathBuf)>();
-        let pool = Arc::new(PermitPool::new(max_concurrent));
-        let mut cancel_handles: Vec<Cancel> = Vec::with_capacity(urls.len());
-        let completed_files: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+        // 逐 URL 尝试
+        for url in urls {
+            if CTRL_C_PRESSED.load(Ordering::Relaxed) {
+                bail!("用户取消 (Ctrl+C)");
+            }
 
-        // ── 启动每个 URL 的下载线程（PermitPool 限流） ──
-        for (ui, url) in urls.iter().enumerate() {
-            let tmp_path = target_path.with_extension(format!("s{}_{}.tmp", *orig_idx, ui));
-            let cancel = Cancel::new();
-            cancel_handles.push(cancel.clone());
+            let tmp_path = target_path.with_extension("tmp");
+            let _ = std::fs::remove_file(&tmp_path);
 
-            let url = url.clone();
-            let bar = bars[ui].clone();
-            let tx = tx.clone();
-            let someone_won = Arc::clone(&someone_won);
-            let completed_files = Arc::clone(&completed_files);
-            let pool = Arc::clone(&pool);
-            let sname = sname.to_string();
-            let backends_arc = Arc::clone(&backends);
-            let si = *orig_idx;
-            let tmp_path_for_completed = tmp_path.clone();
+            ctx.set_status("下载中");
 
-            std::thread::spawn(move || {
-                loop {
-                    if someone_won.load(Ordering::Relaxed) {
-                        if tmp_path_for_completed.is_file() {
-                            let file_size = std::fs::metadata(&tmp_path_for_completed).map(|m| m.len()).unwrap_or(0);
-                            if file_size > 0 {
-                                if let Ok(mut cf) = completed_files.lock() {
-                                    cf.push(tmp_path_for_completed.clone());
-                                }
-                            }
-                        }
-                        ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                            .set_status("✗ 已取消");
-                        let _ = std::fs::remove_file(&tmp_path_for_completed);
-                        return;
-                    }
-                    if let Some(_permit) = pool.try_acquire(Duration::from_millis(500)) {
-                        break;
-                    }
-                }
-                if someone_won.load(Ordering::Relaxed) {
-                    ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                        .set_status("✗ 已取消");
-                    let _ = std::fs::remove_file(&tmp_path_for_completed);
-                    return;
-                }
+            let result = backend.download(
+                url,
+                &tmp_path,
+                &cancel,
+                if tracked { Some(ctx.clone()) } else { None },
+            );
 
-                let result = backends_arc[si].download(&url, &tmp_path, &cancel,
-                    if tracked { Some(bar.clone()) } else { None });
+            match result {
+                Ok(()) => {
+                    // ── 下载成功 ──
+                    if tracked { ctx.bar.finish_and_clear(); }
 
-                match result {
-                    Ok(_) => {
-                        if someone_won.swap(true, Ordering::Relaxed) {
-                            if tmp_path.is_file() {
-                                let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
-                                if file_size > 0 {
-                                    if let Ok(mut cf) = completed_files.lock() {
-                                        cf.push(tmp_path.clone());
-                                    }
-                                }
-                            }
-                            ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                                .set_status("✗ 已取消");
-                            return;
-                        }
-                        let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
-                        ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                            .set_status("✓ 完成");
-                        let _ = tx.send((url.clone(), file_size, tmp_path.clone()));
-                    }
-                    Err(_) => {
-                        if someone_won.load(Ordering::Relaxed) {
-                            if tmp_path.is_file() {
-                                let file_size = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
-                                if file_size > 0 {
-                                    if let Ok(mut cf) = completed_files.lock() {
-                                        cf.push(tmp_path.clone());
-                                    }
-                                }
-                            }
-                            ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                                .set_status("✗ 已取消");
-                        } else {
-                            ProgressCtx::new(bar.bar.clone(), &sname, backends_arc[si].thread_label())
-                                .set_status("✗ 失败");
-                        }
+                    // 执行文件校验
+                    if verify_enabled && !verify_downloaded_file(&tmp_path) {
                         let _ = std::fs::remove_file(&tmp_path);
+                        bail!("{}: 下载内容签名不匹配", sname);
                     }
+
+                    // 移动到目标路径
+                    let _ = std::fs::remove_file(target_path);
+                    std::fs::rename(&tmp_path, target_path)
+                        .context("重命名临时文件到目标路径失败")?;
+
+                    let file_size = std::fs::metadata(target_path)
+                        .map(|m| m.len()).unwrap_or(0);
+                    let elapsed = start.elapsed();
+
+                    return Ok(DownloadReport {
+                        strategy_used: sname.to_string(),
+                        total_bytes: file_size,
+                        elapsed,
+                        url: url.clone(),
+                        target_path: target_path.to_path_buf(),
+                    });
                 }
-            });
+                Err(e) => {
+                    // 当前 URL 失败 → 清理临时文件，继续尝试下一地址
+                    let _ = std::fs::remove_file(&tmp_path);
+                    last_error = Some(format!("{}", e));
+                }
+            }
         }
 
-        // 监控循环：等待第一个成功，或全部失败
-        let round_start = std::time::Instant::now();
-        let grace_period = Duration::from_secs(12);
-        let round_result = loop {
-            match rx.recv_timeout(Duration::from_secs(2)) {
-                Ok((url, file_size, tmp_path)) => break Ok((url, file_size, tmp_path)),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // 刷新活动行的速度显示
-                    for b in &bars {
-                        let status = b.bar.message();
-                        if status.contains("运行中") || status.contains("下载中") || status.contains("连接中") {
-                            b.set_status("下载中");
-                        }
-                    }
-                    if CTRL_C_PRESSED.load(Ordering::Relaxed) {
-                        for c in &cancel_handles { c.cancel(); }
-                        progress().clear().ok();
-                        break Err(anyhow::anyhow!("用户取消 (Ctrl+C)"));
-                    }
-                    if round_start.elapsed() < grace_period { continue; }
-                    let all_idle = cancel_handles.iter().all(|c| c.is_cancelled() || c.last_progress_ms() == 0);
-                    if all_idle {
-                        let completed = completed_files.lock().unwrap_or_else(|e| e.into_inner());
-                        if let Some(fp) = completed.first().filter(|p| p.is_file()) {
-                            let file_size = std::fs::metadata(fp).map(|m| m.len()).unwrap_or(0);
-                            if file_size > 0 {
-                                let path = fp.clone();
-                                break Ok((urls[0].clone(), file_size, path));
-                            }
-                        }
-                        break Err(anyhow::anyhow!("{} 所有地址均失败", sname));
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    let completed = completed_files.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(fp) = completed.first().filter(|p| p.is_file()) {
-                        let file_size = std::fs::metadata(fp).map(|m| m.len()).unwrap_or(0);
-                        if file_size > 0 {
-                            let path = fp.clone();
-                            break Ok((urls[0].clone(), file_size, path));
-                        }
-                    }
-                    break Err(anyhow::anyhow!("所有下载线程已退出"));
-                }
-            }
-        };
-
-        // 取消剩余线程
-        for c in &cancel_handles { c.cancel(); }
-        thread::sleep(Duration::from_millis(500));
-
-        // 处理结果（错误显示在对应行，不输出 eprintln! 破坏布局）
-        match round_result {
-            Ok((url, _file_size, tmp_path)) => {
-                // 标记当前行为成功
-                for b in &bars {
-                    if tracked { b.bar.finish(); }
-                }
-                // 标记后续后端的行（如果有）为已跳过
-                for later_abi in (abi + 1)..bar_grid.len() {
-                    for b in &bar_grid[later_abi] {
-                        let msg = b.bar.message();
-                        if !msg.contains('✓') && !msg.contains('✗') {
-                            b.set_status("✗ 已取消");
-                            if tracked { b.bar.abandon(); }
-                        }
-                    }
-                }
-                let _ = std::fs::remove_file(target_path);
-                if std::fs::rename(&tmp_path, target_path).is_err() {
-                    cleanup_strategy_temp(target_path);
-                    bail!("胜出后端的临时文件不存在");
-                }
-                if verify_enabled && !verify_downloaded_file(target_path) {
-                    let _ = std::fs::remove_file(target_path);
-                    cleanup_strategy_temp(target_path);
-                    bail!("{}: 下载内容签名不匹配", sname);
-                }
-                cleanup_strategy_temp(target_path);
-                let file_size = std::fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
-                let elapsed = start.elapsed();
-                return Ok(DownloadReport {
-                    strategy_used: sname.to_string(),
-                    total_bytes: file_size, elapsed, url,
-                    target_path: target_path.to_path_buf(),
-                });
-            }
-            Err(e) => {
-                if CTRL_C_PRESSED.load(Ordering::Relaxed) {
-                    let _ = std::fs::remove_file(target_path);
-                    cleanup_strategy_temp(target_path);
-                    bail!("{}", e);
-                }
-                // 失败信息显示在当前行，不动固定布局
-                for b in &bars {
-                    if tracked { b.bar.abandon(); }
-                }
-                cleanup_strategy_temp(target_path);
-                last_error = Some(format!("{}", e));
-            }
+        // 该后端所有 URL 均失败
+        if tracked { ctx.bar.abandon(); }
+        if let Some(ref err) = last_error {
+            eprintln!("  {} {}: no usable URL, last error: {}", color::yellow("跳过"), sname, err);
         }
     }
 
-    // 所有策略均失败
-    let _ = std::fs::remove_file(target_path);
-    cleanup_strategy_temp(target_path);
+    // 所有后端均失败
     if CTRL_C_PRESSED.load(Ordering::Relaxed) {
-        progress().clear().ok();
         bail!("用户取消 (Ctrl+C)");
     }
-    progress().clear().ok();
     bail!("下载失败: {}", last_error.as_deref().unwrap_or("未知错误"));
 }
 
@@ -866,7 +657,7 @@ fn probe_alive_urls(urls: &[String]) -> Vec<String> {
     for url in urls {
         let tx = tx.clone();
         let url = url.clone();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             // 使用与下载一致的 Chrome120 UA，避免 CDN 屏蔽非浏览器请求
             let agent = ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(5))

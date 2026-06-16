@@ -117,7 +117,7 @@ fn run_aria2c(
     // ── 启动 aria2c（管道 stdout，stderr 静默） ──
     let mut child = cmd
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())   // ← 关键：管道 stdout！
+        .stdout(Stdio::piped())   // aria2c 的进度行输出在 stdout，不是 stderr
         .stderr(Stdio::null())
         .spawn()
         .context("启动 aria2c 失败")?;
@@ -144,17 +144,34 @@ fn run_aria2c(
             if trimmed.is_empty() {
                 continue;
             }
-            if let Some((cur, total)) = parse_aria2_progress(trimmed) {
-                reader_cancel.mark_progress();
-                if let Some(ref ctx) = reader_pb {
-                    if total > 0 && ctx.bar.length().map(|l| l == 0).unwrap_or(true) {
-                        ctx.bar.set_length(total);
-                    }
-                    ctx.bar.set_position(cur);
-                    if total > 0 {
-                        ctx.bar.set_prefix(crate::download::format_decimal_progress(cur, total));
-                    }
+            let (cur, total, speed_str) = match parse_aria2_progress(trimmed) {
+                Some((c, t, s)) => (c, t, s),
+                None => continue,
+            };
+            reader_cancel.mark_progress();
+            if let Some(ref ctx) = reader_pb {
+                if total > 0 {
+                    ctx.bar.set_length(total);
                 }
+                ctx.bar.set_position(cur);
+                let prefix = if total > 0 {
+                    crate::download::format_decimal_progress(cur, total)
+                } else {
+                    String::new()
+                };
+                // 在状态中附加 aria2c 实时速度（MiB→MB 显示）
+                let speed_decimal = speed_str.map(|s| s
+                    .replace("MiB", "MB")
+                    .replace("KiB", "KB")
+                    .replace("GiB", "GB"));
+                let status = if let Some(ref speed) = speed_decimal {
+                    ctx.bar.set_prefix(format!("{} @ {}", prefix, speed));
+                    "下载中"
+                } else {
+                    ctx.bar.set_prefix(prefix);
+                    "下载中"
+                };
+                ctx.set_status(status);
             }
         }
     });
@@ -200,7 +217,7 @@ fn run_aria2c(
     Ok(())
 }
 
-fn parse_aria2_progress(line: &str) -> Option<(u64, u64)> {
+fn parse_aria2_progress(line: &str) -> Option<(u64, u64, Option<String>)> {
     // 实际 stdout 输出格式: [#6ec300 205MiB/228MiB(89%) CN:16 DL:3.9MiB ETA:5s]
     // 无 "SIZE:" 前缀。合并的 \r 块可能包含多段，只取第一个内容段。
     let segment = line.split(|c: char| c == '\r' || c == '\n').next()?;
@@ -216,7 +233,23 @@ fn parse_aria2_progress(line: &str) -> Option<(u64, u64)> {
 
     let cur = parse_aria2_size(cur_str)?;
     let total = parse_aria2_size(total_str)?;
-    if total == 0 { None } else { Some((cur.min(total), total)) }
+
+    // 提取 DL: 后面的速度（如 DL:3.9MiB → "3.9MiB/s"）
+    let speed = segment.split(' ').find_map(|part| {
+        let part = part.trim();
+        part.strip_prefix("DL:").map(|v| {
+            let v = v.trim();
+            if v.ends_with("MiB") || v.ends_with("KiB") || v.ends_with("GiB") {
+                format!("{}/s", v)
+            } else if v.ends_with('B') {
+                format!("{}/s", v)
+            } else {
+                format!("{}B/s", v)
+            }
+        })
+    });
+
+    Some((cur, total, speed))
 }
 
 fn parse_aria2_size(s: &str) -> Option<u64> {

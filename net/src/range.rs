@@ -101,7 +101,7 @@ pub fn parallel_download(
         let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
-                .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta:.yellow}")
+                .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red}")
                 .unwrap()
                 .progress_chars("━━━"),
         );

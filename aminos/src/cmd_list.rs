@@ -216,17 +216,21 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     // Sort by name case-insensitive
     rows.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
 
+    // 序号宽度
+    let index_w = format!("{}", rows.len()).len();
+
     let max_name = rows.iter().map(|r| r.0.display_width()).max().unwrap_or(4).max(4).min(40);
     let max_ver = rows.iter().map(|r| r.1.display_width()).max().unwrap_or(4).max(4);
 
     // ── 分组显示 ──
     if opts.group {
-        return show_grouped(&rows, max_name, max_ver);
+        return show_grouped(&rows, max_name, max_ver, index_w);
     }
 
     // ── 平铺显示（默认） ──
     println!();
-    let header = format!("{}{}{}{}{}{}",
+    let header = format!("{}{}{}{}{}{}{}",
+        pad("#", index_w + 1),
         pad("名称", max_name + 2),
         pad("版本", max_ver + 2),
         pad("下载", 8 + 1),
@@ -236,7 +240,8 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     println!("{}", header);
     println!("{}", "-".repeat(header.display_width()));
 
-    for (name, ver, _status, status_color, dl_status, dl_color, src_label, src_color, _cat, installer) in &rows {
+    for (i, (name, ver, _status, status_color, dl_status, dl_color, src_label, src_color, _cat, installer)) in rows.iter().enumerate() {
+        let idx = i + 1;
         let name_d = truncate(name, max_name);
         let ver_d = truncate(ver, max_ver + 1);
         let ins_color = match *installer {
@@ -244,7 +249,9 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
             _ => color::ansi::RESET,
         };
         println!(
-            "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+            color::gray(&format!("{:>w$}", idx, w = index_w)),
+            " ",
             pad(&name_d, max_name + 2),
             pad(&ver_d, max_ver + 2),
             dl_color,
@@ -259,7 +266,6 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
             pad(src_label, 4),
             ins_color,
             pad(installer, 6),
-            color::ansi::RESET,
         );
     }
 
@@ -304,27 +310,33 @@ fn show_grouped(
     rows: &[(String, String, &str, &str, &str, &str, &str, &str, String, &str)],
     max_name: usize,
     max_ver: usize,
+    index_w: usize,
 ) -> anyhow::Result<()> {
     let mut by_cat: BTreeMap<String, Vec<&(String, String, &str, &str, &str, &str, &str, &str, String, &str)>> = BTreeMap::new();
     for r in rows {
         by_cat.entry(r.8.clone()).or_default().push(r);
     }
+    let mut global_idx = 0usize;
     for (cat, entries) in &by_cat {
         println!("\n{}  {}", color::bold_yellow(format!("{}", cat)), color::gray(format!("({})", entries.len())));
         // 子表头
-        println!("  {}{}{}{}",
+        println!("  {}{}{}{}{}",
+            pad("#", index_w + 1),
             pad("名称", max_name + 2),
             pad("版本", max_ver + 2),
             pad("安装", 8),
             pad("方式", 6));
         for (name, ver, _status, status_color, _dl_status, _dl_color, _src_label, _src_color, _cat, installer) in entries {
+            global_idx += 1;
             let name_d = truncate(name, max_name);
             let ver_d = truncate(ver, max_ver + 1);
             let ins_color = match *installer {
                 "便携" => color::ansi::CYAN,
                 _ => color::ansi::RESET,
             };
-            println!("  {}{}{}{}{}{}{}{}",
+            println!("  {}{}{}{}{}{}{}{}{}",
+                color::gray(&format!("{:>w$}", global_idx, w = index_w)),
+                " ",
                 pad(&name_d, max_name + 2),
                 pad(&ver_d, max_ver + 2),
                 status_color,
@@ -332,7 +344,6 @@ fn show_grouped(
                 color::ansi::RESET,
                 ins_color,
                 pad(installer, 6),
-                color::ansi::RESET,
             );
         }
     }
