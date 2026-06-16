@@ -192,6 +192,8 @@ enum TagCmd {
 }
 
 fn main() {
+    color::ansi::enable_ansi();
+
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(e) => {
@@ -745,12 +747,10 @@ fn cmd_config(open: bool) {
     // 确保配置文件存在（首次自动创建默认配置）
     let cfg_file = config::ensure_config();
     let cfg_dir = cfg_file.parent().unwrap_or(&cfg_file).to_path_buf();
-    let envs_dir = cfg_dir.join("envs");
 
     if open {
         // 确保目录存在
         let _ = std::fs::create_dir_all(&cfg_dir);
-        let _ = std::fs::create_dir_all(&envs_dir);
         let _ = std::process::Command::new("explorer")
             .arg(&*cfg_dir.to_string_lossy())
             .spawn();
@@ -762,7 +762,6 @@ fn cmd_config(open: bool) {
     println!();
     println!("  {}", bold_yellow("文件:"));
     println!("    {}    {}", pad_left(&cyan("配色配置"), 16), gray(&*cfg_file.to_string_lossy()));
-    println!("    {}    {}", pad_left(&cyan("环境定义"), 16), gray(&*envs_dir.to_string_lossy()));
     println!();
     println!("  {}  {}", gray("打开目录:"), cyan("e config -o"));
     println!("  {}  {}", gray("清除配置:"), cyan("e config --clear"));
@@ -904,6 +903,7 @@ fn print_subcommand_help(cmd: &str) {
             println!();
             println!("  {} 此命令已移除", bold_yellow("说明:"));
             println!("  {} 请使用 e tag create <名称> 创建 tag，然后用 e gen 生成脚本", gray(""));
+            println!("  {} 生成的脚本仅适用于 cmd.exe，请勿在 PowerShell 中使用", gray(""));
         }
         "tag" => {
             println!("  {} — {}", bold_cyan("e tag"), green("管理环境配置 tag"));
@@ -962,6 +962,7 @@ fn print_subcommand_help(cmd: &str) {
             println!();
             println!("  {}", bold_yellow("说明:"));
             println!("  {} 合并指定 tag 的配置，生成 cmd 脚本", gray(""));
+            println!("  {} 生成的脚本仅适用于 cmd.exe，请勿在 PowerShell 中执行", gray(""));
             println!("  {} 脚本包含 PATH 追加、环境变量设置", gray(""));
             println!("  {} tag 顺序决定优先级：后列出的优先", gray(""));
             println!();
@@ -1078,7 +1079,8 @@ fn print_examples() {
 
     println!("  {}", bold_yellow("使用方式:"));
     println!("    {}  {}", gray("1."), gray("e gen python git --copy"));
-    println!("    {}  {}", gray("2."), gray("Ctrl+V 粘贴到 cmd 终端执行"));
+    println!("    {}  {}", gray("2."), gray("Ctrl+V 粘贴到 cmd.exe 终端执行"));
+    println!("    {}  {}", gray("注: 生成的脚本仅适用于 cmd.exe，不可用于 PowerShell"), gray(""));
     println!();
 
     println!("  {}", bold_yellow("配置文件:"));
