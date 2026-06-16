@@ -212,7 +212,13 @@ pub fn clear_config() -> bool {
 fn load_config() -> EConfig {
     let path = get_config_path();
     match std::fs::read_to_string(&path) {
-        Ok(content) => serde_yaml::from_str(&content).unwrap_or_default(),
+        Ok(content) => {
+            serde_yaml::from_str(&content).unwrap_or_else(|e| {
+                eprintln!("{} 配置文件 {} 解析失败: {}", color::yellow("注意:"), path.display(), e);
+                eprintln!("{} 将使用默认配色", color::gray("提示:"));
+                EConfig::default()
+            })
+        }
         Err(_) => {
             // 文件不存在，创建默认配置并告知用户
             let created = ensure_config();
@@ -255,7 +261,10 @@ pub fn get_path_color_map() -> HashMap<String, String> {
     merge_maps(default_path_colors(), yaml_all)
 }
 
-/// 通配符匹配（仅支持 *）
+/// 通配符匹配（仅支持 `*`，内部 `*` 为非贪心匹配）。
+///
+/// 注意：多个 `*` 时，中间的 `*` 以首次匹配为准（非贪心），
+/// 例如 `*\\foo\\*` 匹配 `C:\\foo\\bar\\foo\\baz` 会返回 `true`（预期行为）。
 pub fn wildmatch(pattern: &str, text: &str) -> bool {
     let pattern_lower = pattern.to_lowercase();
     let text_lower = text.to_lowercase();

@@ -429,7 +429,7 @@ fn show_env_vars(left_align: bool, semicolon: bool, no_color: bool) {
     env_vars.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
 
     let max_name_len = env_vars.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
-    let term_w = terminal_width() as usize;
+    let term_w = activate::terminal_width();
     let prefix_indent = max_name_len + 3; // 名字 + " = "
 
     println!();
@@ -487,82 +487,64 @@ fn show_env_vars(left_align: bool, semicolon: bool, no_color: bool) {
     }
 }
 
-/// 将长值按可用宽度分行，优先在 `;` 处断开
+/// 将长值按可用宽度分行，优先在 `;` 处断开。
+///
+/// 使用 `display_width` 计算宽度，正确处理 CJK 等宽字符。
 fn wrap_value(value: &str, avail: usize) -> Vec<String> {
     if value.display_width() <= avail {
         return vec![value.to_string()];
     }
 
     let mut result = Vec::new();
-    let mut pos = 0;
     let chars: Vec<char> = value.chars().collect();
     let len = chars.len();
+    let mut line_start = 0;
 
-    while pos < len {
-        // 计算从 pos 开始最远能到哪
-        let end = if pos + avail >= len {
-            len
-        } else {
-            // 在 [pos, pos+avail) 范围内找最后一个 `;`
-            let search_end = (pos + avail).min(len);
-            let mut break_at = search_end;
-            // 从后往前找 `;`
-            for i in (pos..search_end).rev() {
+    while line_start < len {
+        // 从 line_start 开始，逐字累加 display_width，找到不超过 avail 的最远位置
+        let mut dw = 0usize;
+        let mut cut = line_start;
+        for i in line_start..len {
+            let cw = chars[i..=i].iter().collect::<String>().display_width();
+            if dw + cw > avail {
+                break;
+            }
+            dw += cw;
+            cut = i + 1;
+        }
+
+        if cut >= len {
+            result.push(chars[line_start..].iter().collect());
+            break;
+        }
+
+        // 在 [line_start, cut) 范围内从后往前找断点
+        let break_at = {
+            let mut found = cut;
+            // 优先找 `;`
+            for i in (line_start..cut).rev() {
                 if chars[i] == ';' {
-                    break_at = i + 1; // 包括分号
+                    found = i + 1;
                     break;
                 }
             }
-            // 如果没有分号，找空格
-            if break_at == search_end {
-                for i in (pos..search_end).rev() {
+            // 其次找空格/逗号
+            if found == cut {
+                for i in (line_start..cut).rev() {
                     if chars[i] == ' ' || chars[i] == ',' {
-                        break_at = i + 1;
+                        found = i + 1;
                         break;
                     }
                 }
             }
-            break_at
+            found
         };
 
-        let slice: String = chars[pos..end].iter().collect();
-        result.push(slice);
-        pos = end;
+        result.push(chars[line_start..break_at].iter().collect());
+        line_start = break_at;
     }
 
     result
-}
-
-/// 获取终端宽度（列数），失败默认 120
-fn terminal_width() -> u16 {
-    #[repr(C)]
-    struct ConsoleScreenBufferInfo {
-        dw_size: [u16; 2],
-        dw_cursor: [u16; 2],
-        w_attrs: u16,
-        sr_window: [u16; 4],
-        dw_max: [u16; 2],
-    }
-
-    unsafe extern "system" {
-        fn GetStdHandle(id: u32) -> isize;
-        fn GetConsoleScreenBufferInfo(h: isize, info: *mut ConsoleScreenBufferInfo) -> i32;
-    }
-
-    const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32;
-
-    unsafe {
-        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        if handle == -1 || handle == 0 {
-            return 120;
-        }
-        let mut info: ConsoleScreenBufferInfo = std::mem::zeroed();
-        if GetConsoleScreenBufferInfo(handle, &mut info) != 0 {
-            (info.sr_window[2] - info.sr_window[0] + 1).max(40)
-        } else {
-            120
-        }
-    }
 }
 
 // ── 显示 PATH ──────────────────────────────────
@@ -626,11 +608,13 @@ fn cmd_tag_edit(name: &str) {
     match activate::resolve_tag(name) {
         Some((canonical, _)) => {
             let path = activate::tags_dir().join(format!("{}.yaml", canonical));
-            let _ = std::process::Command::new("notepad")
-                .arg(&*path.to_string_lossy())
-                .spawn();
-            println!("{} 已用记事本打开 tag '{}'", green("✓"), cyan(&canonical));
-            println!("{} 保存后关闭记事本即可生效", gray("提示:"));
+            match std::process::Command::new("notepad").arg(&*path.to_string_lossy()).spawn() {
+                Ok(_) => {
+                    println!("{} 已用记事本打开 tag '{}'", green("✓"), cyan(&canonical));
+                    println!("{} 保存后关闭记事本即可生效", gray("提示:"));
+                }
+                Err(e) => eprintln!("{} 无法打开记事本: {}", red("错误:"), e),
+            }
         }
         None => eprintln!("{} tag '{}' 不存在", red("错误:"), name),
     }
@@ -898,13 +882,6 @@ fn print_subcommand_help(cmd: &str) {
                 pad_left(&cyan("-n, --no-color"), 16),
                 gray("不使用颜色输出"));
         }
-        "activate" | "deactivate" => {
-            println!("  {} — {}", bold_cyan(format!("e {}", cmd)), green(""));
-            println!();
-            println!("  {} 此命令已移除", bold_yellow("说明:"));
-            println!("  {} 请使用 e tag create <名称> 创建 tag，然后用 e gen 生成脚本", gray(""));
-            println!("  {} 生成的脚本仅适用于 cmd.exe，请勿在 PowerShell 中使用", gray(""));
-        }
         "tag" => {
             println!("  {} — {}", bold_cyan("e tag"), green("管理环境配置 tag"));
             println!();
@@ -971,17 +948,6 @@ fn print_subcommand_help(cmd: &str) {
             println!("    {}  {}", gray("e gen --copy python"), gray(""));
             println!("    {}  {}", gray("e gen python git mysql"), gray(""));
             println!("    {}  {}", gray("复制后直接粘贴到终端执行"), gray(""));
-        }
-        "list" => {
-            println!("  {} — {}", bold_cyan("e list"), green("列出所有 tag"));
-            println!();
-            println!("  {} 此命令已改为 e tag list", bold_yellow("注意:"));
-            println!("  {} 请使用: {}", gray(""), cyan("e tag list"));
-            println!();
-            println!("  {}", bold_yellow("说明:"));
-            println!("  {} 显示 %LOCALAPPDATA%\\e\\tags\\ 下的所有 tag", gray(""));
-            println!("  {} 每个 tag 包含 PATH 目录列表和环境变量", gray(""));
-            println!("  {} 使用 e gen 组合多个 tag 生成脚本", gray(""));
         }
         "config" => {
             println!("  {} — {}", bold_cyan("e config"), green("显示/打开配置目录"));

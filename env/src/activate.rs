@@ -517,7 +517,7 @@ fn cell_text(text: &str, col_w: usize) -> String {
 }
 
 /// 获取终端宽度（Windows API）
-fn terminal_width() -> usize {
+pub fn terminal_width() -> usize {
     #[repr(C)]
     struct ConsoleScreenBufferInfo {
         dw_size: [u16; 2],
