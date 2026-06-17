@@ -84,7 +84,7 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
 
     println!();
     println!("  {}", color::gray(format!("配置文件: {}", net::config::config_file_path().to_string_lossy())));
-    println!("  {}", color::gray(format!("as downloader -o  在资源管理器中打开")));
+    println!("  {}", color::gray(format!("{}  在资源管理器中打开", cmd_names::DOWNLOADER_OPEN)));
     println!();
     Ok(())
 }
@@ -129,7 +129,7 @@ pub fn run_downloader_config(open: bool) -> anyhow::Result<()> {
     println!("    {}", color::gray("目录:"));
     println!("      {}", dir.display());
     println!();
-    println!("    {}", color::gray(format!("as downloader -o  在资源管理器中打开")));
+    println!("    {}", color::gray(format!("{}  在资源管理器中打开", cmd_names::DOWNLOADER_OPEN)));
     println!();
 
     if !path.is_file() {

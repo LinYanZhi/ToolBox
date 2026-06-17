@@ -1,4 +1,5 @@
 use crate::downloader;
+use crate::cmd_names;
 
 pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool) -> anyhow::Result<()> {
     if open {
@@ -7,7 +8,7 @@ pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool) -> anyho
 
     if let Some(args) = set {
         if args.len() < 2 {
-            anyhow::bail!("用法: as downloader set <名称> on|off");
+            anyhow::bail!("用法: {} set <名称> on|off", cmd_names::DOWNLOADER_SET);
         }
         let name = &args[0];
         let state = &args[1];
@@ -23,5 +24,6 @@ pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool) -> anyho
         return downloader::run_downloader_list();
     }
 
-    anyhow::bail!("请指定操作：--list 列出后端，set <名称> on|off 切换状态，-o 打开配置目录");
+    anyhow::bail!("请指定操作：{} 列出后端，set <名称> on|off 切换状态，{} 打开配置目录",
+        cmd_names::DOWNLOADER_LIST, cmd_names::DOWNLOADER_OPEN);
 }

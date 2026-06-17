@@ -124,7 +124,7 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
     let lower = name.to_lowercase();
     let dir = paths::apps_source_dir();
     if !dir.is_dir() {
-        bail!("未找到源定义。请先运行: as config source update");
+        bail!("未找到源定义。请先运行: as source -u");
     }
 
     // 1. Exact match
@@ -166,7 +166,7 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
         }
     }
 
-    bail!("未找到软件 '{}' 的定义。请先运行: as config source update", name)
+    bail!("未找到软件 '{}' 的定义。请先运行: as source -u", name)
 }
 
 /// 读取自研工具定义（从 source/tools/ 查找）

@@ -113,7 +113,8 @@ pub fn run_list() -> anyhow::Result<()> {
     }
 
     println!();
-    println!("{}", color::gray(format!("安装: {} <名称>   卸载: {} <名称>", cmd_names::TOOL_ADD, cmd_names::TOOL_REMOVE)));
+    println!("{}", color::gray(format!("查看: {}    安装: {} <名称>   卸载: {} <名称>",
+        cmd_names::TOOL_LIST, cmd_names::TOOL_ADD, cmd_names::TOOL_REMOVE)));
     Ok(())
 }
 

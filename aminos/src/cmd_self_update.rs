@@ -9,8 +9,9 @@ use crate::{installer, paths, pe_version, software};
 pub fn run_self_update() -> anyhow::Result<()> {
     println!("正在检查 as 更新...");
 
-    // 读取 as 自身的源定义
-    let sd = software::read_software_def("as")?;
+    // 读取 as 自身的源定义（优先 app 源，回退到工具源）
+    let sd = software::read_software_def("as")
+        .or_else(|_| software::read_tool_def("as"))?;
     let ver = &sd.default_version;
     let vi = sd.versions.get(ver)
         .ok_or_else(|| anyhow::anyhow!("as 版本 {} 未定义", ver))?;

@@ -183,7 +183,7 @@ pub fn install_software_by_def(name: &str, sd: &software::SoftwareDef, opts: &op
             if let Some(result) = registry::detect_installed(detection) {
                 let installed_ver = result.get("DisplayVersion").map(|s| s.as_str()).unwrap_or(&ver);
                 println!("⚠ {} {} 已安装在系统中。", display, installed_ver);
-                println!("  如需重新安装，请先执行: as uninstall {}", name);
+                println!("  如需重新安装，请先执行: {} {}", cmd_names::UNINSTALL, name);
                 return Ok(());
             }
         }

@@ -3,6 +3,7 @@ use std::fs;
 use anyhow::Context;
 use color;
 use crate::paths;
+use crate::cmd_names;
 
 /// 初始化 as 环境：创建 tools/bin 目录，默认仅打印 PATH 提示，
 /// -g/--global 则写入用户 PATH 注册表。
@@ -76,7 +77,7 @@ pub fn run_init(global: bool) -> anyhow::Result<()> {
         }
         println!();
         println!("  或使用 -g/--global 自动写入用户 PATH 注册表：");
-        println!("    {}", color::cyan("as tool init -g"));
+        println!("    {}", color::cyan(&format!("{} -g", cmd_names::TOOL_INIT)));
     }
 
     Ok(())

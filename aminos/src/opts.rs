@@ -18,23 +18,13 @@ fn styles() -> styling::Styles {
     about = "轻量级 Windows 软件包管理器",
     styles = styles(),
     color = clap::ColorChoice::Always,
-    disable_help_flag = true,
-    disable_version_flag = true,
     disable_help_subcommand = true,
     next_help_heading = "选项",
 )]
 pub struct Cli {
-    /// 显示版本号
-    #[arg(short = 'V', long = "version", global = true)]
-    pub version_flag: bool,
-
     /// 显示使用示例
     #[arg(short = 'e', long = "example", global = true)]
     pub example: bool,
-
-    /// 显示帮助信息
-    #[arg(short = 'h', long = "help", global = true)]
-    pub help: bool,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -242,6 +232,7 @@ pub struct DownloaderOpts {
 }
 
 #[derive(Subcommand)]
+#[command(arg_required_else_help = true)]
 pub enum ToolCli {
     /// 初始化环境（默认打印 PATH 提示，-g 写入注册表）
     Init(ToolInitOpts),
@@ -278,7 +269,7 @@ pub struct ToolAddOpts {
     pub download_only: bool,
 
     /// 升级模式
-    #[arg(long = "upgrade")]
+    #[arg(short = 'u', long = "upgrade")]
     pub upgrade: bool,
 }
 

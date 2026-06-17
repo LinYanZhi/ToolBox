@@ -30,36 +30,23 @@ fn main() {
     color::enable_ansi();
     net::backend::set_tools_bin_dir(paths::tools_bin_dir());
 
-    // 提前处理 --version，避免和子命令的 ver 参数冲突
-    let raw_args: Vec<String> = std::env::args().collect();
-    let has_version = if raw_args.len() == 2 {
-        raw_args[1] == "--version" || raw_args[1] == "-V"
-    } else {
-        false
-    };
-
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
+            // 帮助/版本信息直接输出（不走翻译和包红）
+            if e.kind() == clap::error::ErrorKind::DisplayHelp {
+                let _ = e.print();
+                std::process::exit(0);
+            }
+            if e.kind() == clap::error::ErrorKind::DisplayVersion {
+                let _ = e.print();
+                std::process::exit(0);
+            }
             let msg = translate_clap_error(&e);
             eprintln!("  {}", color::bold_red(msg));
             std::process::exit(1);
         }
     };
-
-    if cli.version_flag || has_version {
-        println!("as {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-
-    if cli.help {
-        let cmd = <Cli as clap::CommandFactory>::command();
-        let _ = cmd
-            .subcommand_help_heading("子命令:")
-            .print_help();
-        println!();
-        return;
-    }
 
     if cli.example {
         print_examples();
