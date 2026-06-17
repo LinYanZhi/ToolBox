@@ -47,15 +47,15 @@ pub fn run_add(opts: ToolAddOpts) -> anyhow::Result<()> {
             println!("  ▶ {} {} ...", display, reason);
         }
 
-        let install_opts = crate::opts::InstallOpts::new(
-            vec![n.clone()],
-            if opts.version.is_empty() { None } else { Some(opts.version.clone()) },
-            false,
-            opts.renew,
-            opts.download_only,
-            None,
-            false,
-        );
+        let install_opts = crate::opts::InstallOpts {
+            names: vec![n.clone()],
+            version: opts.version.clone(),
+            gui: false,
+            renew: opts.renew,
+            download_only: opts.download_only,
+            inst_type: None,
+            upgrade: false,
+        };
         if let Err(e) = installer::install_tool(&n, &install_opts) {
             eprintln!("  {} {}: {}", color::yellow("跳过"), name, e);
             failed += 1;

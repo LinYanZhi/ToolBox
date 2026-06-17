@@ -73,7 +73,7 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
 /// 升级模式：检测是否已安装，卸载旧版后安装新版
 fn upgrade_and_install(name: &str, sd: &crate::software::SoftwareDef, opts: &InstallOpts) -> anyhow::Result<()> {
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
-    let ver = if opts.version.is_empty() { &sd.default_version } else { &opts.version };
+    let ver = opts.version.as_deref().unwrap_or(&sd.default_version);
 
     // 检查是否已安装
     let installed = {

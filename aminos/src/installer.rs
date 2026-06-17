@@ -76,70 +76,71 @@ pub fn install_software_by_def(name: &str, sd: &software::SoftwareDef, opts: &op
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
     // 2. Resolve version — 如果未指定，检查是否有多种安装类型可供选择
-    let ver = if opts.version.is_empty() {
-        // 按安装类型分组版本
-        let mut by_type: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
-        for (vk, vi) in &sd.versions {
-            let itype = if vi.installer_type.is_empty() { "installer" } else { &vi.installer_type };
-            by_type.entry(itype).or_default().push(vk.as_str());
-        }
+    let ver = match &opts.version {
+        None => {
+            // 按安装类型分组版本
+            let mut by_type: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+            for (vk, vi) in &sd.versions {
+                let itype = if vi.installer_type.is_empty() { "installer" } else { &vi.installer_type };
+                by_type.entry(itype).or_default().push(vk.as_str());
+            }
 
-        if by_type.len() >= 2 {
-            // 检查用户是否通过 --type 指定了安装类型
-            if let Some(ref preferred) = opts.inst_type {
-                let matched = by_type.iter().find(|(itype, _)| **itype == preferred.as_str());
-                match matched {
-                    Some((_, vers)) => vers[0].to_string(),
-                    None => {
-                        let avail: Vec<&str> = by_type.keys().map(|t| *t).collect();
-                        bail!("{}: 安装类型 '{}' 不可用（可用: {}）",
-                            display, preferred, avail.join(", "));
+            if by_type.len() >= 2 {
+                // 检查用户是否通过 --type 指定了安装类型
+                if let Some(ref preferred) = opts.inst_type {
+                    let matched = by_type.iter().find(|(itype, _)| **itype == preferred.as_str());
+                    match matched {
+                        Some((_, vers)) => vers[0].to_string(),
+                        None => {
+                            let avail: Vec<&str> = by_type.keys().map(|t| *t).collect();
+                            bail!("{}: 安装类型 '{}' 不可用（可用: {}）",
+                                display, preferred, avail.join(", "));
+                        }
+                    }
+                } else {
+                    // 未指定 → 让用户交互选择
+                    println!("{} 有多种安装方式，请选择：", display);
+                    let mut options: Vec<(&str, Vec<&str>)> = by_type.into_iter().collect();
+                    options.sort_by(|a, b| a.0.cmp(b.0));
+
+                    for (i, (itype, vers)) in options.iter().enumerate() {
+                        let label = match *itype {
+                            "portable" => "便携版（免安装，解压即用）",
+                            "nsis" | "inno" | "exe" | "installer" => "安装版（写入注册表，需管理员）",
+                            other => other,
+                        };
+                        let ver_str = if vers.len() == 1 {
+                            vers[0].to_string()
+                        } else {
+                            format!("{}（共 {} 个版本）", vers[0], vers.len())
+                        };
+                        println!("  {}. {}  — {}  [{}]", i + 1, label, color::cyan(&ver_str), itype);
+                    }
+                    println!("  输入 1-{} 选择，或按 Enter 使用默认：", options.len());
+
+                    let mut input = String::new();
+                    let _ = std::io::stdin().read_line(&mut input);
+                    let choice = input.trim().parse::<usize>().ok()
+                        .and_then(|n| n.checked_sub(1))
+                        .filter(|&i| i < options.len());
+
+                    match choice {
+                        Some(idx) => {
+                            // 选中了某个类型，取该类型的第一个版本
+                            let (_, vers) = &options[idx];
+                            let chosen_ver = vers[0];
+                            println!("  已选择: {} {}", color::bold_green(label_of_type(options[idx].0)), color::cyan(chosen_ver));
+                            chosen_ver.to_string()
+                        }
+                        None => sd.default_version.clone(), // 回车或无效输入 → 默认
                     }
                 }
             } else {
-                // 未指定 → 让用户交互选择
-                println!("{} 有多种安装方式，请选择：", display);
-                let mut options: Vec<(&str, Vec<&str>)> = by_type.into_iter().collect();
-                options.sort_by(|a, b| a.0.cmp(b.0));
-
-                for (i, (itype, vers)) in options.iter().enumerate() {
-                    let label = match *itype {
-                        "portable" => "便携版（免安装，解压即用）",
-                        "nsis" | "inno" | "exe" | "installer" => "安装版（写入注册表，需管理员）",
-                        other => other,
-                    };
-                    let ver_str = if vers.len() == 1 {
-                        vers[0].to_string()
-                    } else {
-                        format!("{}（共 {} 个版本）", vers[0], vers.len())
-                    };
-                    println!("  {}. {}  — {}  [{}]", i + 1, label, color::cyan(&ver_str), itype);
-                }
-                println!("  输入 1-{} 选择，或按 Enter 使用默认：", options.len());
-
-                let mut input = String::new();
-                let _ = std::io::stdin().read_line(&mut input);
-                let choice = input.trim().parse::<usize>().ok()
-                    .and_then(|n| n.checked_sub(1))
-                    .filter(|&i| i < options.len());
-
-                match choice {
-                    Some(idx) => {
-                        // 选中了某个类型，取该类型的第一个版本
-                        let (_, vers) = &options[idx];
-                        let chosen_ver = vers[0];
-                        println!("  已选择: {} {}", color::bold_green(label_of_type(options[idx].0)), color::cyan(chosen_ver));
-                        chosen_ver.to_string()
-                    }
-                    None => sd.default_version.clone(), // 回车或无效输入 → 默认
-                }
+                // 只有一种安装类型
+                sd.default_version.clone()
             }
-        } else {
-            // 只有一种安装类型
-            sd.default_version.clone()
         }
-    } else {
-        opts.version.clone()
+        Some(v) => v.clone(),
     };
 
     let vi = match sd.versions.get(&ver) {
@@ -338,11 +339,7 @@ pub fn install_tool(name: &str, opts: &opts::InstallOpts) -> anyhow::Result<()> 
     let sd = software::read_tool_def(name)?;
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
-    let ver = if opts.version.is_empty() {
-        sd.default_version.clone()
-    } else {
-        opts.version.clone()
-    };
+    let ver = opts.version.clone().unwrap_or_else(|| sd.default_version.clone());
 
     let vi = match sd.versions.get(&ver) {
         Some(vi) => vi,
