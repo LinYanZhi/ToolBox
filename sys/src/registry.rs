@@ -68,6 +68,9 @@ pub fn get_uninstall_string(detection: &Detection) -> Option<String> {
 }
 
 /// 扫描所有已安装的软件（从全部 Uninstall 注册表）。
+///
+/// 自动过滤掉 Windows 系统组件（SystemComponent=1）和子组件（含 ParentDisplayName 的），
+/// 保持与 Windows 卸载面板（appwiz.cpl）一致的列表。
 pub fn scan_all_installed() -> Vec<HashMap<String, String>> {
     let mut seen = std::collections::HashSet::new();
     let mut results = Vec::new();
@@ -80,6 +83,16 @@ pub fn scan_all_installed() -> Vec<HashMap<String, String>> {
         if dn.trim().is_empty() || !seen.insert(dn.clone()) {
             return;
         }
+
+        // 过滤系统组件（SystemComponent = 1，可能存为 REG_DWORD 或 REG_SZ）
+        if is_system_component(subkey) {
+            return;
+        }
+        // 过滤子组件（有父级入口的）
+        if let Ok(_parent) = subkey.get_value::<String, _>("ParentDisplayName") {
+            return;
+        }
+
         let mut entry = HashMap::new();
         entry.insert("display_name".into(), dn);
         for f in ["DisplayVersion", "Publisher", "InstallLocation", "UninstallString"] {
@@ -152,4 +165,16 @@ where
         }
     }
     None
+}
+
+fn is_system_component(subkey: &RegKey) -> bool {
+    if let Ok(val) = subkey.get_value::<u32, _>("SystemComponent") {
+        return val == 1;
+    }
+    if let Ok(val) = subkey.get_value::<String, _>("SystemComponent") {
+        if val.trim() == "1" {
+            return true;
+        }
+    }
+    false
 }

@@ -457,11 +457,7 @@ pub fn download_with_fallback(
 
 /// 检查配置文件是否存在。
 fn config_file_exists() -> bool {
-    let local = std::env::var("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let path = local.join("aminos").join("config").join("download.toml");
-    path.is_file()
+    crate::config::config_file_path().is_file()
 }
 
 /// 从旧的 `DownloadConfig` 转换后端列表（配置文件不存在时的降级）。

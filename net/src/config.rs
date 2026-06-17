@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use crate::backend::{Aria2cBackend, BitsBackend, CurlBackend, DownloadBackend, PowerShellBackend, PowerShellInvokeBackend, RustRangeBackend, UreqBackend};
 
-/// 配置文件路径：`%LOCALAPPDATA%\aminos\config\download.toml`
+/// 配置文件路径：`%LOCALAPPDATA%\aminos\config\downloader.toml`
 pub fn config_file_path() -> PathBuf {
     let local = std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
-    local.join("aminos").join("config").join("download.toml")
+    local.join("aminos").join("config").join("downloader.toml")
 }
 
 /// 列出配置文件中的所有后端及其状态。

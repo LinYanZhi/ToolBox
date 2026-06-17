@@ -80,6 +80,14 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     }
 
     let reg_installed = registry::scan_all_installed();
+    // 应用名称规则过滤（隐藏 Visual C++ SDK 等噪音条目）
+    let list_cfg = crate::list_config::ListConfig::load();
+    let reg_installed: Vec<_> = reg_installed.into_iter()
+        .filter(|reg| {
+            let dn = reg.get("display_name").map(|s| s.as_str()).unwrap_or("");
+            !list_cfg.is_hidden(dn)
+        })
+        .collect();
     let installed_db = software::read_installed_db().unwrap_or_default();
     let defs = software::list_software_defs()?;
     let dl_cache = scan_download_cache();
@@ -219,8 +227,19 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
     // 序号宽度
     let index_w = format!("{}", rows.len()).len();
 
-    let max_name = rows.iter().map(|r| r.0.display_width()).max().unwrap_or(4).max(4).min(40);
+    let max_name_content = rows.iter().map(|r| r.0.display_width()).max().unwrap_or(4).max(4);
     let max_ver = rows.iter().map(|r| r.1.display_width()).max().unwrap_or(4).max(4);
+
+    // 自适应列宽：根据终端宽度动态分配
+    // 固定列占 (idx_w + 1) + 9(下载) + 9(状态) + 4(源) + 6(方式) = idx_w + 29
+    // 版本列至少 max_ver + 2，剩余给名称列
+    let tw = terminal_width() as usize;
+    let fixed_other = index_w + 29 + max_ver + 2; // idx_w + 版本 + 其他固定列
+    let max_name = if tw > fixed_other + 10 {
+        max_name_content.min(tw - fixed_other)
+    } else {
+        max_name_content.min(40) // 终端太窄时回退到 40
+    };
 
     // ── 分组显示 ──
     if opts.group {
@@ -271,6 +290,13 @@ pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
 
     println!("\n{}", color::gray(format!("共 {} 项", rows.len())));
     Ok(())
+}
+
+/// 获取终端宽度（列数），失败时默认 80。
+fn terminal_width() -> u16 {
+    terminal_size::terminal_size()
+        .map(|(w, _h)| w.0)
+        .unwrap_or(80)
 }
 
 /// 显示类别概览

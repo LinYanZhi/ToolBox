@@ -14,6 +14,7 @@ mod downloader;
 mod helpers;
 mod help;
 mod installer;
+mod list_config;
 mod opts;
 mod paths;
 mod pe_version;
