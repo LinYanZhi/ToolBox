@@ -61,7 +61,7 @@ pub enum Commands {
     Source(SourceOpts),
     /// 管理下载引擎后端
     Downloader(DownloaderOpts),
-    /// 管理自研工具（init/add/list/remove）
+    /// 管理自研工具
     #[command(subcommand)]
     Tool(ToolCli),
 }

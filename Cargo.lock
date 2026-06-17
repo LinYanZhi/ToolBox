@@ -837,6 +837,7 @@ dependencies = [
 name = "pp"
 version = "0.0.1"
 dependencies = [
+ "clap",
  "color",
 ]
 
@@ -1079,6 +1080,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 name = "ss"
 version = "0.0.1"
 dependencies = [
+ "clap",
  "color",
 ]
 

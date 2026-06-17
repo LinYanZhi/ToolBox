@@ -5,73 +5,103 @@ mod scanner;
 
 use std::path::Path;
 
-use clap::Parser;
+use clap::{Parser, CommandFactory, builder::styling};
 use color::*;
 use display::Formatter;
 use scanner::ItemInfo;
+
+fn styles() -> styling::Styles {
+    styling::Styles::styled()
+        .header(styling::AnsiColor::Green.on_default().bold())
+        .usage(styling::AnsiColor::Green.on_default().bold())
+        .literal(styling::AnsiColor::Cyan.on_default().bold())
+        .placeholder(styling::AnsiColor::Yellow.on_default().italic())
+        .error(styling::AnsiColor::Red.on_default().bold())
+        .valid(styling::AnsiColor::Cyan.on_default().bold())
+        .invalid(styling::AnsiColor::Yellow.on_default())
+}
 
 #[derive(Parser)]
 #[command(
     name = "ls",
     version = version_str(),
     about,
+    styles = styles(),
+    color = clap::ColorChoice::Always,
     disable_help_flag = true,
     disable_version_flag = true,
 )]
 struct Cli {
+    /// 要列出的目录路径（默认为当前目录）
     #[arg(default_value = ".")]
     directory: String,
 
+    /// 不使用颜色输出
     #[arg(short = 'n', long = "no-color")]
     no_color: bool,
 
+    /// 排序: default name suffix create update
     #[arg(short = 's', long = "sort", default_value = "default")]
     sort: String,
 
+    /// 排除指定后缀（如 .txt .md）
     #[arg(long = "exclude", num_args = 1..)]
     exclude: Vec<String>,
 
+    /// 只包含指定后缀（如 .rs .py）
     #[arg(short = 'i', long = "include", num_args = 1..)]
     include: Vec<String>,
 
+    /// 只显示文件
     #[arg(short = 'f', long = "only-files")]
     only_files: bool,
 
+    /// 只显示目录
     #[arg(short = 'd', long = "only-dirs")]
     only_dirs: bool,
 
+    /// 显示完整路径
     #[arg(short = 'a', long = "abs-path")]
     abs_path: bool,
 
+    /// 右对齐文件名
     #[arg(short = 'r', long = "right-align")]
     right_align: bool,
 
+    /// 显示文件大小
     #[arg(short = 'z', long = "size")]
     size: bool,
 
-    #[arg(short = 't', long = "tree", require_equals = true, default_missing_value = "-1", num_args = 0..=1)]
-    tree: Option<i32>,
+    /// 树形显示（如 -t、-t 3、-t 路径）
+    #[arg(short = 't', long = "tree", default_missing_value = "", num_args = 0..=1)]
+    tree: Option<String>,
 
+    /// 检查链接信息
     #[arg(long = "link")]
     link: Option<String>,
 
     /// 显示配置文件路径
     #[arg(long = "config")]
     config: bool,
+
     /// 在资源管理器中打开配置目录
     #[arg(long = "config-open")]
     config_open: bool,
+
     /// 清除配置文件，恢复默认配色
     #[arg(long = "config-clear")]
     config_clear: bool,
 
-    #[arg(short = 'h', long = "help")]
+    /// 显示帮助信息
+    #[arg(short = 'h', long = "help", global = true)]
     help: bool,
 
+    /// 显示所有选项示例
     #[arg(short = 'e', long = "examples")]
     examples: bool,
 
-    #[arg(short = 'v', long = "version")]
+    /// 显示版本号
+    #[arg(short = 'v', long = "version", global = true)]
     version: bool,
 }
 
@@ -93,6 +123,28 @@ fn version_info() -> String {
     )
 }
 
+/// 解析树形参数：返回 (depth, path)
+///
+/// - `ls -t` → (-1, 用户目录)
+/// - `ls -t 3` → (3, 用户目录)
+/// - `ls -t 3 路径` → (3, 路径)
+/// - `ls -t 路径` → (-1, 路径)  ← 自动识别非数字为路径
+fn parse_tree_opt(tree: &Option<String>, dir: &str) -> (i32, String) {
+    match tree.as_ref() {
+        Some(s) if s.is_empty() => (-1, dir.to_string()),
+        Some(s) => {
+            // 先试解析为数字（深度）
+            if let Ok(n) = s.parse::<i32>() {
+                (n, dir.to_string())
+            } else {
+                // 不是数字，当作路径
+                (-1, s.to_string())
+            }
+        }
+        _ => (-1, dir.to_string()),
+    }
+}
+
 fn main() {
     let cli = match Cli::try_parse() {
         Ok(c) => c,
@@ -103,7 +155,9 @@ fn main() {
     };
 
     if cli.help {
-        print_short_help();
+        let cmd = <Cli as CommandFactory>::command();
+        cmd.next_help_heading("选项:").print_help().ok();
+        println!();
         return;
     }
 
@@ -152,6 +206,22 @@ fn main() {
 
     // 清理路径：去除可能因 shell 转义残留的尾部引号、反斜杠、空白
     let dir_str = sanitize_path(&cli.directory);
+    // 树形显示
+    if cli.tree.is_some() {
+        let (tree_depth, tree_path) = parse_tree_opt(&cli.tree, &dir_str);
+        let target = Path::new(&tree_path);
+        if !target.exists() {
+            eprintln!("错误: 目录 '{}' 不存在", target.display());
+            return;
+        }
+        if !target.is_dir() {
+            eprintln!("错误: '{}' 不是一个目录", target.display());
+            return;
+        }
+        print_tree(target, &formatter, &cli, "", tree_depth);
+        return;
+    }
+
     let target_dir = Path::new(&dir_str);
     if !target_dir.exists() {
         eprintln!("错误: 目录 '{}' 不存在（输入: {}）", target_dir.display(), cli.directory);
@@ -159,11 +229,6 @@ fn main() {
     }
     if !target_dir.is_dir() {
         eprintln!("错误: '{}' 不是一个目录（输入: {}）", target_dir.display(), cli.directory);
-        return;
-    }
-
-    if let Some(depth) = cli.tree {
-        print_tree(target_dir, &formatter, &cli, "", depth);
         return;
     }
 
@@ -219,53 +284,6 @@ fn main() {
 }
 
 /// 简洁帮助（仿 as -h 风格）
-fn print_short_help() {
-    println!("  {}", bold_cyan("ls — 轻量级目录列表工具"));
-    println!();
-    println!("  {}", bold_yellow("用法:"));
-    println!("    {} [{}]", green("ls"), gray("目录路径"));
-    println!();
-    println!("  {}", bold_yellow("选项:"));
-
-    let opts: &[(&str, &str)] = &[
-        ("-h, --help",       "显示简洁帮助"),
-        ("-e, --examples",   "显示所有选项示例"),
-        ("-v, --version",    "显示版本信息"),
-        ("-n, --no-color",   "不使用颜色输出"),
-        ("-s, --sort <排序>", "排序: default name suffix create update"),
-        ("--exclude <后缀> ...", "排除指定后缀"),
-        ("-i, --include <后缀> ...", "只包含指定后缀"),
-        ("-f, --only-files",  "只显示文件"),
-        ("-d, --only-dirs",   "只显示目录"),
-        ("-a, --abs-path",    "打印完整路径"),
-        ("-r, --right-align", "右对齐文件名"),
-        ("-z, --size",        "显示文件大小"),
-        ("-t[=N]",           "树形显示（-t=3 指定深度）"),
-        ("--link <路径>",     "检查链接信息"),
-        ("--config",          "显示配置文件路径"),
-        ("--config-open",     "在资源管理器中打开配置目录"),
-        ("--config-clear",    "清除配置文件，恢复默认配色"),
-    ];
-
-    let max_w = opts.iter().map(|(o, _)| o.display_width()).max().unwrap_or(24);
-
-    for (opt, desc) in opts {
-        println!("  {}  {}",
-            pad_left(&cyan(opt), max_w),
-            gray(desc));
-    }
-    println!();
-
-    println!("  {}  {}  {}",
-        gray("提示:"),
-        gray("查看完整示例请使用"),
-        cyan("ls -e"));
-    println!("  {}  {}  {}",
-        gray("提示:"),
-        gray("环境变量工具请使用"),
-        cyan("e -h"));
-}
-
 /// 全部示例（仿 as -e 风格）
 fn print_examples_help() {
     println!("  {}", bold_cyan("ls — 轻量级目录列表工具"));
@@ -275,7 +293,10 @@ fn print_examples_help() {
     let examples: &[(&str, &str)] = &[
         ("ls",                  "列出当前目录"),
         ("ls PATH",             "列出指定目录"),
-        ("ls -t[=N]",           "树形显示（-t=3 指定深度）"),
+        ("ls -t",               "树形显示（无限深度）"),
+        ("ls -t 3",            "树形显示（深度 3）"),
+        ("ls -t 3 路径",        "树形显示指定目录"),
+        ("ls -t 路径",          "树形显示（自动识别为路径）"),
         ("ls --exclude .txt .md", "排除指定后缀"),
         ("ls -i .rs .py",       "只包含指定后缀"),
         ("ls -a",               "显示完整路径"),
@@ -301,11 +322,12 @@ fn print_examples_help() {
     }
     println!();
 
-    println!("  {}", bold_yellow("环境变量/PATH（需安装 e 工具）"));
+    println!("  {}", bold_yellow("环境变量/PATH（需安装 ss 工具）"));
     let env_examples: &[(&str, &str)] = &[
-        ("e -s", "显示所有环境变量"),
-        ("e -p", "显示 PATH"),
-        ("e -g", "打开环境变量对话框"),
+        ("ss", "显示所有环境变量"),
+        ("ss -l", "左对齐变量名"),
+        ("pp", "显示 PATH"),
+        ("ss gui", "打开环境变量对话框"),
     ];
 
     let max_w2 = env_examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(10);

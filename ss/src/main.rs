@@ -1,7 +1,56 @@
 /// ss — 轻量环境变量显示工具，根据硬编码规则给变量着色
 
-use std::process;
 use std::collections::BTreeMap;
+
+use clap::{Parser, CommandFactory, builder::styling};
+
+fn styles() -> styling::Styles {
+    styling::Styles::styled()
+        .header(styling::AnsiColor::Green.on_default().bold())
+        .usage(styling::AnsiColor::Green.on_default().bold())
+        .literal(styling::AnsiColor::Cyan.on_default().bold())
+        .placeholder(styling::AnsiColor::Yellow.on_default().italic())
+        .error(styling::AnsiColor::Red.on_default().bold())
+        .valid(styling::AnsiColor::Cyan.on_default().bold())
+        .invalid(styling::AnsiColor::Yellow.on_default())
+}
+
+#[derive(Parser)]
+#[command(
+    name = "ss",
+    version = "0.0.1",
+    about = "环境变量查看器，支持颜色区分、左对齐，支持打开系统环境变量对话框",
+    styles = styles(),
+    color = clap::ColorChoice::Always,
+    arg_required_else_help = false,
+    disable_help_flag = true,
+    disable_version_flag = true,
+)]
+struct Cli {
+    /// 左对齐变量名
+    #[arg(short = 'l', long = "left")]
+    left: bool,
+
+    /// 无颜色输出
+    #[arg(short = 'n', long = "no-color")]
+    no_color: bool,
+
+    /// 显示着色规则预览
+    #[arg(short = 's', long = "style")]
+    style: bool,
+
+    /// 打开系统环境变量对话框
+    #[arg(value_name = "命令")]
+    command: Option<String>,
+
+    /// 显示帮助信息
+    #[arg(short = 'h', long = "help", global = true)]
+    help: bool,
+
+    /// 显示版本号
+    #[arg(short = 'V', long = "version", global = true)]
+    version: bool,
+}
 
 struct Rule {
     name: &'static str,
@@ -9,9 +58,33 @@ struct Rule {
     style: &'static str,
 }
 
-/// 环境变量着色规则（源自原 ss.yaml 配置）
+/// PATH 着色规则（与 pp 保持一致）
+static PATH_RULES: &[PathRule] = &[
+    PathRule { pattern: r"C:\Windows*", color: "gray", style: "" },
+    PathRule { pattern: r"*\Notepad_file\*", color: "lightgreen", style: "" },
+    PathRule { pattern: r"*\Program Files\Git\cmd", color: "yellow", style: "" },
+    PathRule { pattern: r"*\AppData\Local\Microsoft\WindowsApps", color: "yellow", style: "" },
+    PathRule { pattern: r"*\Scripts", color: "lightyellow", style: "" },
+    PathRule { pattern: r"*\AppData\Local\Programs\Python\*", color: "lightyellow", style: "" },
+    PathRule { pattern: r"*\Anaconda3\envs\*", color: "green", style: "" },
+    PathRule { pattern: r"*\Anaconda3\condabin", color: "green", style: "" },
+    PathRule { pattern: r"*\miniconda3\condabin", color: "green", style: "" },
+    PathRule { pattern: r"*\AppData\Roaming\nvm", color: "lightcyan", style: "" },
+    PathRule { pattern: r"*\AppData\Local\nvm", color: "lightcyan", style: "" },
+    PathRule { pattern: r"C:\Program Files\nodejs", color: "cyan", style: "" },
+    PathRule { pattern: r"*\nvm_nodejs", color: "cyan", style: "" },
+    PathRule { pattern: r"*\nvm\*", color: "cyan", style: "" },
+    PathRule { pattern: r"*\mysql-8.0.35-winx64\bin", color: "lightblue", style: "" },
+    PathRule { pattern: r"*\Program Files\ShadowBot", color: "lightred", style: "" },
+    PathRule { pattern: r"\\*", color: "", style: "underline" },
+];
+
+struct PathRule {
+    pattern: &'static str,
+    color: &'static str,
+    style: &'static str,
+}
 static VAR_RULES: &[Rule] = &[
-    // 灰色（系统级变量、内部变量）
     Rule { name: "SYSTEMDRIVE", color: "gray", style: "" },
     Rule { name: "SYSTEMROOT", color: "gray", style: "" },
     Rule { name: "TEMP", color: "gray", style: "" },
@@ -20,116 +93,204 @@ static VAR_RULES: &[Rule] = &[
     Rule { name: "USERPROFILE", color: "gray", style: "" },
     Rule { name: "COMSPEC", color: "gray", style: "" },
     Rule { name: "PROMPT", color: "gray", style: "" },
-    // 绿色
     Rule { name: "CONDA_HOME", color: "green", style: "" },
-    // 浅蓝
     Rule { name: "MYSQL_HOME", color: "lightblue", style: "" },
-    // 浅青
     Rule { name: "NVM_HOME", color: "lightcyan", style: "" },
     Rule { name: "NVM_SYMLINK", color: "lightcyan", style: "" },
-    // 紫色
     Rule { name: "ENV", color: "purple", style: "" },
     Rule { name: "ENV_PATH", color: "purple", style: "" },
     Rule { name: "KMP_DUPLICATE_LIB_OK", color: "purple", style: "" },
-    // 红色
     Rule { name: "REDIS_HOME", color: "red", style: "" },
-    // 浅黄
     Rule { name: "PYTHON_HOME", color: "lightyellow", style: "" },
-    // 蓝色
     Rule { name: "JAVA_HOME", color: "blue", style: "" },
     Rule { name: "GOPATH", color: "blue", style: "" },
-    // 浅红
+    Rule { name: "PATH", color: "green", style: "bold" },
     Rule { name: "SHADOWBOT_CULTURE", color: "lightred", style: "" },
     Rule { name: "SHADOWBOT_ROOT_X64", color: "lightred", style: "" },
-    // 浅紫
     Rule { name: "RUSTUP_UPDATE_ROOT", color: "lightpurple", style: "" },
     Rule { name: "RUSTUP_DIST_SERVER", color: "lightpurple", style: "" },
-    // 变量样式规则
     Rule { name: "WT_SESSION", color: "", style: "italic" },
 ];
 
 /// 需要排除（不显示）的变量
 static EXCLUDE_NAMES: &[&str] = &[
-    // PyInstaller 内部变量
-    "_PYI_APPLICATION_HOME_DIR",
-    "_PYI_ARCHIVE_FILE",
-    "_PYI_PARENT_PROCESS_LEVEL",
-    // Python 虚拟环境旧变量
-    "_OLD_VIRTUAL_PATH",
-    "_OLD_VIRTUAL_PROMPT",
-    // 自定义环境变量
-    "_MY_CURRENT_ENV",
-    "_MY_ENV_ACTIVATED",
-    "_MY_OLD_PATH",
-    "_MY_OLD_PROMPT",
-    "_MY_FORCE",
+    "_PYI_APPLICATION_HOME_DIR", "_PYI_ARCHIVE_FILE", "_PYI_PARENT_PROCESS_LEVEL",
+    "_OLD_VIRTUAL_PATH", "_OLD_VIRTUAL_PROMPT",
+    "_MY_CURRENT_ENV", "_MY_ENV_ACTIVATED", "_MY_OLD_PATH", "_MY_OLD_PROMPT", "_MY_FORCE",
 ];
 
 fn main() {
     color::enable_ansi();
 
-    let args: Vec<String> = std::env::args().collect();
-    let no_color = args.iter().any(|a| a == "-n" || a == "--no-color");
-    let left_align = args.iter().any(|a| a == "-l" || a == "--left");
+    let cli = Cli::parse();
 
-    // ss gui — 打开环境变量对话框
-    if args.get(1).map(|s| s.as_str()) == Some("gui") {
-        let _ = process::Command::new("rundll32.exe")
-            .args(["sysdm.cpl,EditEnvironmentVariables"])
-            .spawn();
+    if cli.help {
+        let cmd = <Cli as CommandFactory>::command();
+        let _ = cmd.next_help_heading("选项:").print_help();
+        println!();
         return;
     }
 
-    // 收集所有环境变量
+    if cli.version {
+        println!("ss 0.0.1");
+        return;
+    }
+
+    if cli.style {
+        print_styles();
+        return;
+    }
+
+    let no_color = cli.no_color;
+    let left_align = cli.left;
+
+    if let Some(cmd) = &cli.command {
+        if cmd == "gui" {
+            let _ = std::process::Command::new("rundll32.exe")
+                .args(["sysdm.cpl,EditEnvironmentVariables"])
+                .spawn();
+            return;
+        }
+    }
+
     let mut vars: BTreeMap<String, String> = BTreeMap::new();
     for (k, v) in std::env::vars() {
-        if k.starts_with('=') {
-            continue;
-        }
-        if is_excluded(&k) {
-            continue;
-        }
+        if k.starts_with('=') { continue; }
+        if is_excluded(&k) { continue; }
         vars.insert(k, v);
     }
 
-    if vars.is_empty() {
-        return;
-    }
+    if vars.is_empty() { return; }
 
     let max_len = vars.keys().map(|k| k.len()).max().unwrap_or(0);
+    let prefix_width = max_len + 3;
+    let indent = " ".repeat(prefix_width);
 
     println!();
     for (name, value) in &vars {
-        if no_color {
-            if left_align {
-                println!("{:<width$} = {value}", name, width = max_len);
-            } else {
-                println!("{:>width$} = {value}", name, width = max_len);
+        let (color, style) = match_var(name);
+        let is_path = name.eq_ignore_ascii_case("PATH");
+        let spaced = if left_align {
+            format!("{name}{}", " ".repeat(max_len - name.len()))
+        } else {
+            format!("{}{name}", " ".repeat(max_len - name.len()))
+        };
+
+        if is_path && !no_color {
+            // PATH 变量的值按 pp 的规则逐段着色
+            let segments: Vec<&str> = value.split(';').collect();
+            for (i, seg) in segments.iter().enumerate() {
+                let seg = seg.trim();
+                if seg.is_empty() { continue; }
+                let (p_color, p_style) = match_path(seg);
+                let colored = if p_color.is_empty() && p_style.is_empty() {
+                    seg.to_string()
+                } else {
+                    styled(seg, p_color, p_style)
+                };
+                let line = if i == segments.len() - 1 || !value.contains(';') {
+                    colored
+                } else {
+                    format!("{colored};")
+                };
+                if i == 0 {
+                    println!("{} = {}", styled(&spaced, color, style), line);
+                } else {
+                    println!("{indent}{line}");
+                }
+            }
+        } else if value.contains(';') {
+            let segments: Vec<&str> = value.split(';').filter(|s| !s.is_empty()).collect();
+            for (i, seg) in segments.iter().enumerate() {
+                let line = if i == segments.len() - 1 {
+                    seg.to_string()
+                } else {
+                    format!("{seg};")
+                };
+                if i == 0 {
+                    if no_color {
+                        println!("{spaced} = {line}");
+                    } else {
+                        println!("{} = {}", styled(&spaced, color, style), styled(&line, color, style));
+                    }
+                } else {
+                    if no_color {
+                        println!("{indent}{line}");
+                    } else {
+                        println!("{}{}", indent, styled(&line, color, style));
+                    }
+                }
             }
         } else {
-            let (color, style) = match_var(name);
-            let padding = if left_align {
-                " ".repeat(max_len - name.len())
+            if no_color {
+                println!("{spaced} = {value}");
             } else {
-                " ".repeat(max_len - name.len())
-            };
-            if left_align {
-                print!("{}{} = ", styled(name, color, style), padding);
-            } else {
-                print!("{}{} = ", padding, styled(name, color, style));
+                println!("{} = {}", styled(&spaced, color, style), styled(value, color, style));
             }
-            println!("{}", styled(value, color, style));
         }
     }
 }
 
-/// 判断变量是否排除
 fn is_excluded(name: &str) -> bool {
     let lower = name.to_lowercase();
     EXCLUDE_NAMES.iter().any(|e| e.to_lowercase() == lower)
 }
 
-/// 匹配变量名，返回 (color_name, style_name)
+/// 显示着色规则预览
+fn print_styles() {
+    use color::*;
+    println!("{}", bold_cyan("环境变量着色规则预览"));
+    println!("{}", gray("━".repeat(40)));
+    println!();
+    println!("{}", bold_green("变量名规则:"));
+    for rule in VAR_RULES {
+        let (c, s) = (rule.color, rule.style);
+        let preview = if c.is_empty() && s.is_empty() {
+            gray("颜色").to_string()
+        } else {
+            styled(&rule.name, c, s)
+        };
+        let desc = if !c.is_empty() {
+            gray(if !s.is_empty() { format!("  ← {}, {}", c, s) } else { format!("  ← {}", c) })
+        } else if !s.is_empty() {
+            gray(format!("  ← {}", s))
+        } else {
+            gray("  ← 默认颜色".to_string())
+        };
+        println!("  {}  {}", preview, desc);
+    }
+    println!();
+    println!("{}", bold_green("PATH 路径值规则（与 pp 一致）:"));
+    for rule in PATH_RULES {
+        let sample = if rule.pattern.contains('*') {
+            rule.pattern
+                .replace(r"C:\Windows*", r"C:\Windows\System32")
+                .replace(r"*\Notepad_file\*", r"D:\My\Notepad_file\scripts")
+                .replace(r"*\AppData\Local\Microsoft\WindowsApps", r"C:\Users\Me\AppData\Local\Microsoft\WindowsApps")
+                .replace(r"*\Scripts", r"C:\Python312\Scripts")
+                .replace(r"*\AppData\Local\Programs\Python\*", r"C:\Users\Me\AppData\Local\Programs\Python\312")
+                .replace(r"*\Anaconda3\envs\*", r"C:\Users\Me\Anaconda3\envs\base")
+                .replace(r"*\Anaconda3\condabin", r"C:\Users\Me\Anaconda3\condabin")
+                .replace(r"*\miniconda3\condabin", r"C:\Users\Me\miniconda3\condabin")
+                .replace(r"*\AppData\Roaming\nvm", r"C:\Users\Me\AppData\Roaming\nvm")
+                .replace(r"*\AppData\Local\nvm", r"C:\Users\Me\AppData\Local\nvm")
+                .replace(r"C:\Program Files\nodejs", r"C:\Program Files\nodejs")
+                .replace(r"*\nvm_nodejs", r"C:\ProgramData\nvm_nodejs")
+                .replace(r"*\nvm\*", r"C:\Users\Me\nvm\versions")
+                .replace(r"*\mysql-8.0.35-winx64\bin", r"D:\mysql-8.0.35-winx64\bin")
+                .replace(r"*\Program Files\ShadowBot", r"C:\Program Files\ShadowBot")
+                .replace(r"\\*", r"\\server\share\folder")
+        } else {
+            rule.pattern.to_string()
+        };
+        let (c, s) = (rule.color, rule.style);
+        println!("  {}  {}", styled(&sample, c, s), gray(&format!("  ← {}", rule.pattern)));
+    }
+    println!();
+    println!("{}", gray("无颜色的变量保持默认终端颜色"));
+    println!("{}", gray("无颜色匹配的路径保持默认终端颜色"));
+}
+
 fn match_var(name: &str) -> (&'static str, &'static str) {
     for rule in VAR_RULES {
         if rule.name.eq_ignore_ascii_case(name) {
@@ -139,60 +300,75 @@ fn match_var(name: &str) -> (&'static str, &'static str) {
     ("", "")
 }
 
-/// 颜色名称 → ANSI 前景色码
+/// 匹配 PATH 路径，返回 (color_name, style_name)
+fn match_path(text: &str) -> (&'static str, &'static str) {
+    for rule in PATH_RULES {
+        if !rule.pattern.contains('*') && rule.pattern.eq_ignore_ascii_case(text) {
+            return (rule.color, rule.style);
+        }
+    }
+    for rule in PATH_RULES {
+        if rule.pattern.contains('*') && wildmatch(rule.pattern, text) {
+            return (rule.color, rule.style);
+        }
+    }
+    ("", "")
+}
+
+fn wildmatch(pattern: &str, text: &str) -> bool {
+    let p = pattern.to_lowercase();
+    let t = text.to_lowercase();
+    let parts: Vec<&str> = p.split('*').collect();
+    if parts.is_empty() || (parts.len() == 1 && parts[0].is_empty()) {
+        return true;
+    }
+    if !parts[0].is_empty() && !t.starts_with(parts[0]) {
+        return false;
+    }
+    let last = parts.last().unwrap();
+    if !last.is_empty() && !t.ends_with(last) {
+        return false;
+    }
+    let mut pos = parts[0].len();
+    for i in 1..parts.len() - 1 {
+        let part = parts[i];
+        if part.is_empty() { continue; }
+        match t[pos..].find(part) {
+            Some(idx) => pos += idx + part.len(),
+            None => return false,
+        }
+    }
+    true
+}
+
 fn color_code(name: &str) -> Option<u8> {
     match name.to_lowercase().as_str() {
-        "black" => Some(30),
-        "red" => Some(31),
-        "green" => Some(32),
-        "yellow" => Some(33),
-        "blue" => Some(34),
-        "magenta" | "purple" => Some(35),
-        "cyan" => Some(36),
-        "white" => Some(37),
-        "gray" => Some(90),
-        "lightred" => Some(91),
-        "lightgreen" => Some(92),
-        "lightyellow" => Some(93),
-        "lightblue" => Some(94),
-        "lightmagenta" | "lightpurple" => Some(95),
-        "lightcyan" => Some(96),
-        "brightwhite" => Some(97),
+        "black" => Some(30), "red" => Some(31), "green" => Some(32),
+        "yellow" => Some(33), "blue" => Some(34), "magenta" | "purple" => Some(35),
+        "cyan" => Some(36), "white" => Some(37), "gray" => Some(90),
+        "lightred" => Some(91), "lightgreen" => Some(92), "lightyellow" => Some(93),
+        "lightblue" => Some(94), "lightmagenta" | "lightpurple" => Some(95),
+        "lightcyan" => Some(96), "brightwhite" => Some(97),
         _ => None,
     }
 }
 
-/// 样式名称 → ANSI 样式码
 fn style_code(name: &str) -> Option<u8> {
     match name.to_lowercase().as_str() {
-        "bold" => Some(1),
-        "dim" => Some(2),
-        "italic" => Some(3),
-        "underline" => Some(4),
-        "blink" => Some(5),
-        "reverse" => Some(7),
-        "hidden" => Some(8),
-        "strikethrough" => Some(9),
+        "bold" => Some(1), "dim" => Some(2), "italic" => Some(3),
+        "underline" => Some(4), "blink" => Some(5), "reverse" => Some(7),
+        "hidden" => Some(8), "strikethrough" => Some(9),
         _ => None,
     }
 }
 
-/// 给文本加上 ANSI 样式
 fn styled(text: &str, color: &str, style: &str) -> String {
     let mut codes: Vec<u8> = Vec::new();
-    if let Some(c) = color_code(color) {
-        codes.push(c);
-    }
-    if let Some(s) = style_code(style) {
-        codes.push(s);
-    }
+    if let Some(c) = color_code(color) { codes.push(c); }
+    if let Some(s) = style_code(style) { codes.push(s); }
     if codes.is_empty() {
         return text.to_string();
     }
-    let code_str = codes
-        .iter()
-        .map(|c| c.to_string())
-        .collect::<Vec<_>>()
-        .join(";");
+    let code_str = codes.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(";");
     format!("\x1b[{code_str}m{text}\x1b[0m")
 }
