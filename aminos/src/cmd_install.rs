@@ -35,8 +35,33 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
                         eprintln!("  {} {} 是自研工具，请使用:", color::yellow("提示"), name);
                         eprintln!("    {}", color::cyan(&format!("{} {}", cmd_names::TOOL_ADD, name)));
                     }
-                    Err(e) => {
-                        eprintln!("  {} {}: {}", color::yellow("跳过"), name, e);
+                    Err(_) => {
+                        // 3. 无源 → 搜索注册表
+                        let reg_all = crate::registry::scan_all_installed_unfiltered();
+                        let name_lower = n.to_lowercase();
+                        let matches: Vec<_> = reg_all.into_iter()
+                            .filter(|entry| {
+                                entry.get("display_name")
+                                    .map(|dn| dn.to_lowercase().contains(&name_lower))
+                                    .unwrap_or(false)
+                            })
+                            .collect();
+                        if !matches.is_empty() {
+                            for reg in &matches {
+                                let dn = reg.get("display_name").map(|s| s.as_str()).unwrap_or(&n);
+                                let ver = reg.get("version").map(|s| s.as_str()).unwrap_or("未知");
+                                let pub_ = reg.get("publisher").map(|s| s.as_str()).unwrap_or("");
+                                eprintln!("  {} 已在系统中找到: {}", color::green("✓"), dn);
+                                eprintln!("    版本: {}", ver);
+                                if !pub_.is_empty() {
+                                    eprintln!("    发行商: {}", pub_);
+                                }
+                                eprintln!("    {} 没有对应的源定义，无法安装/更新。", color::yellow("注意:"));
+                                eprintln!("    如需提交源定义，请前往: {}", crate::repo::SOURCE_GITHUB_URL);
+                            }
+                        } else {
+                            eprintln!("  {} {}: 未找到源定义，且未在注册表中找到匹配", color::yellow("跳过"), name);
+                        }
                     }
                 }
             }

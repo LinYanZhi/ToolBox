@@ -38,6 +38,9 @@ pub struct VersionInfo {
     /// 未设置时自动扫描目录中的 exe。
     #[serde(default)]
     pub entry_point: Option<String>,
+    /// 安装包的 SHA256 哈希（可选），用于自研工具检测内容变更。
+    #[serde(default)]
+    pub sha256: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -77,6 +80,9 @@ pub struct InstallRecord {
     /// 安装类型（如 "portable", "nsis", "inno" 等），升级时复用
     #[serde(default)]
     pub installer_type: String,
+    /// 安装包/文件的 SHA256 哈希，用于检测内容变更。
+    #[serde(default)]
+    pub file_sha256: String,
 }
 
 fn default_provenance() -> String {
@@ -88,9 +94,9 @@ fn default_provenance() -> String {
 /// 委托到 `config::source` 更新源定义。
 pub fn update_sources() -> anyhow::Result<()> {
     let builtin: Vec<String> = vec![
-        "https://ghproxy.net/https://raw.githubusercontent.com/LinYanZhi/aminos-source/main",
-        "https://cdn.jsdelivr.net/gh/LinYanZhi/aminos-source@main",
-        "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main",
+        format!("https://ghproxy.net/{}", crate::repo::SOURCE_RAW_URL),
+        format!("https://cdn.jsdelivr.net/gh/{}@main", crate::repo::SOURCE_REPO),
+        crate::repo::SOURCE_RAW_URL.to_string(),
     ]
     .into_iter()
     .map(|s| s.to_string())
@@ -315,7 +321,7 @@ pub fn write_installed_db(db: &HashMap<String, InstallRecord>) -> anyhow::Result
     Ok(())
 }
 
-pub fn record_installation(name: &str, version: &str, install_path: &str, version_provenance: &str, source_version: &str, installer_type: &str) -> anyhow::Result<()> {
+pub fn record_installation(name: &str, version: &str, install_path: &str, version_provenance: &str, source_version: &str, installer_type: &str, file_sha256: &str) -> anyhow::Result<()> {
     let mut db = read_installed_db()?;
     db.insert(
         name.to_string(),
@@ -329,6 +335,7 @@ pub fn record_installation(name: &str, version: &str, install_path: &str, versio
                 .unwrap_or_default()
                 .as_secs(),
             installer_type: installer_type.to_string(),
+            file_sha256: file_sha256.to_string(),
         },
     );
     write_installed_db(&db)

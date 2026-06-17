@@ -27,13 +27,24 @@ pub fn run_add(opts: ToolAddOpts) -> anyhow::Result<()> {
             let current_ver = installed_db.get(&n)
                 .map(|rec| rec.version.clone())
                 .unwrap_or_default();
+            let recorded_sha256 = installed_db.get(&n)
+                .map(|rec| rec.file_sha256.clone())
+                .unwrap_or_default();
+            let source_vi = sd.versions.get(source_ver);
+            let source_sha256 = source_vi.map(|vi| vi.sha256.as_str()).unwrap_or("");
+            let sha256_changed = !source_sha256.is_empty() && source_sha256 != recorded_sha256;
 
-            if current_ver == *source_ver && !opts.renew {
+            if current_ver == *source_ver && !sha256_changed && !opts.renew {
                 println!("  {}", color::gray(format!("{} {} 已是最新", display, current_ver)));
                 continue;
             }
 
-            println!("  ▶ {} {} → {} ...", display, current_ver, source_ver);
+            let reason = if sha256_changed {
+                format!("内容已变更 (SHA256)")
+            } else {
+                format!("{} → {}", current_ver, source_ver)
+            };
+            println!("  ▶ {} {} ...", display, reason);
         }
 
         let install_opts = crate::opts::InstallOpts::new(

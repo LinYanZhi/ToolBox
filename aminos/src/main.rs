@@ -19,6 +19,7 @@ mod opts;
 mod paths;
 mod pe_version;
 mod registry;
+mod repo;
 mod software;
 mod speedtest;
 

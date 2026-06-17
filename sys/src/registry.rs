@@ -112,6 +112,41 @@ pub fn scan_all_installed() -> Vec<HashMap<String, String>> {
     results
 }
 
+/// 扫描所有已安装的软件（无过滤），用于卸载等需要全量搜索的场景。
+///
+/// 与 `scan_all_installed` 不同，此函数不过滤 `SystemComponent` 或
+/// `ParentDisplayName`，返回注册表中所有含 DisplayName 的条目。
+pub fn scan_all_installed_unfiltered() -> Vec<HashMap<String, String>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut results = Vec::new();
+
+    for_each_uninstall(|_subkey_name, subkey| {
+        let dn: String = match subkey.get_value("DisplayName") {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        if dn.trim().is_empty() || !seen.insert(dn.clone()) {
+            return;
+        }
+        let mut entry = HashMap::new();
+        entry.insert("display_name".into(), dn);
+        for f in ["DisplayVersion", "Publisher", "InstallLocation", "UninstallString"] {
+            if let Ok(val) = subkey.get_value::<String, _>(f) {
+                let k = match f {
+                    "DisplayVersion" => "version",
+                    "Publisher" => "publisher",
+                    "InstallLocation" => "install_path",
+                    "UninstallString" => "uninstall_string",
+                    _ => continue,
+                };
+                entry.insert(k.into(), val);
+            }
+        }
+        results.push(entry);
+    });
+    results
+}
+
 // ── 内部函数 ───────────────────────────────────────────
 
 fn for_each_uninstall(mut cb: impl FnMut(&str, &RegKey)) {

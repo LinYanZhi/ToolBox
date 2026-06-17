@@ -1,5 +1,5 @@
 /// 重新导出 sys::registry，保持 aminos 内部接口不变。
-pub use sys::registry::scan_all_installed;
+pub use sys::registry::{scan_all_installed, scan_all_installed_unfiltered};
 
 use std::collections::HashMap;
 

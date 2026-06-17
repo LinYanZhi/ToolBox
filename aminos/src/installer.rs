@@ -5,6 +5,8 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
+use sha2::{Sha256, Digest};
+
 use crate::{opts, paths, pe_version, registry, cmd_names};
 use crate::software::{self, SoftwareDef, VersionInfo};
 use color;
@@ -224,6 +226,7 @@ pub fn install_software_by_def(name: &str, sd: &software::SoftwareDef, opts: &op
         provenance,
         &ver,
         &vi.installer_type,
+        "",
     )?;
 
     println!("\n✓ {} {} 安装完成", display, canonical_version);
@@ -295,8 +298,11 @@ fn install_self_tool(
         .with_context(|| format!("创建硬链接失败: {} → {}", link_path.display(), exe_path.display()))?;
     println!("  硬链接: {} → {}", link_path.display(), exe_path.display());
 
-    // 6. 记录安装
-    software::record_installation(name, ver, tool_dir.to_string_lossy().as_ref(), "source", ver, &vi.installer_type)?;
+    // 6. 计算下载包的 SHA256
+    let file_sha256 = file_sha256(&installer_path);
+
+    // 7. 记录安装
+    software::record_installation(name, ver, tool_dir.to_string_lossy().as_ref(), "source", ver, &vi.installer_type, &file_sha256)?;
 
     println!("\n✓ {} {} 安装完成", display, ver);
     println!("  位置: {}", tool_dir.display());
@@ -363,57 +369,91 @@ pub fn uninstall_tool(name: &str) -> anyhow::Result<()> {
 // ── Uninstall ─────────────────────────────────────────────
 
 pub fn uninstall_software(name: &str, gui: bool, force: bool) -> anyhow::Result<()> {
-    let sd = software::read_software_def(name)?;
-    let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
+    let sd = match software::read_software_def(name) {
+        Ok(sd) => Some(sd),
+        Err(_) => None,
+    };
 
-    // Find installed version
-    let version = sd.default_version.as_str();
-    let vi = sd.versions.get(version);
+    // 有源定义：走标准流程
+    if let Some(ref sd) = sd {
+        let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
-    // ── 自研工具卸载 ──
-    if sd.kind == "self" {
-        return uninstall_self_tool(name, display);
-    }
-
-    let is_portable = vi.map(|v| v.installer_type == "portable").unwrap_or(false);
-    let installed_info = vi.and_then(|v| v.detection.as_ref())
-        .and_then(|d| registry::detect_installed(d));
-
-    if installed_info.is_none() && !force && !is_portable {
-        println!("{} 未在系统中检测到安装记录。", display);
-        println!("如需清理安装记录，请使用 --force 参数。");
-        return Ok(());
-    }
-
-    if is_portable {
-        // 便携版：直接删除 apps/{name}-{version}/ 目录
-        let dir_name = format!("{}-{}", name, version);
-        let portable_dir = paths::apps_dir().join(&dir_name);
-        if portable_dir.exists() {
-            fs::remove_dir_all(&portable_dir)?;
-            println!("  已删除便携版目录: {}", portable_dir.display());
+        // 自研工具卸载
+        if sd.kind == "self" {
+            return uninstall_self_tool(name, display);
         }
-    } else {
-        // 标准安装：运行卸载程序
-        if let Some(ref info) = installed_info {
+
+        let version = sd.default_version.as_str();
+        let vi = sd.versions.get(version);
+        let is_portable = vi.map(|v| v.installer_type == "portable").unwrap_or(false);
+        let installed_info = vi.and_then(|v| v.detection.as_ref())
+            .and_then(|d| registry::detect_installed(d));
+
+        if installed_info.is_none() && !force && !is_portable {
+            println!("{} 未在系统中检测到安装记录。", display);
+            println!("如需清理安装记录，请使用 --force 参数。");
+            return Ok(());
+        }
+
+        if is_portable {
+            let dir_name = format!("{}-{}", name, version);
+            let portable_dir = paths::apps_dir().join(&dir_name);
+            if portable_dir.exists() {
+                fs::remove_dir_all(&portable_dir)?;
+                println!("  已删除便携版目录: {}", portable_dir.display());
+            }
+        } else if let Some(ref info) = installed_info {
             let ok = run_uninstall(name, info, gui)?;
             if !ok {
                 return Ok(());
             }
         }
+
+        // 清理快捷方式
+        let app_lnk = paths::apps_dir().join(format!("{}.lnk", name));
+        if app_lnk.exists() {
+            fs::remove_file(&app_lnk)?;
+            println!("  已删除快捷方式: {}", app_lnk.display());
+        }
+
+        // 删除安装记录
+        software::remove_installation_record(name)?;
+        println!("\n✓ {} 卸载完成", display);
+        return Ok(());
     }
 
-    // Clean up shortcuts
-    let app_lnk = paths::apps_dir().join(format!("{}.lnk", name));
-    if app_lnk.exists() {
-        fs::remove_file(&app_lnk)?;
-        println!("  已删除快捷方式: {}", app_lnk.display());
+    // ── 无源定义：回退到注册表搜索 ──
+    eprintln!("    ℹ  未找到「{}」的源定义，正在搜索注册表...", name);
+    let reg_all = crate::registry::scan_all_installed_unfiltered();
+    // 大小写不敏感模糊匹配
+    let name_lower = name.to_lowercase();
+    let matches: Vec<_> = reg_all.into_iter()
+        .filter(|entry| {
+            entry.get("display_name")
+                .map(|dn| dn.to_lowercase().contains(&name_lower))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if matches.is_empty() {
+        bail!("未在注册表中找到匹配「{}」的软件", name);
     }
 
-    // Remove installation record
-    software::remove_installation_record(name)?;
-    println!("\n✓ {} 卸载完成", display);
+    for info in &matches {
+        let dn = info.get("display_name").map(|s| s.as_str()).unwrap_or(name);
+        println!("  找到: {}", dn);
+        let ok = run_uninstall(name, info, gui)?;
+        if !ok {
+            println!("  跳过: {}", dn);
+        }
+    }
 
+    // 清理安装记录（如果有）
+    if software::remove_installation_record(name).is_ok() {
+        println!("  已清理安装记录");
+    }
+
+    println!("\n✓ {} 卸载完成", name);
     Ok(())
 }
 
@@ -666,6 +706,25 @@ fn safe_installer_name(name: &str, version: &str, urls: &[String]) -> String {
         }
     }
     format!("{}-{}.exe", safe_name, safe_ver)
+}
+
+/// 计算文件的 SHA256 十六进制字符串。
+fn file_sha256(path: &Path) -> String {
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return String::new(),
+    };
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => return String::new(),
+        };
+        hasher.update(&buf[..n]);
+    }
+    hex::encode(hasher.finalize())
 }
 
 // ── Installer execution ───────────────────────────────────
