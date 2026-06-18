@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use color::*;
 use crate::opts::DownloadOpts;
 use crate::paths;
 
@@ -9,9 +10,9 @@ pub fn run_download(opts: DownloadOpts) -> anyhow::Result<()> {
         let dir = paths::downloads_dir();
         if dir.exists() {
             let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-            println!("已在资源管理器中打开: {}", dir.display());
+            println!("已在资源管理器中打开: {}", gray(dir.to_string_lossy()));
         } else {
-            println!("下载目录不存在: {}", dir.display());
+            println!("下载目录不存在: {}", gray(dir.to_string_lossy()));
         }
         return Ok(());
     }
@@ -31,7 +32,8 @@ pub fn run_download(opts: DownloadOpts) -> anyhow::Result<()> {
         dir
     };
 
-    for target in &opts.targets {
+    let count = opts.targets.len();
+    for (i, target) in opts.targets.iter().enumerate() {
         // 判断是 URL 还是软件名称
         if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("ftp://") {
             // 直接下载 URL
@@ -39,6 +41,9 @@ pub fn run_download(opts: DownloadOpts) -> anyhow::Result<()> {
         } else {
             // 尝试匹配软件名称
             download_by_name(target, &target_dir)?;
+        }
+        if i < count - 1 {
+            println!();
         }
     }
 
@@ -54,8 +59,8 @@ fn download_url(url: &str, target_dir: &std::path::Path) -> anyhow::Result<()> {
         .unwrap_or("download");
 
     let dest = target_dir.join(filename);
-    println!("正在下载: {}", url);
-    println!("  保存到: {}", dest.display());
+    println!("{} {}", bold_green("正在下载"), gray(url));
+    println!("  {}", gray(dest.to_string_lossy()));
 
     net::download::download_with_url_fallback(
         "download",
@@ -64,7 +69,7 @@ fn download_url(url: &str, target_dir: &std::path::Path) -> anyhow::Result<()> {
         &net::DownloadConfig::default(),
     )?;
 
-    println!("下载完成: {}", dest.display());
+    println!("{} {}", green("下载完成"), gray(dest.to_string_lossy()));
     Ok(())
 }
 
@@ -89,9 +94,12 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         let zip_name = format!("{}-{}.{}", sd.name, ver, ext);
         let dest = target_dir.join(&zip_name);
 
-        println!("正在下载 {} {}...", display, ver);
+        println!("{} {} {}...", bold_green("正在下载"), bold_cyan(display), gray(ver));
+        for url in &vi.urls {
+            println!("  {}", gray(url));
+        }
         net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &net::DownloadConfig::default())?;
-        println!("下载完成: {}", dest.display());
+        println!("{} {}", green("下载完成"), gray(dest.to_string_lossy()));
         return Ok(());
     }
 
@@ -111,9 +119,12 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         let zip_name = format!("{}-{}.zip", sd.name, ver);
         let dest = target_dir.join(&zip_name);
 
-        println!("正在下载 {} {}...", display, ver);
+        println!("{} {} {}...", bold_green("正在下载"), bold_cyan(display), gray(ver));
+        for url in &vi.urls {
+            println!("  {}", gray(url));
+        }
         net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &net::DownloadConfig::default())?;
-        println!("下载完成: {}", dest.display());
+        println!("{} {}", green("下载完成"), gray(dest.to_string_lossy()));
         return Ok(());
     }
 

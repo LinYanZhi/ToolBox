@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context};
+use color::*;
 use indicatif::MultiProgress;
 
 use crate::backend::DownloadBackend;
@@ -289,7 +290,7 @@ pub fn download_with_fallback(
 
     // ── 进度条模板 ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {msg:.cyan}")
+        .template("    {bar:40.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {msg:.cyan}")
         .unwrap()
         .progress_chars("━━━");
 
@@ -321,7 +322,7 @@ pub fn download_with_fallback(
         let ctx = ProgressCtx::new(bar, sname);
         let cancel = Cancel::new();
 
-        eprintln!("  使用 {} ({} 线程)...", sname, backend.thread_label());
+        eprintln!("    使用 {} ({})", yellow(sname), backend.thread_label());
 
         // 逐 URL 尝试
         for url in urls {
@@ -361,7 +362,7 @@ pub fn download_with_fallback(
                         .map(|m| m.len()).unwrap_or(0);
                     let elapsed = start.elapsed();
 
-                    eprintln!("  {} 下载完成", sname);
+                    eprintln!("    {} {}", yellow(sname), green("下载完成"));
 
                     return Ok(DownloadReport {
                         strategy_used: sname.to_string(),
@@ -384,7 +385,7 @@ pub fn download_with_fallback(
             ctx.bar.finish();
         }
         if let Some(ref err) = last_error {
-            eprintln!("  {} 下载失败: {}", sname, err);
+            eprintln!("    {} {}: {}", yellow(sname), red("下载失败"), err);
         }
     }
 

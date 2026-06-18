@@ -157,7 +157,7 @@ impl DownloaderConfig {
         let content = match std::fs::read_to_string(&config_path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("  读取配置文件失败（{}），使用默认配置: {}", config_path.display(), e);
+                eprintln!("    读取配置文件失败（{}），使用默认配置: {}", config_path.display(), e);
                 return Self::default();
             }
         };
@@ -167,11 +167,11 @@ impl DownloaderConfig {
                 // 自动补缺：检查是否有新的默认后端未在配置文件中
                 sync_strategies_if_needed(&config_path, &mut parsed);
                 let cfg = Self::from_toml_config(&parsed);
-                eprintln!("  已加载配置文件: {}", config_path.display());
+                eprintln!("    已加载配置文件: {}", config_path.display());
                 cfg
             }
             Err(e) => {
-                eprintln!("  解析配置文件失败: {}，使用默认配置", e);
+                eprintln!("    解析配置文件失败: {}，使用默认配置", e);
                 Self::default()
             }
         }

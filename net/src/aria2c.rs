@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{bail, Context};
+use color::*;
 
 use crate::agent::Fingerprint;
 use crate::download::{Cancel, ProgressCtx};
@@ -52,7 +53,7 @@ pub fn try_aria2c_download(
 
     // ── 第二步：分片失败 → 不分片模式（单线程重试） ──
     if let Some(ref ctx) = pb {
-        eprintln!("  使用 {}（单线程重试）", ctx.name);
+        eprintln!("    使用 {}（单线程重试）", yellow(&ctx.name));
     }
     // 清理分片模式留下的残留文件
     let _ = std::fs::remove_file(target_path);
