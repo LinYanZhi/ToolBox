@@ -304,3 +304,33 @@ fn find_aria2c() -> Option<std::path::PathBuf> {
         None
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_aria2_size() {
+        assert_eq!(parse_aria2_size("1024"), Some(1024));
+        assert_eq!(parse_aria2_size("1.5KiB"), Some(1536));
+        assert_eq!(parse_aria2_size("2MiB"), Some(2 * 1024 * 1024));
+        assert_eq!(parse_aria2_size("1GiB"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_aria2_size(""), None);
+    }
+
+    #[test]
+    fn test_parse_aria2_progress() {
+        // Sample aria2c stdout line
+        let line = "[#6ec300 205MiB/228MiB(89%) CN:16 DL:3.9MiB ETA:5s]";
+        let (cur, total, speed) = parse_aria2_progress(line).unwrap();
+        assert_eq!(cur, 205 * 1024 * 1024);
+        assert_eq!(total, 228 * 1024 * 1024);
+        assert_eq!(speed, Some("3.9MiB/s".to_string()));
+
+        // Non-progress line should return None
+        assert!(parse_aria2_progress("NOT a progress line").is_none());
+
+        // Empty line
+        assert!(parse_aria2_progress("").is_none());
+    }
+}

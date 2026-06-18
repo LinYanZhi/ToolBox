@@ -17,6 +17,16 @@ pub fn tools_source_dir() -> PathBuf {
     source_dir().join("tools")
 }
 
+/// 第三方社区源根目录：`source/community/`
+pub fn community_source_dir() -> PathBuf {
+    source_dir().join("community")
+}
+
+/// 获取某个第三方源的本地缓存目录：`source/community/{name}/`
+pub fn community_source_named(name: &str) -> PathBuf {
+    community_source_dir().join(name)
+}
+
 pub fn builds_dir() -> PathBuf {
     RESOLVER.appdata_root().join("builds")
 }

@@ -48,9 +48,11 @@ pub enum Commands {
     /// 管理下载缓存
     Cache(CacheOpts),
     /// 管理软件源
-    Source(SourceOpts),
+    #[command(subcommand)]
+    Source(SourceCommand),
     /// 管理下载引擎后端
-    Downloader(DownloaderOpts),
+    #[command(subcommand)]
+    Downloader(DownloaderCommand),
     /// 管理自研工具
     #[command(subcommand)]
     Tool(ToolCli),
@@ -185,50 +187,61 @@ pub struct CacheOpts {
     pub open: bool,
 }
 
-#[derive(Args)]
-pub struct SourceOpts {
-    /// 更新所有源
-    #[arg(short = 'u', long = "update")]
-    pub update: bool,
-
-    /// 清空所有源
-    #[arg(short = 'c', long = "clear")]
-    pub clear: bool,
-
+#[derive(Subcommand)]
+pub enum SourceCommand {
+    /// 更新所有源（内置 + 第三方社区源）
+    Update,
+    /// 清空所有源缓存
+    Clear,
     /// 在资源管理器中打开源目录
-    #[arg(short = 'o', long = "open")]
-    pub open: bool,
-
+    Open,
     /// 对源进行测速
-    #[arg(long = "speedtest")]
-    pub speedtest: bool,
-
-    /// 测速时指定软件（可选）
-    #[arg(long = "name", value_name = "SOFTWARE")]
-    pub name: Option<String>,
-
-    /// 测速时以软件为单位统计
-    #[arg(short = 'S', long = "software")]
-    pub software: bool,
+    Speedtest {
+        /// 测速时指定软件（可选）
+        #[arg(long = "name", value_name = "SOFTWARE")]
+        name: Option<String>,
+        /// 测速时以软件为单位统计
+        #[arg(short = 'S', long = "software")]
+        software: bool,
+    },
+    /// 添加第三方社区源
+    Add {
+        name: String,
+        url: String,
+    },
+    /// 移除第三方社区源
+    Remove {
+        name: String,
+    },
+    /// 列出所有已配置的源
+    List,
+    /// 启用一个第三方源
+    Enable {
+        name: String,
+    },
+    /// 禁用一个第三方源
+    Disable {
+        name: String,
+    },
 }
 
-#[derive(Args)]
-pub struct DownloaderOpts {
+#[derive(Subcommand)]
+pub enum DownloaderCommand {
     /// 列出所有下载后端
-    #[arg(short = 'l', long = "list")]
-    pub list: bool,
-
+    List {
+        /// 显示后端的详细说明
+        #[arg(short = 'v', long = "verbose")]
+        verbose: bool,
+    },
+    /// 切换后端启用/禁用状态
+    Set {
+        /// 后端名称
+        name: String,
+        /// 启用或禁用（on/off）
+        state: String,
+    },
     /// 在资源管理器中打开配置目录
-    #[arg(short = 'o', long = "open")]
-    pub open: bool,
-
-    /// 显示后端的详细说明（需与 --list 同时使用）
-    #[arg(short = 'v', long = "verbose")]
-    pub verbose: bool,
-
-    /// 子命令: set <名称> on|off
-    #[arg(trailing_var_arg = true)]
-    pub args: Vec<String>,
+    Open,
 }
 
 #[derive(Subcommand)]

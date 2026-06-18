@@ -42,6 +42,10 @@ impl SourceRepo {
 struct Index {
     #[allow(dead_code)]
     version: u32,
+    /// 源最后更新时间（ISO 日期，如 "2026-06-15"）
+    #[serde(default)]
+    #[allow(dead_code)]
+    updated: String,
     files: HashMap<String, FileEntry>,
 }
 

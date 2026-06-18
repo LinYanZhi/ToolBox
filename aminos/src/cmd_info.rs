@@ -25,6 +25,12 @@ pub fn run_info(name: &str, _show_urls: bool) -> anyhow::Result<()> {
         if !sd.aliases.is_empty() {
             println!("  {}  {}", color::gray("别名:"), sd.aliases.join(", "));
         }
+        if !sd.updated.is_empty() {
+            println!("  {}  {}", color::gray("更新日期:"), color::yellow(&sd.updated));
+        }
+        if !sd.homepage.is_empty() {
+            println!("  {}  {}", color::gray("主页:"), color::cyan(&sd.homepage));
+        }
         println!("  {}  {}", color::gray("默认版本:"), color::cyan(default_ver));
         if !sd.kind.is_empty() {
             println!("  {}  {}", color::gray("类型:"), sd.kind);
@@ -71,14 +77,15 @@ pub fn run_info(name: &str, _show_urls: bool) -> anyhow::Result<()> {
         for vk in &sorted_versions {
             let vi = &sd.versions[*vk];
             let marker = if vk.as_str() == default_ver { " ← 默认" } else { "" };
-            let urls = &vi.urls;
-            let first_url = urls.first().map(|s| s.as_str()).unwrap_or("无下载地址");
-            let installer_type = if vi.installer_type.is_empty() { "(auto)" } else { &vi.installer_type };
-            println!("    {}", color::green(format!("{}{}", vk, marker)));
-            println!("      {} {}", color::gray("类型:"), installer_type);
-            println!("      {} {}", color::gray("下载:"), first_url);
-            for url in urls.iter().skip(1) {
-                println!("           {}", url);
+            let installer_type = if vi.installer_type.is_empty() { "auto" } else { &vi.installer_type };
+            let first_url = vi.urls.first().map(|s| s.as_str()).unwrap_or("无下载地址");
+            println!("    {} {} {}",
+                color::green(format!("{}{}", vk, marker)),
+                color::gray(&format!("[{}]", installer_type)),
+                color::gray(first_url),
+            );
+            for url in vi.urls.iter().skip(1) {
+                println!("      {}", color::gray(url));
             }
         }
         println!();

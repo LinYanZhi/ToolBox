@@ -4,9 +4,8 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context};
 use color;
-use crate::cmd_names;
 use serde::{Deserialize, Serialize};
-
+use crate::cmd_names;
 use crate::paths;
 
 // ── JSON Schema ──────────────────────────────────────────
@@ -61,6 +60,9 @@ pub struct SoftwareDef {
     /// 软件类型：空/未设置 = 第三方软件, "self" = 自研工具
     #[serde(default)]
     pub kind: String,
+    /// 源定义最后更新时间（ISO 日期，如 "2026-06-15"）
+    #[serde(default)]
+    pub updated: String,
     pub versions: HashMap<String, VersionInfo>,
 }
 
@@ -114,6 +116,22 @@ pub fn update_sources() -> anyhow::Result<()> {
     let tools_repo = config::SourceRepo::new(tools_builtin);
     config::source::update_sources(&paths::tools_source_dir(), &tools_repo)?;
 
+    // 3. 同步第三方社区源
+    let config_dir = paths::config_dir();
+    let source_cfg = config::SourceConfig::new(config_dir);
+    let entries = source_cfg.load();
+    for entry in &entries {
+        if !entry.enabled {
+            continue;
+        }
+        println!("  {} {}", color::gray("同步源:"), color::cyan(&entry.name));
+        let dest = paths::community_source_named(&entry.name);
+        let repo = config::SourceRepo::new(vec![entry.url.clone()]);
+        if let Err(e) = config::source::update_sources(&dest, &repo) {
+            eprintln!("  {} 更新源 '{}' 失败: {}", color::red("错误"), entry.name, e);
+        }
+    }
+
     clear_defs_cache();
     clear_tool_cache();
     Ok(())
@@ -166,7 +184,57 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
         }
     }
 
+    // 5. 社区源中查找
+    if let Ok(sd) = find_in_community_sources(name) {
+        return Ok(sd);
+    }
+
     bail!("未找到软件 '{}' 的定义。请先运行: as source -u", name)
+}
+
+/// 在第三方社区源中查找软件定义。
+fn find_in_community_sources(name: &str) -> anyhow::Result<SoftwareDef> {
+    let lower = name.to_lowercase();
+    let config_dir = paths::config_dir();
+    let source_cfg = config::SourceConfig::new(config_dir);
+    let entries = source_cfg.load();
+
+    for entry in &entries {
+        if !entry.enabled {
+            continue;
+        }
+        let dir = paths::community_source_named(&entry.name);
+        if !dir.is_dir() {
+            continue;
+        }
+
+        // Exact match
+        let exact = dir.join(format!("{}.json", lower));
+        if exact.exists() {
+            if let Ok(sd) = parse_json(&exact) {
+                return Ok(sd);
+            }
+        }
+
+        // display_name / aliases match
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.extension().map_or(false, |ext| ext == "json") && path.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                    if let Ok(sd) = parse_json(&path) {
+                        if sd.name.to_lowercase() == lower
+                            || sd.display_name.to_lowercase() == lower
+                            || sd.aliases.iter().any(|a| a.to_lowercase() == lower)
+                        {
+                            return Ok(sd);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    bail!("未在社区源中找到 '{}'", name)
 }
 
 /// 读取自研工具定义（从 source/tools/ 查找）
@@ -232,7 +300,28 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
         read_defs_from_dir(&apps_dir, &mut defs);
     }
 
-    // 写入缓存
+    // 合并社区源（不缓存，动态读取）
+    let mut seen: std::collections::HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
+    let config_dir = paths::config_dir();
+    let source_cfg = config::SourceConfig::new(config_dir);
+    for entry in source_cfg.load() {
+        if !entry.enabled {
+            continue;
+        }
+        let comm_dir = paths::community_source_named(&entry.name);
+        if !comm_dir.is_dir() {
+            continue;
+        }
+        let mut community_defs = Vec::new();
+        read_defs_from_dir(&comm_dir, &mut community_defs);
+        for d in community_defs {
+            if seen.insert(d.name.clone()) {
+                defs.push(d);
+            }
+        }
+    }
+
+    // 写入缓存（仅内置部分）
     if let Ok(mut cache) = DEFS_CACHE.lock() {
         *cache = Some(defs.clone());
     }
@@ -348,6 +437,44 @@ pub fn remove_installation_record(name: &str) -> anyhow::Result<()> {
 }
 
 // ── Helpers ──────────────────────────────────────────────
+
+/// 读取源索引中的 `updated` 字段（源最后更新时间）。
+pub fn read_source_updated() -> String {
+    let index_path = paths::apps_source_dir().join("index.json");
+    if !index_path.is_file() {
+        return String::new();
+    }
+    #[derive(serde::Deserialize)]
+    struct IndexMeta {
+        #[serde(default)]
+        updated: String,
+    }
+    match std::fs::read_to_string(&index_path)
+        .and_then(|s| Ok(serde_json::from_str::<IndexMeta>(&s).map(|m| m.updated).unwrap_or_default()))
+    {
+        Ok(u) => u,
+        Err(_) => String::new(),
+    }
+}
+
+/// 读取工具源索引中的 `updated` 字段。
+pub fn read_tool_source_updated() -> String {
+    let index_path = paths::tools_source_dir().join("index.json");
+    if !index_path.is_file() {
+        return String::new();
+    }
+    #[derive(serde::Deserialize)]
+    struct IndexMeta {
+        #[serde(default)]
+        updated: String,
+    }
+    match std::fs::read_to_string(&index_path)
+        .and_then(|s| Ok(serde_json::from_str::<IndexMeta>(&s).map(|m| m.updated).unwrap_or_default()))
+    {
+        Ok(u) => u,
+        Err(_) => String::new(),
+    }
+}
 
 fn parse_json(path: &PathBuf) -> anyhow::Result<SoftwareDef> {
     let data = fs::read_to_string(path)

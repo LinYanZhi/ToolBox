@@ -37,11 +37,12 @@ fn main() {
         if args.len() == 2 {
             let sub = &args[1].to_lowercase();
             match sub.as_str() {
-                "tool" => { print_tool_help(); return; }
-                "downloader" => { print_downloader_help(); return; }
-                "install" => { print_install_help(); return; }
-                "info" => { print_info_help(); return; }
-                "uninstall" => { print_uninstall_help(); return; }
+                "tool" | "downloader" | "install" | "info" | "uninstall" | "source" | "cache" => {
+                    let mut cmd = <Cli as clap::CommandFactory>::command();
+                    let _ = cmd.find_subcommand_mut(sub).map(|c| c.print_help());
+                    println!();
+                    return;
+                }
                 _ => {}
             }
         }
@@ -78,56 +79,6 @@ fn main() {
             let mut cmd = <Cli as clap::CommandFactory>::command();
             let _ = cmd.print_help();
             println!();
-        }
-    }
-}
-
-/// 手动打印 `as tool` 帮助（避免 clap 写 stderr 红色）
-fn print_tool_help() {
-    let args: Vec<&str> = vec!["as.exe", "tool", "--help"];
-    if let Err(e) = Cli::try_parse_from(args) {
-        if e.kind() == clap::error::ErrorKind::DisplayHelp {
-            let _ = e.print();
-        }
-    }
-}
-
-/// 手动打印 `as downloader` 帮助
-fn print_downloader_help() {
-    let args: Vec<&str> = vec!["as.exe", "downloader", "--help"];
-    if let Err(e) = Cli::try_parse_from(args) {
-        if e.kind() == clap::error::ErrorKind::DisplayHelp {
-            let _ = e.print();
-        }
-    }
-}
-
-/// 手动打印 `as install` 帮助
-fn print_install_help() {
-    let args: Vec<&str> = vec!["as.exe", "install", "--help"];
-    if let Err(e) = Cli::try_parse_from(args) {
-        if e.kind() == clap::error::ErrorKind::DisplayHelp {
-            let _ = e.print();
-        }
-    }
-}
-
-/// 手动打印 `as info` 帮助
-fn print_info_help() {
-    let args: Vec<&str> = vec!["as.exe", "info", "--help"];
-    if let Err(e) = Cli::try_parse_from(args) {
-        if e.kind() == clap::error::ErrorKind::DisplayHelp {
-            let _ = e.print();
-        }
-    }
-}
-
-/// 手动打印 `as uninstall` 帮助
-fn print_uninstall_help() {
-    let args: Vec<&str> = vec!["as.exe", "uninstall", "--help"];
-    if let Err(e) = Cli::try_parse_from(args) {
-        if e.kind() == clap::error::ErrorKind::DisplayHelp {
-            let _ = e.print();
         }
     }
 }
@@ -183,23 +134,11 @@ fn dispatch(cmd: Commands) -> i32 {
         Commands::Cache(opts) => {
             help::run(|| cmd_cache::run_cache(opts.list, opts.clear, opts.open))
         }
-        Commands::Source(opts) => {
-            help::run(|| cmd_source::run_source(
-                opts.update,
-                opts.clear,
-                opts.open,
-                opts.speedtest,
-                opts.name.map(|n| vec![n]).unwrap_or_default(),
-                opts.software,
-            ))
+        Commands::Source(cmd) => {
+            help::run(|| cmd_source::run_source(&cmd))
         }
-        Commands::Downloader(opts) => {
-            let set = if opts.args.len() >= 3 && opts.args[0] == "set" {
-                Some(vec![opts.args[1].clone(), opts.args[2].clone()])
-            } else {
-                None
-            };
-            help::run(|| cmd_downloader::run_downloader(opts.list, set, opts.open, opts.verbose))
+        Commands::Downloader(cmd) => {
+            help::run(|| cmd_downloader::run_downloader(&cmd))
         }
         Commands::Tool(tool) => {
             dispatch_tool(tool)

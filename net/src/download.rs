@@ -706,3 +706,45 @@ pub fn probe_filename(url: &str) -> Option<String> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_decimal_progress() {
+        assert_eq!(format_decimal_progress(0, 0), "0/0 B");
+        assert_eq!(format_decimal_progress(500, 1000), "0.5/1 KB");
+        assert_eq!(format_decimal_progress(1_500_000, 2_000_000), "1.5/2 MB");
+        assert_eq!(format_decimal_progress(1_500_000_000, 2_000_000_000), "1.5/2 GB");
+        assert_eq!(format_decimal_progress(1_000_000, 2_000_000), "1/2 MB");
+    }
+
+    #[test]
+    fn test_format_eta_hms() {
+        assert_eq!(format_eta_hms(0), "0:00:00");
+        assert_eq!(format_eta_hms(59), "0:00:59");
+        assert_eq!(format_eta_hms(60), "0:01:00");
+        assert_eq!(format_eta_hms(3661), "1:01:01");
+        assert_eq!(format_eta_hms(86399), "23:59:59");
+    }
+
+    #[test]
+    fn test_expand_github_urls() {
+        let urls = vec!["https://github.com/user/repo/releases/download/v1/file.zip".to_string()];
+        let expanded = expand_github_urls(&urls);
+        assert_eq!(expanded.len(), 2);
+        assert!(expanded[0].contains("ghproxy.net"));
+        assert_eq!(&expanded[1], &urls[0]);
+
+        // Non-github URL should not be expanded
+        let urls2 = vec!["https://example.com/file.zip".to_string()];
+        let expanded2 = expand_github_urls(&urls2);
+        assert_eq!(expanded2.len(), 1);
+
+        // Already proxied URL should not be expanded
+        let urls3 = vec!["https://ghproxy.net/https://github.com/user/repo".to_string()];
+        let expanded3 = expand_github_urls(&urls3);
+        assert_eq!(expanded3.len(), 1);
+    }
+}

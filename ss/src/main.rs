@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use clap::{Parser, Subcommand, builder::styling};
+use color;
 
 fn styles() -> styling::Styles {
     styling::Styles::styled()
@@ -342,34 +343,23 @@ fn wildmatch(pattern: &str, text: &str) -> bool {
     true
 }
 
-fn color_code(name: &str) -> Option<u8> {
-    match name.to_lowercase().as_str() {
-        "black" => Some(30), "red" => Some(31), "green" => Some(32),
-        "yellow" => Some(33), "blue" => Some(34), "magenta" | "purple" => Some(35),
-        "cyan" => Some(36), "white" => Some(37), "gray" => Some(90),
-        "lightred" => Some(91), "lightgreen" => Some(92), "lightyellow" => Some(93),
-        "lightblue" => Some(94), "lightmagenta" | "lightpurple" => Some(95),
-        "lightcyan" => Some(96), "brightwhite" => Some(97),
-        _ => None,
+fn styled(text: &str, color_name: &str, style_name: &str) -> String {
+    let code = match color_name.to_lowercase().as_str() {
+        "black" => 30, "red" => 31, "green" => 32,
+        "yellow" => 33, "blue" => 34, "magenta" | "purple" => 35,
+        "cyan" => 36, "white" => 37, "gray" => 90,
+        "lightred" => 91, "lightgreen" => 92, "lightyellow" => 93,
+        "lightblue" => 94, "lightmagenta" | "lightpurple" => 95,
+        "lightcyan" => 96, "brightwhite" => 97,
+        _ => return text.to_string(),
+    };
+    let mut s = color::Style::new(code);
+    match style_name.to_lowercase().as_str() {
+        "bold" => s = s.bold(),
+        "dim" => s = s.dim(),
+        "italic" => s = s.italic(),
+        "underline" => s = s.underline(),
+        _ => {}
     }
-}
-
-fn style_code(name: &str) -> Option<u8> {
-    match name.to_lowercase().as_str() {
-        "bold" => Some(1), "dim" => Some(2), "italic" => Some(3),
-        "underline" => Some(4), "blink" => Some(5), "reverse" => Some(7),
-        "hidden" => Some(8), "strikethrough" => Some(9),
-        _ => None,
-    }
-}
-
-fn styled(text: &str, color: &str, style: &str) -> String {
-    let mut codes: Vec<u8> = Vec::new();
-    if let Some(c) = color_code(color) { codes.push(c); }
-    if let Some(s) = style_code(style) { codes.push(s); }
-    if codes.is_empty() {
-        return text.to_string();
-    }
-    let code_str = codes.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(";");
-    format!("\x1b[{code_str}m{text}\x1b[0m")
+    s.paint(text)
 }

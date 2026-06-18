@@ -1,29 +1,20 @@
 use crate::downloader;
-use crate::cmd_names;
 
-pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool, verbose: bool) -> anyhow::Result<()> {
-    if open {
-        return downloader::run_downloader_config(true);
-    }
-
-    if let Some(args) = set {
-        if args.len() < 2 {
-            anyhow::bail!("用法: {} set <名称> on|off", cmd_names::DOWNLOADER_SET);
+pub fn run_downloader(cmd: &crate::opts::DownloaderCommand) -> anyhow::Result<()> {
+    match cmd {
+        crate::opts::DownloaderCommand::List { verbose } => {
+            downloader::run_downloader_list(*verbose)
         }
-        let name = &args[0];
-        let state = &args[1];
-        let enable = match state.as_str() {
-            "on" => true,
-            "off" => false,
-            _ => anyhow::bail!("无效状态: {}（使用 on/off）", state),
-        };
-        return downloader::run_downloader_set(name, enable);
+        crate::opts::DownloaderCommand::Set { name, state } => {
+            let enable = match state.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => anyhow::bail!("无效状态: {}（使用 on/off）", state),
+            };
+            downloader::run_downloader_set(name, enable)
+        }
+        crate::opts::DownloaderCommand::Open => {
+            downloader::run_downloader_config(true)
+        }
     }
-
-    if list {
-        return downloader::run_downloader_list(verbose);
-    }
-
-    anyhow::bail!("请指定操作：{} 列出后端，set <名称> on|off 切换状态，{} 打开配置目录",
-        cmd_names::DOWNLOADER_LIST, cmd_names::DOWNLOADER_OPEN);
 }
