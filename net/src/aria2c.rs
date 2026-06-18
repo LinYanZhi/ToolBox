@@ -37,7 +37,6 @@ pub fn try_aria2c_download(
         if total_size > 0 {
             ctx.bar.set_length(total_size);
         }
-        ctx.set_status("下载中");
     }
 
     // ── 第一步：分片模式（多线程） ──
@@ -53,8 +52,7 @@ pub fn try_aria2c_download(
 
     // ── 第二步：分片失败 → 不分片模式（单线程重试） ──
     if let Some(ref ctx) = pb {
-        ctx.set_thread_label("单线程");
-        ctx.set_status("重试");
+        eprintln!("  > {} (单线程重试)", ctx.name);
     }
     // 清理分片模式留下的残留文件
     let _ = std::fs::remove_file(target_path);
@@ -144,7 +142,7 @@ fn run_aria2c(
             if trimmed.is_empty() {
                 continue;
             }
-            let (cur, total, speed_str) = match parse_aria2_progress(trimmed) {
+            let (cur, total, _speed_str) = match parse_aria2_progress(trimmed) {
                 Some((c, t, s)) => (c, t, s),
                 None => continue,
             };
@@ -159,19 +157,8 @@ fn run_aria2c(
                 } else {
                     String::new()
                 };
-                // 在状态中附加 aria2c 实时速度（MiB→MB 显示）
-                let speed_decimal = speed_str.map(|s| s
-                    .replace("MiB", "MB")
-                    .replace("KiB", "KB")
-                    .replace("GiB", "GB"));
-                let status = if let Some(ref speed) = speed_decimal {
-                    ctx.bar.set_prefix(format!("{} @ {}", prefix, speed));
-                    "下载中"
-                } else {
-                    ctx.bar.set_prefix(prefix);
-                    "下载中"
-                };
-                ctx.set_status(status);
+                // 不把速度塞进 prefix 了，speed 由模板的 {decimal_bytes_per_sec} 统一显示
+                ctx.bar.set_prefix(prefix);
             }
         }
     });

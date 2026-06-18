@@ -50,10 +50,10 @@ pub fn run_cache(_list: bool, clear: bool, open: bool) -> anyhow::Result<()> {
                     });
                     match matched_sd {
                         Some(sd) if sd.default_version != pe_ver => {
-                            color::yellow(" ⚠")
+                            color::yellow(" !")
                         }
                         Some(_) => {
-                            color::green(" ✓")
+                            color::green(" OK")
                         }
                         None => String::new(),
                     }
@@ -88,7 +88,7 @@ pub fn run_cache(_list: bool, clear: bool, open: bool) -> anyhow::Result<()> {
     // 图例
     if entries.iter().any(|(_, _, _, c)| !c.is_empty()) {
         println!();
-        println!("  {} 版本与源定义一致  {} 与源定义不一致", color::green("✓"), color::yellow("⚠"));
+        println!("  {} 版本与源定义一致  {} 与源定义不一致", color::green("OK"), color::yellow("!"));
     }
 
     println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size))));
@@ -123,7 +123,7 @@ fn clear_cache(downloads: &std::path::Path) -> anyhow::Result<()> {
             count,
             format_size(total_size),
         );
-        print!("  {} {}", color::yellow("⚠"), hint);
+        print!("  {} {}", color::yellow("!"), hint);
         use std::io::Write;
         let _ = std::io::stdout().flush();
         let mut input = String::new();

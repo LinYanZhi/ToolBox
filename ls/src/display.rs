@@ -157,38 +157,34 @@ impl Formatter {
             return format!("{}{} ", pad_str, name);
         }
 
-        let color = self.get_item_color(item);
-        match color {
-            Some(code) => {
-                if item.is_dir || item.link_type != crate::links::LinkType::File {
-                    format!("{}{} ", pad_str, paint_by_code(name, code))
-                } else {
-                    // 仅后缀着色：文件名用白色，后缀用扩展名颜色
-                    let ext = std::path::Path::new(name)
-                        .extension()
-                        .map(|e| format!(".{}", e.to_string_lossy()))
-                        .unwrap_or_default();
-                    let name_part = name.strip_suffix(&ext).unwrap_or(name);
-                    if ext.is_empty() {
-                        format!("{}{} ", pad_str, paint_by_code(name, "97"))
-                    } else {
-                        let ext_color = self.config.ext_color(&ext);
-                        match ext_color {
-                            Some(ec) if ec != code => {
-                                format!("{}{}{} ", pad_str, paint_by_code(name_part, "97"), paint_by_code(&ext, ec))
-                            }
-                            _ => format!("{}{} ", pad_str, paint_by_code(name, code)),
-                        }
-                    }
+        if item.is_dir || matches!(item.link_type, crate::links::LinkType::Symlink | crate::links::LinkType::Junction) {
+            let color = self.get_item_color(item);
+            match color {
+                Some(code) => format!("{}{} ", pad_str, paint_by_code(name, code)),
+                None => format!("{}{} ", pad_str, name),
+            }
+        } else {
+            // 文件：文件名主体白色，后缀用扩展名颜色
+            let ext = std::path::Path::new(name)
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
+            if ext.is_empty() {
+                format!("{}{} ", pad_str, paint_by_code(name, "97"))
+            } else {
+                let name_part = name.strip_suffix(&ext).unwrap_or(name);
+                let ext_color = self.config.ext_color(&ext);
+                match ext_color {
+                    Some(ec) => format!("{}{}{} ", pad_str, paint_by_code(name_part, "97"), paint_by_code(&ext, ec)),
+                    None => format!("{}{} ", pad_str, paint_by_code(name, "97")),
                 }
             }
-            None => format!("{}{} ", pad_str, name),
         }
     }
 
     /// 获取项目颜色
     pub fn get_item_color(&self, item: &ItemInfo) -> Option<&str> {
-        if item.is_dir {
+        if item.is_dir || matches!(item.link_type, crate::links::LinkType::Symlink | crate::links::LinkType::Junction) {
             match item.link_type {
                 crate::links::LinkType::Symlink | crate::links::LinkType::Junction => {
                     Some(self.config.dir_link_color.as_str())
@@ -235,8 +231,7 @@ impl Formatter {
 
         if let Some(parent) = parent {
             if !parent.is_empty() && parent != "." {
-                result.push_str(&paint_by_code(parent, &self.config.dir_link_path_color));
-                result.push('\\');
+                result.push_str(&paint_by_code(&format!("{}\\", parent), &self.config.dir_link_path_color));
             }
         }
 

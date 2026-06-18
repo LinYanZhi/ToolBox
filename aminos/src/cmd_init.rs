@@ -10,12 +10,12 @@ use crate::cmd_names;
 pub fn run_init(global: bool) -> anyhow::Result<()> {
     let bin_dir = paths::tools_bin_dir();
     fs::create_dir_all(&bin_dir)?;
-    println!("✓ 已创建: {}", bin_dir.display());
+    println!("OK 已创建: {}", bin_dir.display());
 
     let bin_path = bin_dir.to_string_lossy();
 
     if global {
-        // 写入注册表（原 as self init 的行为）
+        // 写入注册表（原 as tool init -g 的行为）
         let ps_get_path = format!(
             "[Environment]::GetEnvironmentVariable('PATH', 'User')"
         );
@@ -29,7 +29,7 @@ pub fn run_init(global: bool) -> anyhow::Result<()> {
             .any(|p| p.trim().to_lowercase() == bin_path.to_lowercase());
 
         if already_in_path {
-            println!("✓ {} 已在用户 PATH 中", bin_dir.display());
+            println!("OK {} 已在用户 PATH 中", bin_dir.display());
             return Ok(());
         }
 
@@ -50,7 +50,7 @@ pub fn run_init(global: bool) -> anyhow::Result<()> {
 
         if status.success() {
             let is_powershell = detect_powershell();
-            println!("✓ 已将 {} 添加到用户 PATH", bin_dir.display());
+            println!("OK 已将 {} 添加到用户 PATH", bin_dir.display());
             println!("  新打开的终端将自动生效。");
             println!("  如需在当前终端立即生效，请执行:");
             println!();
@@ -64,7 +64,7 @@ pub fn run_init(global: bool) -> anyhow::Result<()> {
             anyhow::bail!("添加 PATH 失败");
         }
 
-        println!("\n✓ as 环境初始化完成");
+        println!("\nOK as 环境初始化完成");
     } else {
         // 默认模式：仅打印提示
         println!();

@@ -1,7 +1,7 @@
 use crate::downloader;
 use crate::cmd_names;
 
-pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool) -> anyhow::Result<()> {
+pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool, verbose: bool) -> anyhow::Result<()> {
     if open {
         return downloader::run_downloader_config(true);
     }
@@ -21,7 +21,7 @@ pub fn run_downloader(list: bool, set: Option<Vec<String>>, open: bool) -> anyho
     }
 
     if list {
-        return downloader::run_downloader_list();
+        return downloader::run_downloader_list(verbose);
     }
 
     anyhow::bail!("请指定操作：{} 列出后端，set <名称> on|off 切换状态，{} 打开配置目录",

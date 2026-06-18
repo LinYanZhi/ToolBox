@@ -64,7 +64,7 @@ impl Fingerprint {
 pub struct AgentConfig {
     /// 使用的浏览器指纹。
     pub fingerprint: Fingerprint,
-    /// 是否跳过证书校验（⚠ 不安全，可能受 MITM 攻击）。
+    /// 是否跳过证书校验（! 不安全，可能受 MITM 攻击）。
     pub insecure: bool,
     /// 连接超时（秒）。
     pub connect_timeout: u64,

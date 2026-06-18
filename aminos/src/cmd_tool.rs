@@ -44,7 +44,7 @@ pub fn run_add(opts: ToolAddOpts) -> anyhow::Result<()> {
             } else {
                 format!("{} → {}", current_ver, source_ver)
             };
-            println!("  ▶ {} {} ...", display, reason);
+            println!("  > {} {} ...", display, reason);
         }
 
         let install_opts = crate::opts::InstallOpts {

@@ -195,7 +195,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
             color::yellow(format!("{} 不可用", unavailable)), elapsed);
 
         if unavailable > 0 {
-            println!("\n\n  {}", color::yellow("⚠ 以下软件所有源均不可用:"));
+            println!("\n\n  {}", color::yellow("! 以下软件所有源均不可用:"));
             for (name, _, _, _) in &summary {
                 if let Some((_, urls)) = by_sw.get(name) {
                     let all_dead = urls.iter().all(|r| r.3.is_none());
@@ -259,7 +259,7 @@ pub fn speedtest(names: &[String], per_software: bool) -> anyhow::Result<()> {
             color::yellow(format!("{} 不可用", unavailable)), elapsed);
 
         if unavailable > 0 {
-            println!("\n\n  {}", color::yellow("⚠ 以下源不可用，建议检查或更新:"));
+            println!("\n\n  {}", color::yellow("! 以下源不可用，建议检查或更新:"));
             for (display, _, url, speed) in results.iter() {
                 if speed.is_none() {
                     println!("    {}: {}", color::gray(format!("{}", display)), url);

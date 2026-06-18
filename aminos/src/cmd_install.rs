@@ -51,7 +51,7 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
                                 let dn = reg.get("display_name").map(|s| s.as_str()).unwrap_or(&n);
                                 let ver = reg.get("version").map(|s| s.as_str()).unwrap_or("未知");
                                 let pub_ = reg.get("publisher").map(|s| s.as_str()).unwrap_or("");
-                                eprintln!("  {} 已在系统中找到: {}", color::green("✓"), dn);
+                                eprintln!("  {} 已在系统中找到: {}", color::green("OK"), dn);
                                 eprintln!("    版本: {}", ver);
                                 if !pub_.is_empty() {
                                     eprintln!("    发行商: {}", pub_);
@@ -100,9 +100,18 @@ fn upgrade_and_install(name: &str, sd: &crate::software::SoftwareDef, opts: &Ins
     println!("  {} 检测到旧版本，正在卸载...", display);
 
     // 卸载旧版本
-    if let Err(e) = crate::installer::uninstall_software(name, false, false) {
+    if let Err(e) = crate::installer::uninstall_software(name, false) {
         eprintln!("  {} 卸载旧版本失败: {}", color::yellow("警告"), e);
         eprintln!("  继续安装新版本...");
+    } else {
+        // 卸载后检查软件是否仍在系统中（用户可能取消了卸载）
+        let vi = sd.versions.get(ver).unwrap();
+        if let Some(ref detection) = vi.detection {
+            if crate::registry::detect_installed(detection).is_some() {
+                println!("  卸载未完成，已跳过安装");
+                return Ok(());
+            }
+        }
     }
 
     // 安装新版本

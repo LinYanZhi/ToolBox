@@ -134,6 +134,61 @@ impl ItemInfo {
         None
     }
 
+    /// 检测是否为 Git 项目目录
+    pub fn get_git_info(&self) -> Option<String> {
+        if !self.is_dir {
+            return None;
+        }
+
+        let git_dir = self.path.join(".git");
+        if !git_dir.exists() || !git_dir.is_dir() {
+            return None;
+        }
+
+        // 尝试获取当前分支名（git 不可用时仍标记为 git 项目）
+        let output = Command::new("git")
+            .args(["-C", &self.path.to_string_lossy(), "rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .ok();
+
+        if let Some(output) = output {
+            if output.status.success() {
+                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !branch.is_empty() {
+                    return Some(format!("git:({})", branch));
+                }
+            }
+        }
+
+        Some("git".to_string())
+    }
+
+    /// 检测是否为 Node.js 项目目录
+    pub fn get_node_info(&self) -> Option<String> {
+        if !self.is_dir {
+            return None;
+        }
+
+        let pkg_json = self.path.join("package.json");
+        if !pkg_json.exists() || !pkg_json.is_file() {
+            return None;
+        }
+
+        // 尝试获取 Node.js 版本
+        let output = Command::new("node")
+            .arg("-v")
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !version.is_empty() {
+                return Some(version);
+            }
+        }
+
+        Some("node".to_string())
+    }
+
     /// 获取创建时间时间戳（秒）
     pub fn create_time_secs(&self) -> Option<i64> {
         self.create_time.and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64)

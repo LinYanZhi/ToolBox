@@ -30,19 +30,34 @@ fn main() {
     color::enable_ansi();
     net::backend::set_tools_bin_dir(paths::tools_bin_dir());
 
+    // 拦截 `as tool` / `as downloader` + 无参数，手动打印帮助
+    //（clap 把 `arg_required_else_help` 嵌套子命令的帮助写 stderr，exit 非零 → 红色）
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() == 2 {
+            let sub = &args[1].to_lowercase();
+            if sub == "tool" {
+                print_tool_help();
+                return;
+            }
+            if sub == "downloader" {
+                print_downloader_help();
+                return;
+            }
+        }
+    }
+
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
-            // 帮助/版本信息直接输出（不走翻译和包红）
-            if e.kind() == clap::error::ErrorKind::DisplayHelp {
+            // 帮助/版本信息直接输出到 stdout（避免 clap 默认写 stderr 导致 PowerShell 变红）
+            if e.kind() == clap::error::ErrorKind::DisplayHelp
+                || e.kind() == clap::error::ErrorKind::DisplayVersion
+            {
                 let _ = e.print();
                 std::process::exit(0);
             }
-            if e.kind() == clap::error::ErrorKind::DisplayVersion {
-                let _ = e.print();
-                std::process::exit(0);
-            }
-            let msg = translate_clap_error(&e);
+            let msg = translate_error(&e);
             eprintln!("  {}", color::bold_red(msg));
             std::process::exit(1);
         }
@@ -67,70 +82,51 @@ fn main() {
     }
 }
 
-/// 将 clap 的错误信息翻译为中文
-fn translate_clap_error(e: &clap::error::Error) -> String {
-    use clap::error::ErrorKind;
-    let msg = e.to_string();
+/// 手动打印 `as tool` 帮助（避免 clap 写 stderr 红色）
+fn print_tool_help() {
+    let args: Vec<&str> = vec!["as.exe", "tool", "--help"];
+    if let Err(e) = Cli::try_parse_from(args) {
+        if e.kind() == clap::error::ErrorKind::DisplayHelp {
+            let _ = e.print();
+        }
+    }
+}
 
+/// 手动打印 `as downloader` 帮助
+fn print_downloader_help() {
+    let args: Vec<&str> = vec!["as.exe", "downloader", "--help"];
+    if let Err(e) = Cli::try_parse_from(args) {
+        if e.kind() == clap::error::ErrorKind::DisplayHelp {
+            let _ = e.print();
+        }
+    }
+}
+
+/// 将 clap 错误翻译为中文（帮助/版本以外的错误）
+fn translate_error(e: &clap::error::Error) -> String {
+    use clap::error::ErrorKind;
+    let raw_str = e.to_string();
+    let raw = color::ansi::strip_ansi(&raw_str);
     match e.kind() {
+        ErrorKind::UnknownArgument => {
+            let flag = raw.split('\'').nth(1).unwrap_or("?");
+            format!("未知的选项 '{}'\n提示: 使用 --help 查看可用选项", flag)
+        }
         ErrorKind::InvalidSubcommand => {
-            // 从原始错误中提取子命令名和提示
-            let mut subcmd = String::new();
-            let mut tip = String::new();
-            // 用 strip_ansi 拿到纯文本
-            let clean = color::ansi::strip_ansi(&msg);
-            for line in clean.lines() {
-                let line = line.trim();
-                if line.contains("unrecognized subcommand") || line.contains("subcommand") {
-                    // 提取单引号内的子命令名
-                    if let Some(start) = line.find('\'') {
-                        let rest = &line[start + 1..];
-                        if let Some(end) = rest.find('\'') {
-                            subcmd = rest[..end].to_string();
-                        }
-                    }
-                } else if line.starts_with("tip:") || line.starts_with("提示:") {
-                    tip = line
-                        .replace("tip:", "提示:")
-                        .replace("some similar subcommands exist", "相似的子命令");
-                }
-            }
-            if !subcmd.is_empty() {
-                format!("未知的子命令 '{}'\n{}", subcmd, tip)
-            } else {
-                clean.to_string()
-            }
+            let sub = raw.split('\'').nth(1).unwrap_or("?");
+            format!("未知的子命令 '{}'\n提示: 使用 --help 查看可用子命令", sub)
         }
         ErrorKind::MissingRequiredArgument => {
-            let clean = color::ansi::strip_ansi(&msg);
-            let mut translated = String::new();
-            for line in clean.lines() {
-                let line = line.trim();
-                if line.starts_with("error:") {
-                    translated.push_str("错误: 缺少必要参数");
-                    translated.push('\n');
-                } else {
-                    translated.push_str(line);
-                    translated.push('\n');
-                }
-            }
-            translated.trim().to_string()
-        }
-        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
-            msg
+            "错误: 缺少必要参数\n提示: 使用 --help 查看正确用法".to_string()
         }
         _ => {
-            let clean = color::ansi::strip_ansi(&msg);
-            clean
+            raw
                 .replace("error:", "错误:")
                 .replace("tip:", "提示:")
                 .replace("Usage:", "用法:")
-                .replace("For more information, try '--help'.", "更多信息请查看 --help")
                 .replace("Commands:", "子命令:")
                 .replace("Options:", "选项:")
                 .replace("Arguments:", "参数:")
-                .replace("Flags:", "标志:")
-                .replace("Subcommand:", "子命令:")
                 .trim()
                 .to_string()
         }
@@ -173,7 +169,7 @@ fn dispatch(cmd: Commands) -> i32 {
             } else {
                 None
             };
-            help::run(|| cmd_downloader::run_downloader(opts.list, set, opts.open))
+            help::run(|| cmd_downloader::run_downloader(opts.list, set, opts.open, opts.verbose))
         }
         Commands::Tool(tool) => {
             dispatch_tool(tool)
@@ -212,7 +208,7 @@ fn print_examples() {
             ("as install 7zip --renew", "强制重新下载并安装"),
             ("as install 7zip --download-only", "仅下载，不安装"),
             ("as install 7zip --type portable", "指定安装类型为便携版"),
-            ("as install 7zip --upgrade", "检测更新，卸载旧版后安装新版"),
+            ("as install 7zip -u", "检测更新，卸载旧版后安装新版"),
         ]),
         ("list", "列出已安装的软件", vec![
             ("as list", "仅列出已安装的软件"),
@@ -233,9 +229,7 @@ fn print_examples() {
             ("as download <url> --target ./tmp", "下载到指定目录"),
         ]),
         ("uninstall", "卸载指定软件", vec![
-            ("as uninstall 7zip", "静默卸载 7-Zip"),
-            ("as uninstall vscode python", "同时卸载多个软件"),
-            ("as uninstall 7zip --gui", "使用图形界面卸载向导"),
+            ("as uninstall 7zip", "弹出卸载窗口卸载 7-Zip"),
             ("as uninstall 7zip --force", "强制删除（跳过卸载器）"),
         ]),
         ("cache", "管理下载缓存", vec![
@@ -265,7 +259,6 @@ fn print_examples() {
             ("as tool add as --upgrade", "升级 as 自身"),
         ]),
         ("tool", "管理自研工具", vec![
-            ("as tool init", "初始化环境"),
             ("as tool list", "列出自研工具"),
             ("as tool remove ls", "移除 ls 工具"),
         ]),

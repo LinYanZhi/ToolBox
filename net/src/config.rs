@@ -23,7 +23,7 @@ pub fn list_backend_states() -> Vec<(String, bool, Option<u8>)> {
         if let Ok(content) = toml::to_string_pretty(&default_toml) {
             let _ = std::fs::write(&path, &content);
         }
-        eprintln!("    ℹ  已创建默认配置文件: {}", path.display());
+        eprintln!("    [i] 已创建默认配置文件: {}", path.display());
         return vec![
             ("Aria2c".into(), true, None),
             ("RustRange".into(), true, Some(16)),
@@ -150,14 +150,14 @@ impl DownloaderConfig {
             if let Ok(content) = toml::to_string_pretty(&default_toml) {
                 let _ = std::fs::write(&config_path, &content);
             }
-            eprintln!("    ℹ  已创建默认配置文件: {}", config_path.display());
+            eprintln!("    [i] 已创建默认配置文件: {}", config_path.display());
             return Self::default();
         }
 
         let content = match std::fs::read_to_string(&config_path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("    ⚠ 读取配置文件失败 ({}), 使用默认配置: {}", config_path.display(), e);
+                eprintln!("    ! 读取配置文件失败 ({}), 使用默认配置: {}", config_path.display(), e);
                 return Self::default();
             }
         };
@@ -171,7 +171,7 @@ impl DownloaderConfig {
                 cfg
             }
             Err(e) => {
-                eprintln!("    ⚠ 解析配置文件失败: {}, 使用默认配置", e);
+                eprintln!("    ! 解析配置文件失败: {}, 使用默认配置", e);
                 Self::default()
             }
         }
@@ -203,13 +203,13 @@ impl DownloaderConfig {
                     // RustSingle 已合并到 RustRange，静默跳过
                 }
                 other => {
-                    eprintln!("    ⚠ 配置文件包含未知后端: {}", other);
+                    eprintln!("    ! 配置文件包含未知后端: {}", other);
                 }
             }
         }
 
         if backends.is_empty() {
-            eprintln!("    ⚠ 配置文件中没有启用的后端，使用默认配置");
+            eprintln!("    ! 配置文件中没有启用的后端，使用默认配置");
             return Self::default();
         }
 
@@ -281,7 +281,7 @@ fn sync_strategies_if_needed(config_path: &std::path::Path, parsed: &mut TomlCon
     let mut changed = false;
     for def in default_strategies() {
         if !existing_names.contains(&def.name) {
-            eprintln!("    ℹ  配置文件中缺少后端「{}」，已自动添加", def.name);
+            eprintln!("    [i] 配置文件中缺少后端「{}」，已自动添加", def.name);
             parsed.download.strategies.push(def);
             changed = true;
         }

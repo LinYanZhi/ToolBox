@@ -65,7 +65,7 @@ pub fn run_self_update() -> anyhow::Result<()> {
 Start-Sleep -Seconds 1
 Copy-Item -Path '{}' -Destination '{}' -Force
 Remove-Item -Path '{}' -Recurse -Force
-Write-Host '✓ as 已更新到 {}'
+Write-Host 'OK as 已更新到 {}'
 "#,
         new_exe.display(),
         current_exe.display(),
@@ -81,7 +81,7 @@ Write-Host '✓ as 已更新到 {}'
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", &ps_path.to_string_lossy()])
         .spawn()?;
 
-    println!("  ✓ 更新脚本已启动，as 将在重启后完成更新");
+    println!("  OK 更新脚本已启动，as 将在重启后完成更新");
     println!("  当前终端可继续使用");
 
     Ok(())

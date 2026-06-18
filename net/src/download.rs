@@ -17,13 +17,7 @@ const CHUNK: usize = 64 * 1024;
 
 // ── ANSI 颜色常量（用于进度条表格） ──
 const C_RESET: &str = "\x1b[0m";
-const C_BOLD: &str = "\x1b[1m";
-const C_RED: &str = "\x1b[31m";
 const C_GREEN: &str = "\x1b[32m";
-const C_YELLOW: &str = "\x1b[33m";
-const C_BRIGHT_MAGENTA: &str = "\x1b[95m";
-const C_CYAN: &str = "\x1b[36m";
-const C_GREY: &str = "\x1b[90m";
 
 /// 格式化下载进度为 "cur/total UNIT"（1 位小数，十进制，无末尾零）。
 /// 例: "12.5/12.5 MB"，"1.2/1.2 GB"
@@ -218,85 +212,17 @@ fn cleanup_strategy_temp(target_path: &Path) {
     }
 }
 
-/// 终端显示宽度：CJK 字符占 2 列，其余占 1 列。
-fn display_width(s: &str) -> usize {
-    s.chars().map(|c| {
-        if c >= '\u{4e00}' && c <= '\u{9fff}'
-            || c >= '\u{3400}' && c <= '\u{4dbf}'
-            || c >= '\u{ff00}' && c <= '\u{ffef}'
-        { 2 } else { 1 }
-    }).sum()
-}
-
-/// 将字符串填充到指定的终端显示宽度（不是 Rust 字符数）。
-fn pad_display(s: &str, width: usize) -> String {
-    let w = display_width(s);
-    if w < width {
-        let mut r = s.to_string();
-        r.push_str(&" ".repeat(width - w));
-        r
-    } else {
-        s.to_string()
-    }
-}
-
-/// 进度条上下文 — 将 (col1, tlabel) 与 bar 打包，用于子函数更新 status。
+/// 进度条上下文 — 将 bar 和名字打包，用于子函数更新进度。
 #[derive(Clone)]
 pub struct ProgressCtx {
     pub bar: indicatif::ProgressBar,
-    col1: String,
-    tlabel: std::cell::Cell<&'static str>,
+    pub name: String,
 }
 
 impl ProgressCtx {
-    pub fn new(bar: indicatif::ProgressBar, col1: &str, tlabel: &'static str) -> Self {
-        Self { bar, col1: col1.to_string(), tlabel: std::cell::Cell::new(tlabel) }
+    pub fn new(bar: indicatif::ProgressBar, name: &str) -> Self {
+        Self { bar, name: name.to_string() }
     }
-    /// 更新状态列（如 "下载中" / "✓ 完成"），自动补齐对齐 + ANSI 颜色。
-    /// 速度信息通过模板的 {bytes_per_sec} 展示在进度条后方，不从 msg 加。
-    pub fn set_status(&self, status: &str) {
-        let base = build_msg(&self.col1, self.tlabel.get(), status);
-        self.bar.set_message(base);
-    }
-    /// 更新线程标签（如 "多线程" → "单线程"），再调 set_status 即可刷新显示。
-    pub fn set_thread_label(&self, label: &'static str) {
-        self.tlabel.set(label);
-    }
-}
-
-fn colored_thread(t: &str) -> String {
-    match t {
-        "多线程" => format!("{}{}{}", C_CYAN, pad_display(t, 8), C_RESET),
-        "单线程" => format!("{}{}{}", C_BRIGHT_MAGENTA, pad_display(t, 8), C_RESET),
-        _ => pad_display(t, 8),
-    }
-}
-
-fn colored_status(s: &str) -> String {
-    let trimmed = s.trim_end();
-    let padded = pad_display(trimmed, 10);
-    match trimmed {
-        "等待中" | "待命中" => format!("{}{}{}", C_GREY, padded, C_RESET),
-        "运行中" | "连接中" => format!("{}{}{}", C_YELLOW, padded, C_RESET),
-        "下载中" => format!("{}{}{}", C_BOLD, padded, C_RESET),
-        _ if trimmed.starts_with('✓') => format!("{}{}{}", C_GREEN, padded, C_RESET),
-        _ if trimmed.starts_with('✗') => format!("{}{}{}", C_RED, padded, C_RESET),
-        _ => padded,
-    }
-}
-
-/// 构建 5 列进度条消息。
-///   列 1：工具名（14 列，pad）
-///   列 2：线程（8 列，彩色）
-///   列 3：状态（10 列，彩色）
-///   ── 以上共 32 列 ──
-///   列 4：进度条（模板中渲染）
-///   列 5：进度数值（模板中渲染）
-pub(crate) fn build_msg(col1: &str, thread: &str, status: &str) -> String {
-    let col1 = pad_display(col1, 14);
-    let col2 = colored_thread(thread);
-    let col3 = colored_status(status);
-    format!("{}{}{}", col1, col2, col3)
 }
 
 /// Ctrl+C 被按下时设为 true，各环节检查此标志后优雅退出。
@@ -343,14 +269,9 @@ pub fn download_with_fallback(
     // 清理上次残留的临时文件
     let _ = std::fs::remove_file(target_path.with_extension("tmp"));
 
-    // ── 进度条模板（仅 tracked 后端使用） ──
+    // ── 进度条模板（无 msg，消息用 eprintln 单独打印） ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{msg} {bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {elapsed_precise}")
-        .unwrap()
-        .progress_chars("━━━");
-    // 自报速度的后端（aria2c），去掉 decimal_bytes_per_sec 避免速度重复
-    let tracked_style_nospeed = indicatif::ProgressStyle::default_bar()
-        .template("{msg} {bar:26.green/white} {prefix:.green} {elapsed_precise}")
+        .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta}")
         .unwrap()
         .progress_chars("━━━");
 
@@ -377,15 +298,12 @@ pub fn download_with_fallback(
         // 创建一个进度条（注册到 MultiProgress 确保渲染）
         let bar = progress().add(indicatif::ProgressBar::new(1));
         if tracked {
-            // aria2c 自报速度，用无 speed 模板避免重复
-            if backend.id() == "aria2c" {
-                bar.set_style(tracked_style_nospeed.clone());
-            } else {
-                bar.set_style(tracked_style.clone());
-            }
+            bar.set_style(tracked_style.clone());
         }
-        let ctx = ProgressCtx::new(bar, sname, backend.thread_label());
+        let ctx = ProgressCtx::new(bar, sname);
         let cancel = Cancel::new();
+
+        eprintln!("  >> {} ({})", sname, backend.thread_label());
 
         // 逐 URL 尝试
         for url in urls {
@@ -395,8 +313,6 @@ pub fn download_with_fallback(
 
             let tmp_path = target_path.with_extension("tmp");
             let _ = std::fs::remove_file(&tmp_path);
-
-            ctx.set_status("下载中");
 
             let result = backend.download(
                 url,
@@ -408,7 +324,9 @@ pub fn download_with_fallback(
             match result {
                 Ok(()) => {
                     // ── 下载成功 ──
-                    if tracked { ctx.bar.finish_and_clear(); }
+                    if tracked {
+                        ctx.bar.finish();
+                    }
 
                     // 执行文件校验
                     if verify_enabled && !verify_downloaded_file(&tmp_path) {
@@ -424,6 +342,8 @@ pub fn download_with_fallback(
                     let file_size = std::fs::metadata(target_path)
                         .map(|m| m.len()).unwrap_or(0);
                     let elapsed = start.elapsed();
+
+                    eprintln!("  OK {}", sname);
 
                     return Ok(DownloadReport {
                         strategy_used: sname.to_string(),
@@ -441,10 +361,12 @@ pub fn download_with_fallback(
             }
         }
 
-        // 该后端所有 URL 均失败
-        if tracked { ctx.bar.abandon(); }
+        // 该后端所有 URL 均失败 → 冻结条，打印失败信息
+        if tracked {
+            ctx.bar.finish();
+        }
         if let Some(ref err) = last_error {
-            eprintln!("  {} {}: no usable URL, last error: {}", color::yellow("跳过"), sname, err);
+            eprintln!("  ! {} 失败: {}", sname, err);
         }
     }
 
@@ -534,7 +456,7 @@ pub(crate) fn download_with_ureq(
             if attempt == 0 && set_cookie.is_some() {
                 // 首次遇到 HTML + Set-Cookie → cookie 挑战
                 cookie = Some(set_cookie.unwrap());
-                eprintln!("       ⚠ Cookie 挑战，重试中...");
+                eprintln!("       ! Cookie 挑战，重试中...");
                 last_err = None;
                 continue;
             }
@@ -543,13 +465,13 @@ pub(crate) fn download_with_ureq(
                 // 尝试剥离 tads 参数（JS 挑战的清理逻辑）
                 if let Some(pos) = current_url.find("?tads") {
                     current_url = current_url[..pos].to_string();
-                    eprintln!("       ⚠ 清理 URL 参数重试...");
+                    eprintln!("       ! 清理 URL 参数重试...");
                     last_err = None;
                     continue;
                 }
                 if let Some(pos) = current_url.find("&tads") {
                     current_url = current_url[..pos].to_string();
-                    eprintln!("       ⚠ 清理 URL 参数重试...");
+                    eprintln!("       ! 清理 URL 参数重试...");
                     last_err = None;
                     continue;
                 }
@@ -582,25 +504,15 @@ pub(crate) fn download_with_ureq(
             }
             ctx.bar.clone()
         });
-        let mut first_byte = true;
 
         loop {
             if cancel.is_cancelled() {
-                if let Some(ref ctx) = external_pb {
-                    ctx.set_status("✗ 已取消");
-                }
                 let _ = std::fs::remove_file(target_path);
                 return Err(anyhow::anyhow!("已取消"));
             }
             let n = reader.read(&mut buf)?;
             if n == 0 {
                 break;
-            }
-            if first_byte {
-                first_byte = false;
-                if let Some(ref ctx) = external_pb {
-                    ctx.set_status("下载中");
-                }
             }
             file.write_all(&buf[..n])?;
             cancel.mark_progress();
@@ -610,10 +522,6 @@ pub(crate) fn download_with_ureq(
                     pb.set_prefix(crate::download::format_decimal_progress(pb.position(), total));
                 }
             }
-        }
-
-        if let Some(ref ctx) = external_pb {
-            ctx.set_status("✓ 完成");
         }
 
         return Ok(());
@@ -705,7 +613,7 @@ pub fn download_with_url_fallback(
     // ── Phase 1: 并行探测，收集可达地址 ──
     let alive = probe_alive_urls(&expanded);
     let (immediate, deferred) = if alive.is_empty() {
-        eprintln!("    ⚠ 全部探测无响应（8s 超时），降级为全部地址参与");
+        eprintln!("    ! 全部探测无响应（8s 超时），降级为全部地址参与");
         (expanded, vec![])
     } else {
         let deferred: Vec<String> = expanded
@@ -722,7 +630,7 @@ pub fn download_with_url_fallback(
         if deferred.is_empty() {
             return Err(first_err);
         }
-        eprintln!("    ⚠ 初始地址全部失败，降级到 {} 个未探测地址重试...", deferred.len());
+        eprintln!("    ! 初始地址全部失败，降级到 {} 个未探测地址重试...", deferred.len());
         cleanup_strategy_temp(target_path);
         download_with_fallback(&deferred, target_path, config)
     })

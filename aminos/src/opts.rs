@@ -23,7 +23,7 @@ fn styles() -> styling::Styles {
 )]
 pub struct Cli {
     /// 显示使用示例
-    #[arg(short = 'e', long = "example", global = true)]
+    #[arg(short = 'e', long = "example")]
     pub example: bool,
 
     #[command(subcommand)]
@@ -82,7 +82,7 @@ pub struct InstallOpts {
     pub inst_type: Option<String>,
 
     /// 检测更新，卸载旧版后安装新版
-    #[arg(long = "upgrade")]
+    #[arg(short = 'u', long = "upgrade")]
     pub upgrade: bool,
 }
 
@@ -165,10 +165,6 @@ pub struct UninstallOpts {
     /// 软件名称（可同时指定多个）
     pub names: Vec<String>,
 
-    /// 使用图形界面卸载
-    #[arg(short = 'g', long = "gui")]
-    pub gui: bool,
-
     /// 强制删除（跳过卸载器）
     #[arg(short = 'f', long = "force")]
     pub force: bool,
@@ -219,12 +215,16 @@ pub struct SourceOpts {
 #[derive(Args)]
 pub struct DownloaderOpts {
     /// 列出所有下载后端
-    #[arg(long = "list")]
+    #[arg(short = 'l', long = "list")]
     pub list: bool,
 
     /// 在资源管理器中打开配置目录
     #[arg(short = 'o', long = "open")]
     pub open: bool,
+
+    /// 显示后端的详细说明（需与 --list 同时使用）
+    #[arg(short = 'v', long = "verbose")]
+    pub verbose: bool,
 
     /// 子命令: set <名称> on|off
     #[arg(trailing_var_arg = true)]
@@ -232,7 +232,11 @@ pub struct DownloaderOpts {
 }
 
 #[derive(Subcommand)]
-#[command(arg_required_else_help = true)]
+#[command(
+    arg_required_else_help = true,
+    styles = styles(),
+    disable_help_subcommand = true,
+)]
 pub enum ToolCli {
     /// 初始化环境（默认打印 PATH 提示，-g 写入注册表）
     Init(ToolInitOpts),

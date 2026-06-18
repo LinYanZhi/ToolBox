@@ -1,8 +1,26 @@
 use color::DisplayWidth;
 use crate::{paths, cmd_names};
 
+/// 估算单个字符的显示宽度（CJK 等宽字符占 2）。
+fn char_display_width(c: char) -> usize {
+    // 简单判断 CJK / 全角字符
+    if ('\u{1100}'..='\u{115f}').contains(&c)
+        || ('\u{2e80}'..='\u{9fff}').contains(&c)
+        || ('\u{ac00}'..='\u{d7a3}').contains(&c)
+        || ('\u{f900}'..='\u{faff}').contains(&c)
+        || ('\u{fe30}'..='\u{fe6f}').contains(&c)
+        || ('\u{ff01}'..='\u{ff60}').contains(&c)
+        || ('\u{ffe0}'..='\u{ffe6}').contains(&c)
+        || ('\u{1f000}'..='\u{1f9ff}').contains(&c)
+    {
+        2
+    } else {
+        1
+    }
+}
+
 /// 运行 `as downloader` 子命令。
-pub fn run_downloader_list() -> anyhow::Result<()> {
+pub fn run_downloader_list(verbose: bool) -> anyhow::Result<()> {
     // 确保工具目录已设置
     net::backend::set_tools_bin_dir(paths::tools_bin_dir());
     let states = net::config::list_backend_states();
@@ -18,11 +36,7 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
         let path_text = if net::backend::backend_is_builtin(name) {
             "[内置]".into()
         } else if let Some(p) = net::backend::backend_binary_path(name) {
-            if p.starts_with("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\") {
-                "powershell.exe".into()
-            } else {
-                p
-            }
+            p
         } else {
             "未安装".into()
         };
@@ -43,6 +57,10 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
         color::bold_cyan("下载后端列表"));
     println!("  {}",
         color::gray(format!("({} <name> <on|off> 切换)", cmd_names::DOWNLOADER_SET)));
+    if verbose {
+        println!("  {}",
+            color::gray("(详细说明)"));
+    }
     println!();
 
     // 表头
@@ -80,6 +98,21 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
             padded_path,
             padded_range,
         );
+
+        // verbose 模式下，在后端所在行下方显示说明，与"程序路径"列对齐
+        if verbose {
+            let desc = net::backend::backend_description(&r.name);
+            if !desc.is_empty() {
+                // 缩进 = 4(初始) + label_name_w + 2(间隔) + label_status_w + 2(间隔)
+                let desc_indent = label_name_w + label_status_w + 8;
+                // 可用宽度 = 程序路径列 + 间隔 + 分片列
+                let desc_max_width = label_path_w + 2 + label_range_w;
+                let indent_str = color::gray(&color::pad_left("", desc_indent));
+                for line in wrap_text(desc, desc_max_width) {
+                    println!("{}{}", indent_str, color::gray(&line));
+                }
+            }
+        }
     }
 
     println!();
@@ -87,6 +120,53 @@ pub fn run_downloader_list() -> anyhow::Result<()> {
     println!("  {}", color::gray(format!("{}  在资源管理器中打开", cmd_names::DOWNLOADER_OPEN)));
     println!();
     Ok(())
+}
+
+/// 按显示宽度自动换行文本（在空格或标点处断开）。
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    use color::DisplayWidth;
+
+    if max_width < 10 || text.display_width() <= max_width {
+        return vec![text.to_string()];
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_w: usize = 0;
+
+    // 按字符遍历，在超出 max_width 时回溯到最近的可断开位置
+    for ch in text.chars() {
+        let cw = char_display_width(ch);
+        if current_w + cw > max_width {
+            // 当前行已满，检查是否有空格或标点可断
+            if let Some(last_space) = current.rfind(|c: char| c.is_whitespace() || c == '，' || c == '。' || c == '）') {
+                let after = current[last_space + 1..].to_string();
+                let after_w = after.display_width();
+                current.truncate(last_space + 1);
+                // 去除行尾空白
+                let trimmed = current.trim_end().to_string();
+                if !trimmed.is_empty() {
+                    lines.push(trimmed);
+                }
+                current = after;
+                current_w = after_w;
+            } else {
+                // 无空格，直接截断
+                lines.push(current.trim_end().to_string());
+                current = String::new();
+                current_w = 0;
+            }
+        }
+        current.push(ch);
+        current_w += cw;
+    }
+
+    let trimmed = current.trim_end().to_string();
+    if !trimmed.is_empty() {
+        lines.push(trimmed);
+    }
+
+    lines
 }
 
 /// 设置后端启用/禁用。
@@ -98,7 +178,7 @@ pub fn run_downloader_set(name: &str, enable: bool) -> anyhow::Result<()> {
         color::green(action),
         color::gray(net::config::config_file_path().to_string_lossy()),
     );
-    println!("  下次下载时将生效。\n");
+    println!("  下次下载时将生效。");
     Ok(())
 }
 

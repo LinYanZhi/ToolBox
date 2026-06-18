@@ -93,6 +93,9 @@ pub trait DownloadBackend: Send + Sync + Debug {
     /// 健康检查：后端是否可用（二进制存在、平台匹配等）。
     fn health_check(&self) -> bool;
 
+    /// 后端的详细说明（用于 verbose 模式展示）。
+    fn description(&self) -> &'static str;
+
     /// 执行下载。
     fn download(
         &self,
@@ -124,6 +127,7 @@ impl DownloadBackend for RustRangeBackend {
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "多线程" }
     fn health_check(&self) -> bool { true } // 纯 Rust，始终可用
+    fn description(&self) -> &'static str { "纯 Rust 实现的多线程分片下载器，零外部依赖。支持 Range 分片和断点续传。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::range::parallel_download(url, target_path, self.threads as usize, self.resume, cancel, pb)
@@ -147,6 +151,7 @@ impl DownloadBackend for Aria2cBackend {
             .map(|dir| dir.join("aria2c.exe").is_file())
             .unwrap_or(false)
     }
+    fn description(&self) -> &'static str { "基于 aria2c 的高性能多线程下载器，支持 Range 分片。需安装 (as tool install aria2c)。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::aria2c::try_aria2c_download(url, target_path, cancel, pb)
@@ -179,6 +184,13 @@ impl DownloadBackend for UreqBackend {
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "单线程" }
     fn health_check(&self) -> bool { true }
+    fn description(&self) -> &'static str {
+        if self.insecure {
+            "Ureq 的跳过 TLS 证书验证版本，用于自签名证书或代理 MITM 场景。"
+        } else {
+            "纯 Rust 单线程下载器，模拟完整浏览器指纹。内置 Cookie/JS 挑战绕过机制，反反爬能力强。"
+        }
+    }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         let agent_cfg = crate::agent::AgentConfig {
@@ -205,6 +217,7 @@ impl DownloadBackend for PowerShellBackend {
     fn health_check(&self) -> bool {
         cfg!(target_os = "windows")
     }
+    fn description(&self) -> &'static str { "调用 System.Net.WebClient 下载。使用 Windows Schannel TLS 栈，JA3 指纹独特，可绕过部分 CDN 反爬。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, _pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::powershell::try_powershell_download(url, target_path, cancel)
@@ -225,6 +238,7 @@ impl DownloadBackend for PowerShellInvokeBackend {
     fn health_check(&self) -> bool {
         cfg!(target_os = "windows")
     }
+    fn description(&self) -> &'static str { "调用 PowerShell Invoke-WebRequest 下载。带完整浏览器请求头，HTTP 栈与 PowerShell 后端相同。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, _pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::powershell::try_powershell_invoke(url, target_path, cancel)
@@ -245,6 +259,7 @@ impl DownloadBackend for BitsBackend {
     fn health_check(&self) -> bool {
         cfg!(target_os = "windows")
     }
+    fn description(&self) -> &'static str { "使用 Windows BITS 后台智能传输服务，系统级下载。支持分片续传，进程退出后仍可继续下载。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, _pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::powershell::try_bits_transfer(url, target_path, cancel)
@@ -263,6 +278,7 @@ impl DownloadBackend for CurlBackend {
     fn tracked(&self) -> bool { false }
     fn thread_label(&self) -> &'static str { "单线程" }
     fn health_check(&self) -> bool { which_available("curl") }
+    fn description(&self) -> &'static str { "调用系统 curl.exe 下载，Windows 10/11 自带。作为最终兜底方案，失败时自动尝试跳过证书验证。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, _pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::curl::try_curl_download(url, target_path, cancel)
@@ -417,4 +433,19 @@ pub fn backend_binary_path(name: &str) -> Option<String> {
 /// 查询指定后端是否支持 Range 分片下载。
 pub fn backend_supports_range(name: &str) -> bool {
     matches!(name, "RustRange" | "Aria2c" | "Curl" | "BitsTransfer")
+}
+
+/// 查询指定后端的详细说明。
+pub fn backend_description(name: &str) -> &'static str {
+    match name {
+        "RustRange" => "纯 Rust 实现的多线程分片下载器，零外部依赖。支持 Range 分片和断点续传。",
+        "Aria2c" => "基于 aria2c 的高性能多线程下载器，支持 Range 分片。需安装（as tool install aria2c）。",
+        "Ureq" => "纯 Rust 单线程下载器，模拟完整浏览器指纹。内置 Cookie/JS 挑战绕过机制，反反爬能力强。",
+        "UreqInsecure" => "Ureq 的跳过 TLS 证书验证版本，用于自签名证书或代理 MITM 场景。",
+        "PowerShell" => "调用 System.Net.WebClient 下载。使用 Windows Schannel TLS 栈，JA3 指纹独特，可绕过部分 CDN 反爬。",
+        "PowerShellInvoke" => "调用 PowerShell Invoke-WebRequest 下载。带完整浏览器请求头，HTTP 栈与 PowerShell 后端相同。",
+        "BitsTransfer" => "使用 Windows BITS 后台智能传输服务，系统级下载。支持分片续传，进程退出后仍可继续下载。",
+        "Curl" => "调用系统 curl.exe 下载，Windows 10/11 自带。作为最终兜底方案，失败时自动尝试跳过证书验证。",
+        _ => "",
+    }
 }

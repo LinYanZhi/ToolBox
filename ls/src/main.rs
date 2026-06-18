@@ -3,7 +3,7 @@ mod display;
 mod links;
 mod scanner;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, CommandFactory, builder::styling};
 use color::*;
@@ -40,9 +40,13 @@ struct Cli {
     #[arg(short = 'n', long = "no-color")]
     no_color: bool,
 
-    /// 排序: default name suffix create update
+    /// 排序方式: default(目录优先+名称), name, suffix(扩展名), size, create(创建时间), update(修改时间)
     #[arg(short = 's', long = "sort", default_value = "default")]
     sort: String,
+
+    /// 按文件大小排序（从大到小，等同于 -s size）
+    #[arg(short = 'S', long = "size-sort")]
+    size_sort: bool,
 
     /// 排除指定后缀（如 .txt .md）
     #[arg(long = "exclude", num_args = 1..)]
@@ -80,17 +84,13 @@ struct Cli {
     #[arg(long = "link")]
     link: Option<String>,
 
-    /// 显示配置文件路径
-    #[arg(long = "config")]
-    config: bool,
+    /// 长格式输出（每行一个，显示详细信息）
+    #[arg(short = 'l', long = "long")]
+    long: bool,
 
-    /// 在资源管理器中打开配置目录
-    #[arg(long = "config-open")]
-    config_open: bool,
-
-    /// 清除配置文件，恢复默认配色
-    #[arg(long = "config-clear")]
-    config_clear: bool,
+    /// 递归列出子目录内容
+    #[arg(short = 'R', long = "recursive")]
+    recursive: bool,
 
     /// 显示帮助信息
     #[arg(short = 'h', long = "help", global = true)]
@@ -171,30 +171,7 @@ fn main() {
         return;
     }
 
-    // 配置管理（--config / --config-open / --config-clear）
-    if cli.config {
-        let path = config::ensure_config();
-        println!("{}", path.display());
-        return;
-    }
-    if cli.config_open {
-        let dir = config::get_config_dir();
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::process::Command::new("explorer")
-            .arg(&*dir.to_string_lossy())
-            .spawn();
-        return;
-    }
-    if cli.config_clear {
-        if config::clear_config() {
-            println!("{} 配置文件已清除，下次运行将自动恢复为默认配置", green("✓"));
-        } else {
-            println!("{} 当前没有配置文件，无需清除", gray("•"));
-        }
-        return;
-    }
-
-    // 加载配置（优先读取 YAML 文件，不存在则自动创建）
+    // 加载配置
     config::ColorConfig::init();
     let color_config = config::ColorConfig::load();
     let formatter = Formatter::new(color_config, cli.no_color);
@@ -260,26 +237,38 @@ fn main() {
         items.retain(|item| item.is_dir);
     }
 
-    // 排序
-    sort_items(&mut items, &cli.sort);
+    // 排序（-S 优先级高于 -s）
+    let sort_key = if cli.size_sort { "size" } else { &cli.sort };
+    sort_items(&mut items, sort_key);
 
-    // 计算最大宽度
-    let max_width = if cli.right_align {
-        items.iter().map(|item| item.name.display_width()).max().unwrap_or(0)
-    } else {
-        0
-    };
-
-    let max_size_width = if cli.size {
-        items.iter().map(|item| color::format_size(item.size).len()).max().unwrap_or(0)
-    } else {
-        0
-    };
+    // 递归显示
+    if cli.recursive {
+        print_recursive(target_dir, &formatter, &cli, sort_key);
+        return;
+    }
 
     // 输出
-    for item in &items {
-        let line = format_item_line(item, &formatter, &cli, max_width, max_size_width);
-        println!("{}", line);
+    if cli.abs_path || cli.long {
+        // 长格式或绝对路径：每行一个
+        let max_width = if cli.right_align {
+            items.iter().map(|item| item.name.display_width()).max().unwrap_or(0)
+        } else {
+            0
+        };
+
+        let max_size_width = if cli.size {
+            items.iter().map(|item| color::format_size(item.size).len()).max().unwrap_or(0)
+        } else {
+            0
+        };
+
+        for item in &items {
+            let line = format_item_line(item, &formatter, &cli, max_width, max_size_width);
+            println!("{}", line);
+        }
+    } else {
+        // 多列输出
+        print_multi_column(&items, &formatter, cli.no_color);
     }
 }
 
@@ -291,8 +280,10 @@ fn print_examples_help() {
     println!("  {}", bold_yellow("目录列表"));
 
     let examples: &[(&str, &str)] = &[
-        ("ls",                  "列出当前目录"),
+        ("ls",                  "列出当前目录（多列）"),
         ("ls PATH",             "列出指定目录"),
+        ("ls -l",               "长格式（每行一个，显示详细信息）"),
+        ("ls -l PATH",          "长格式指定目录"),
         ("ls -t",               "树形显示（无限深度）"),
         ("ls -t 3",            "树形显示（深度 3）"),
         ("ls -t 3 路径",        "树形显示指定目录"),
@@ -306,11 +297,11 @@ fn print_examples_help() {
         ("ls -d",               "只显示目录"),
         ("ls -s name",          "按名称排序"),
         ("ls -s suffix",        "按后缀排序"),
+        ("ls -S",               "按文件大小排序（大→小）"),
+        ("ls -R",               "递归列出子目录内容"),
+        ("ls -R -l",            "递归列出（长格式）"),
         ("ls --link PATH",      "检查链接信息"),
         ("ls -n",               "不使用颜色输出"),
-        ("ls --config",         "显示配置文件路径"),
-        ("ls --config-open",    "打开配置目录"),
-        ("ls --config-clear",   "清除配置文件"),
     ];
 
     let max_w = examples.iter().map(|(e, _)| e.display_width()).max().unwrap_or(28);
@@ -406,20 +397,62 @@ fn format_item_line(
     let mut line = String::new();
 
     if cli.abs_path {
-        let abs_path = std::fs::canonicalize(&item.path)
-            .unwrap_or_else(|_| item.path.clone())
-            .to_string_lossy()
-            .to_string();
+        let raw = std::fs::canonicalize(&item.path)
+            .unwrap_or_else(|_| item.path.clone());
+        let abs_path = raw.to_string_lossy()
+            .replace("\\\\?\\", "")
+            .replace("\\??\\", "");
 
         if cli.no_color {
             line.push_str(&abs_path);
-        } else {
-            let color = formatter.get_item_color(item);
-            match color {
-                Some(c) => line.push_str(&display::paint_by_code(&abs_path, c)),
-                None => line.push_str(&abs_path),
+            return line;
+        }
+
+        let path = std::path::Path::new(&abs_path);
+        let parent = path.parent().and_then(|p| p.to_str());
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(&abs_path);
+
+        let is_link = matches!(item.link_type, links::LinkType::Symlink | links::LinkType::Junction);
+
+        // 父路径灰显
+        if let Some(parent) = parent {
+            if !parent.is_empty() && parent != "." {
+                line.push_str(&display::paint_by_code(&format!("{}\\", parent), "90"));
             }
         }
+
+        if item.is_dir || is_link {
+            // 目录/链接目录：目录名用目录色
+            let color = formatter.get_item_color(item);
+            match color {
+                Some(c) => line.push_str(&display::paint_by_code(file_name, c)),
+                None => line.push_str(file_name),
+            }
+        } else {
+            // 文件：文件名白色，后缀用扩展名颜色
+            let ext = std::path::Path::new(file_name)
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
+            if ext.is_empty() {
+                line.push_str(&display::paint_by_code(file_name, "97"));
+            } else {
+                let name_part = file_name.strip_suffix(&ext).unwrap_or(file_name);
+                let ext_color = formatter.config.ext_color(&ext);
+                line.push_str(&display::paint_by_code(name_part, "97"));
+                match ext_color {
+                    Some(ec) => line.push_str(&display::paint_by_code(&ext, ec)),
+                    None => line.push_str(&ext),
+                }
+            }
+        }
+
+        // 链接目标
+        if let Some(ref target) = item.link_target {
+            line.push_str(&formatter.print_link_arrow(item.is_dir));
+            line.push_str(&formatter.print_link_target(target, item.link_type == links::LinkType::Shortcut));
+        }
+
         return line;
     }
 
@@ -460,7 +493,7 @@ fn format_item_line(
         }
     }
 
-    // Python/Java 环境版本
+    // Python/Java/Node 环境版本
     if item.is_dir && !is_link {
         let name_lower = item.name.to_lowercase();
         let looks_like_python = name_lower == ".venv" || name_lower == "venv"
@@ -468,6 +501,7 @@ fn format_item_line(
             || name_lower.starts_with("python");
         let looks_like_java = name_lower.contains("jdk") || name_lower.contains("jre")
             || name_lower.contains("java");
+        let looks_like_node = name_lower.contains("node");
 
         if looks_like_python {
             if let Some(ver) = item.get_python_env() {
@@ -482,6 +516,17 @@ fn format_item_line(
             if let Some(ver) = item.get_java_env() {
                 line.push_str(&format_text_colored(&ver, cli));
             }
+        } else if looks_like_node {
+            if let Some(ver) = item.get_node_info() {
+                line.push_str(&format_text_colored(&ver, cli));
+            }
+        }
+    }
+
+    // Git 项目检测
+    if item.is_dir && !is_link {
+        if let Some(info) = item.get_git_info() {
+            line.push_str(&format_text_colored(&info, cli));
         }
     }
 
@@ -492,6 +537,140 @@ fn format_item_line(
 fn format_text_colored(text: &str, _cli: &Cli) -> String {
     let quoted = format!("\"{}\"", text);
     gray(&quoted)
+}
+
+// ── 多列输出 ──────────────────────────────────────────
+
+/// 获取终端宽度（列数），失败时默认 80
+fn terminal_width() -> usize {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct COORD { x: i16, y: i16 }
+        #[repr(C)]
+        struct SMALL_RECT { left: i16, top: i16, right: i16, bottom: i16 }
+        #[repr(C)]
+        struct CONSOLE_SCREEN_BUFFER_INFO {
+            dw_size: COORD,
+            dw_cursor_position: COORD,
+            w_attributes: u16,
+            sr_window: SMALL_RECT,
+            dw_maximum_window_size: COORD,
+        }
+        unsafe extern "system" {
+            fn GetStdHandle(nStdHandle: u32) -> isize;
+            fn GetConsoleScreenBufferInfo(
+                hConsoleOutput: isize,
+                lpConsoleScreenBufferInfo: *mut CONSOLE_SCREEN_BUFFER_INFO,
+            ) -> i32;
+        }
+        unsafe {
+            const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32;
+            let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+            if handle == -1 || handle == 0 {
+                return 80;
+            }
+            let mut info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+            if GetConsoleScreenBufferInfo(handle, &mut info) != 0 {
+                (info.sr_window.right - info.sr_window.left + 1) as usize
+            } else {
+                80
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("COLUMNS").ok().and_then(|s| s.parse().ok()).unwrap_or(80)
+    }
+}
+
+/// 生成多列模式下的条目显示名
+fn format_item_name_multi(item: &ItemInfo, formatter: &Formatter) -> String {
+    let name = &item.name;
+    if formatter.no_color {
+        if item.is_dir || matches!(item.link_type, links::LinkType::Symlink | links::LinkType::Junction) {
+            name.to_string()
+        } else {
+            name.to_string()
+        }
+    } else {
+        // 带颜色
+        if item.is_dir || matches!(item.link_type, crate::links::LinkType::Symlink | crate::links::LinkType::Junction) {
+            // 目录/链接目录：浅蓝色
+            formatter.get_item_color(item)
+                .map(|c| display::paint_by_code(name, c))
+                .unwrap_or_else(|| name.to_string())
+        } else if matches!(item.link_type, crate::links::LinkType::Shortcut) {
+            formatter.get_item_color(item)
+                .map(|c| display::paint_by_code(name, c))
+                .unwrap_or_else(|| name.to_string())
+        } else {
+            // 文件：文件名白色，后缀用扩展名颜色
+            let ext = std::path::Path::new(name)
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
+            if ext.is_empty() {
+                display::paint_by_code(name, "97")
+            } else {
+                let name_part = name.strip_suffix(&ext).unwrap_or(name);
+                let ext_color = formatter.config.ext_color(&ext);
+                match ext_color {
+                    Some(ec) => format!("{}{}", display::paint_by_code(name_part, "97"), display::paint_by_code(&ext, ec)),
+                    None => display::paint_by_code(name, "97"),
+                }
+            }
+        }
+    }
+}
+
+/// 多列输出
+fn print_multi_column(items: &[ItemInfo], formatter: &Formatter, _no_color: bool) {
+    use color::DisplayWidth;
+
+    if items.is_empty() {
+        return;
+    }
+
+    // 生成每列的显示字符串
+    let entries: Vec<String> = items.iter()
+        .map(|item| format_item_name_multi(item, formatter))
+        .collect();
+
+    let term_width = terminal_width();
+
+    // 计算最大项宽度
+    let max_width = entries.iter().map(|s| s.display_width()).max().unwrap_or(0);
+    let col_width = max_width + 2; // 2 格间距
+
+    if col_width >= term_width || items.len() <= 1 {
+        // 太窄了或只有一个，每行一个
+        for e in &entries {
+            println!("{}", e);
+        }
+        return;
+    }
+
+    let num_cols = ((term_width - 1) / col_width).max(1);
+    let num_rows = (items.len() + num_cols - 1) / num_cols;
+
+    for row in 0..num_rows {
+        let mut line = String::new();
+        for col in 0..num_cols {
+            let idx = col * num_rows + row;
+            if idx < entries.len() {
+                let s = &entries[idx];
+                line.push_str(s);
+                if col < num_cols - 1 {
+                    let padding = col_width.saturating_sub(s.display_width());
+                    for _ in 0..padding {
+                        line.push(' ');
+                    }
+                }
+            }
+        }
+        println!("{}", line);
+    }
 }
 
 /// 排序项目
@@ -511,6 +690,15 @@ fn sort_items(items: &mut Vec<ItemInfo>, sort: &str) {
                     .map(|e| e.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
                 ext_a.cmp(&ext_b).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
+        }
+        "size" => {
+            items.sort_by(|a, b| {
+                // 目录优先，同级按大小降序
+                if a.is_dir != b.is_dir {
+                    return if a.is_dir { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+                }
+                b.size.cmp(&a.size)
             });
         }
         "create" => {
@@ -586,10 +774,32 @@ fn print_tree(
         if cli.no_color {
             println!("{}{}{}", prefix, connector, item.name);
         } else {
-            let color = formatter.get_item_color(item);
-            match color {
-                Some(c) => println!("{}{}{}", prefix, connector, display::paint_by_code(&item.name, c)),
-                None => println!("{}{}{}", prefix, connector, item.name),
+            let name = &item.name;
+            if item.is_dir || matches!(item.link_type, links::LinkType::Symlink | links::LinkType::Junction) {
+                // 目录：整体用目录色
+                let color = formatter.get_item_color(item);
+                match color {
+                    Some(c) => println!("{}{}{}", prefix, connector, display::paint_by_code(name, c)),
+                    None => println!("{}{}{}", prefix, connector, name),
+                }
+            } else {
+                // 文件：白色主体 + 后缀颜色
+                let ext = std::path::Path::new(name)
+                    .extension()
+                    .map(|e| format!(".{}", e.to_string_lossy()))
+                    .unwrap_or_default();
+                if ext.is_empty() {
+                    println!("{}{}{}", prefix, connector, display::paint_by_code(name, "97"));
+                } else {
+                    let name_part = name.strip_suffix(&ext).unwrap_or(name);
+                    let ext_color = formatter.config.ext_color(&ext);
+                    let name_colored = display::paint_by_code(name_part, "97");
+                    let ext_colored = match ext_color {
+                        Some(ec) => display::paint_by_code(&ext, ec),
+                        None => ext.clone(),
+                    };
+                    println!("{}{}{}{}", prefix, connector, name_colored, ext_colored);
+                }
             }
         }
 
@@ -598,6 +808,77 @@ fn print_tree(
             let new_depth = if depth > 0 { depth - 1 } else { -1 };
             print_tree(&item.path, formatter, cli, &format!("{}{}", prefix, extension), new_depth);
         }
+    }
+}
+
+// ── 递归列出 ──────────────────────────────────────────
+
+/// 递归平铺列出目录内容（类似标准 `ls -R`）
+fn print_recursive(root: &Path, formatter: &Formatter, cli: &Cli, sort_key: &str) {
+    let mut dirs_to_visit: Vec<PathBuf> = vec![root.to_path_buf()];
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some(dir) = dirs_to_visit.pop() {
+        if !visited.insert(dir.clone()) {
+            continue;
+        }
+
+        let mut items = scanner::scan_directory(&dir);
+        if items.is_empty() {
+            continue;
+        }
+
+        // 过滤
+        if !cli.exclude.is_empty() {
+            items.retain(|item| {
+                !cli.exclude.iter().any(|ext| {
+                    item.name.to_lowercase().ends_with(&ext.to_lowercase())
+                })
+            });
+        }
+        if !cli.include.is_empty() {
+            items.retain(|item| {
+                if item.is_dir { return true; }
+                cli.include.iter().any(|ext| item.name.to_lowercase().ends_with(&ext.to_lowercase()))
+            });
+        }
+        if cli.only_files {
+            items.retain(|item| item.is_file);
+        } else if cli.only_dirs {
+            items.retain(|item| item.is_dir);
+        }
+
+        sort_items(&mut items, sort_key);
+
+        // 输出标题
+        let display_path = dir.to_string_lossy().replace("\\\\?\\", "").replace("\\??\\", "");
+        println!("{}:", display_path);
+
+        if cli.long || cli.abs_path {
+            // 长格式输出
+            let max_width = 0;
+            let max_size_width = if cli.size {
+                items.iter().map(|item| color::format_size(item.size).len()).max().unwrap_or(0)
+            } else {
+                0
+            };
+            for item in &items {
+                let line = format_item_line(item, formatter, cli, max_width, max_size_width);
+                println!("{}", line);
+            }
+        } else {
+            // 多列输出
+            print_multi_column(&items, formatter, cli.no_color);
+        }
+        println!();
+
+        // 收集子目录供后续遍历
+        let mut subdirs: Vec<PathBuf> = items.iter()
+            .filter(|item| item.is_dir && !matches!(item.link_type, links::LinkType::Symlink | links::LinkType::Junction))
+            .map(|item| item.path.clone())
+            .collect();
+        subdirs.sort();
+        dirs_to_visit.extend(subdirs.into_iter().rev()); // reverse so first dir is visited first (stack)
     }
 }
 

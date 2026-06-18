@@ -54,7 +54,7 @@ fn download_url(url: &str, target_dir: &std::path::Path) -> anyhow::Result<()> {
         .unwrap_or("download");
 
     let dest = target_dir.join(filename);
-    println!("  ▶ 正在下载: {}", url);
+    println!("  > 正在下载: {}", url);
     println!("    保存到: {}", dest.display());
 
     net::download::download_with_url_fallback(
@@ -64,7 +64,7 @@ fn download_url(url: &str, target_dir: &std::path::Path) -> anyhow::Result<()> {
         &net::DownloadConfig::default(),
     )?;
 
-    println!("  ✓ 下载完成: {}", dest.display());
+    println!("  OK 下载完成: {}", dest.display());
     Ok(())
 }
 
@@ -89,9 +89,9 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         let zip_name = format!("{}-{}.{}", sd.name, ver, ext);
         let dest = target_dir.join(&zip_name);
 
-        println!("  ▶ 正在下载 {} {} ...", display, ver);
+        println!("  > 正在下载 {} {} ...", display, ver);
         net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &net::DownloadConfig::default())?;
-        println!("  ✓ 下载完成: {}", dest.display());
+        println!("  OK 下载完成: {}", dest.display());
         return Ok(());
     }
 
@@ -111,9 +111,9 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         let zip_name = format!("{}-{}.zip", sd.name, ver);
         let dest = target_dir.join(&zip_name);
 
-        println!("  ▶ 正在下载 {} {} ...", display, ver);
+        println!("  > 正在下载 {} {} ...", display, ver);
         net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &net::DownloadConfig::default())?;
-        println!("  ✓ 下载完成: {}", dest.display());
+        println!("  OK 下载完成: {}", dest.display());
         return Ok(());
     }
 

@@ -67,24 +67,42 @@ impl ListConfig {
         paths::config_dir().join("list.json")
     }
 
-    /// 加载配置，文件不存在时写入默认配置。
+    /// 加载配置，文件不存在时写入默认配置；存在时合并新增的默认规则。
     pub fn load() -> Self {
         let path = Self::config_path();
+        let default_cfg = Self::default();
         if !path.is_file() {
-            let cfg = Self::default();
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Ok(content) = serde_json::to_string_pretty(&cfg) {
+            if let Ok(content) = serde_json::to_string_pretty(&default_cfg) {
                 let _ = std::fs::write(&path, content);
             }
-            return cfg;
+            return default_cfg;
         }
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(_) => return Self::default(),
+            Err(_) => return default_cfg,
         };
-        serde_json::from_str(&content).unwrap_or_default()
+        let mut cfg: Self = serde_json::from_str(&content).unwrap_or_default();
+
+        // 合并缺失的默认规则：把默认配置中有而用户配置中没有的规则追加进去
+        let mut changed = false;
+        for default_pattern in &default_cfg.hide_display_names {
+            if !cfg.hide_display_names.iter().any(|p| p == default_pattern) {
+                cfg.hide_display_names.push(default_pattern.clone());
+                changed = true;
+            }
+        }
+
+        // 写回文件，让用户下次打开也能看到完整规则
+        if changed {
+            if let Ok(content) = serde_json::to_string_pretty(&cfg) {
+                let _ = std::fs::write(&path, content);
+            }
+        }
+
+        cfg
     }
 
     /// 检查显示名称是否被过滤规则命中。
