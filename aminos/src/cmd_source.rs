@@ -12,6 +12,8 @@ pub fn run_source(cmd: &crate::opts::SourceCommand) -> anyhow::Result<()> {
         crate::opts::SourceCommand::Add { name, url } => run_add(name, url),
         crate::opts::SourceCommand::Remove { name } => run_remove(name),
         crate::opts::SourceCommand::List => run_list(),
+        crate::opts::SourceCommand::Tree => run_tree(),
+        crate::opts::SourceCommand::Info { name } => run_info(name),
         crate::opts::SourceCommand::Enable { name } => run_toggle(name, true),
         crate::opts::SourceCommand::Disable { name } => run_toggle(name, false),
     }
@@ -29,15 +31,26 @@ fn run_clear() -> anyhow::Result<()> {
     }
 
     let total = count_files(&dir);
-    // 只清 apps、tools、community 的内容，保留目录结构
-    for sub in &["apps", "tools", "community"] {
+    // 清空所有分类目录 + tools + community
+    for sub in paths::CATEGORIES {
         let subdir = dir.join(sub);
         if subdir.exists() {
             let _ = std::fs::remove_dir_all(&subdir);
         }
         let _ = std::fs::create_dir_all(&subdir);
     }
-    println!("已清空源目录（共 {} 个文件）: {}", total, dir.display());
+    // tools
+    let tools_dir = dir.join("tools");
+    if tools_dir.exists() {
+        let _ = std::fs::remove_dir_all(&tools_dir);
+    }
+    let _ = std::fs::create_dir_all(&tools_dir);
+    // community
+    let comm_dir = dir.join("community");
+    if comm_dir.exists() {
+        let _ = std::fs::remove_dir_all(&comm_dir);
+    }
+    println!("已清空源缓存（共 {} 个文件）", total);
     Ok(())
 }
 
@@ -56,7 +69,6 @@ fn run_add(name: &str, url: &str) -> anyhow::Result<()> {
     let config_dir = paths::config_dir();
     let cfg = config::SourceConfig::new(config_dir);
     cfg.add(name, url)?;
-    // 立即同步一次
     println!("  正在首次同步源 '{}'...", name);
     let dest = paths::community_source_named(name);
     let repo = config::SourceRepo::new(vec![url.to_string()]);
@@ -76,19 +88,43 @@ fn run_remove(name: &str) -> anyhow::Result<()> {
 }
 
 fn run_list() -> anyhow::Result<()> {
-    let builtin_dir = paths::source_dir();
-    let builtin_apps = builtin_dir.join("apps");
-    let builtin_tools = builtin_dir.join("tools");
-
-    // 统计内置源
-    let apps_count = count_json_files(&builtin_apps);
-    let tools_count = count_json_files(&builtin_tools);
+    let source_root = paths::source_dir();
+    let base_url = crate::repo::SOURCE_RAW_URL;
 
     println!();
-    println!("  {}  {}", color::bold_cyan("软件源列表"), color::gray("(as source update 更新)"));
-    println!("  {}", color::gray("─".repeat(50)));
-    println!("  {}  {} 个软件定义", color::gray("内置源 (apps):"), apps_count);
-    println!("  {}  {} 个工具定义", color::gray("内置源 (tools):"), tools_count);
+    println!("  {}  ({} 更新)", color::bold_cyan("软件源列表"), color::gray("as source update"));
+    println!("  {}", color::gray("─".repeat(56)));
+
+    // 内置源（分类）
+    let mut total_builtin = 0;
+    for (dir_name, label, desc) in paths::CATEGORY_META {
+        let dir = source_root.join(dir_name);
+        let count = count_json_files(&dir);
+        total_builtin += count;
+        println!("  {} {}  {}  {} 个定义  {}",
+            color::green("✓"),
+            color::cyan(label),
+            color::gray(desc),
+            color::yellow(&count.to_string()),
+            color::gray(&format!("({})", dir_name)),
+        );
+        println!("    {}", color::gray(&format!("{}/{}", base_url, dir_name)));
+    }
+
+    // 自研工具
+    let tools_dir = paths::tools_source_dir();
+    let tools_count = count_json_files(&tools_dir);
+    total_builtin += tools_count;
+    println!("  {} {}  {}  {} 个定义  {}",
+        color::green("✓"),
+        color::cyan("自研工具"),
+        color::gray("ToolBox 系列 CLI"),
+        color::yellow(&tools_count.to_string()),
+        color::gray("(tools)"),
+    );
+    println!("    {}", color::gray(&format!("{}/tools", base_url)));
+
+    println!("  {} 共计 {} 个软件定义", color::gray("─"), total_builtin);
 
     // 社区源
     let config_dir = paths::config_dir();
@@ -97,30 +133,294 @@ fn run_list() -> anyhow::Result<()> {
 
     if entries.is_empty() {
         println!();
-        println!("  暂无第三方社区源。");
-        println!("  使用 {} 添加", color::yellow("as source add <名称> <仓库URL>"));
+        println!("  {}", color::gray("暂无第三方社区源"));
+        println!("  使用 {} 添加社区源", color::yellow("as source add <名称> <URL>"));
     } else {
+        println!();
+        println!("  {}  ({} 管理)", color::bold_cyan("第三方社区源"), color::gray("as source add|remove|enable|disable"));
         for entry in &entries {
-            let status = if entry.enabled {
-                color::green("启用")
-            } else {
-                color::gray("禁用")
-            };
+            let status_mark = if entry.enabled { color::green("●") } else { color::gray("○") };
+            let status_label = if entry.enabled { color::green("已启用") } else { color::gray("已禁用") };
             let local_dir = paths::community_source_named(&entry.name);
             let count = count_json_files(&local_dir);
-            println!();
-            println!("  {} ({})", color::cyan(&entry.name), status);
-            println!("    {}", color::gray(&entry.url));
-            if count > 0 {
-                println!("    {} {} 个软件定义", color::gray("本地缓存:"), count);
+            let count_str = if count > 0 {
+                format!("{} 个定义", count)
             } else {
-                println!("    {} 尚未同步", color::gray("本地缓存:"));
-            }
+                "尚未同步".to_string()
+            };
+            println!();
+            println!("  {}  {}  ({})", status_mark, color::cyan(&entry.name), status_label);
+            println!("    地址: {}", color::gray(&entry.url));
+            println!("    本地: {}", color::gray(&count_str));
         }
     }
 
     println!();
     Ok(())
+}
+
+fn run_tree() -> anyhow::Result<()> {
+    let source_root = paths::source_dir();
+    let base_url = crate::repo::SOURCE_RAW_URL;
+
+    println!();
+    println!("  {}", color::bold_cyan("软件源"));
+    println!("  {}", color::gray("─".repeat(56)));
+
+    let meta_len = paths::CATEGORY_META.len();
+    let all_items: Vec<(&str, &str, &str)> = paths::CATEGORY_META.iter().map(|(a, b, c)| (*a, *b, *c)).collect();
+
+    for (i, (dir_name, label, desc)) in all_items.iter().enumerate() {
+        let is_last_dir = i == meta_len - 1;
+        let dir = source_root.join(dir_name);
+        let count = count_json_files(&dir);
+
+        let mut defs: Vec<(String, String)> = Vec::new();
+        if dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                        if let Ok(sd) = software::parse_json(&p) {
+                            let dn = if sd.display_name.is_empty() { sd.name.clone() } else { sd.display_name };
+                            defs.push((sd.name.clone(), dn));
+                        }
+                    }
+                }
+            }
+        }
+        defs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let prefix = if is_last_dir { "└── " } else { "├── " };
+        let connector = if is_last_dir { "    " } else { "│   " };
+        println!("  {} {} {}  {}",
+            color::gray(prefix),
+            color::cyan(label),
+            color::gray(&format!("[{}] {}", dir_name, desc)),
+            color::gray(&format!("({} 个)", count)),
+        );
+
+        for (j, (name, display_name)) in defs.iter().enumerate() {
+            let is_last_def = j == defs.len() - 1;
+            let def_prefix = if is_last_def {
+                format!("{}    └── {}", connector, display_name)
+            } else {
+                format!("{}    ├── {}", connector, display_name)
+            };
+            println!("  {}  {}", color::gray(&def_prefix), color::gray(&format!("({})", name)));
+        }
+
+        if defs.is_empty() && count > 0 {
+            println!("  {}    {} ({} 个文件, 暂未同步)", connector, color::gray("└──"), count);
+        }
+
+        println!("  {}    {}",
+            connector,
+            color::gray(&format!("地址: {}/{}", base_url, dir_name)),
+        );
+    }
+
+    // 自研工具
+    let tools_dir = paths::tools_source_dir();
+    let tools_count = count_json_files(&tools_dir);
+    let mut tool_defs: Vec<(String, String)> = Vec::new();
+    if tools_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&tools_dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                    if let Ok(sd) = software::parse_json(&p) {
+                        let dn = if sd.display_name.is_empty() { sd.name.clone() } else { sd.display_name };
+                        tool_defs.push((sd.name.clone(), dn));
+                    }
+                }
+            }
+        }
+    }
+    tool_defs.sort_by(|a, b| a.0.cmp(&b.0));
+    println!("  {} {}  {}",
+        color::gray("└── "),
+        color::cyan("自研工具"),
+        color::gray(&format!("(tools, {} 个)", tools_count)),
+    );
+    for (j, (name, display_name)) in tool_defs.iter().enumerate() {
+        let is_last = j == tool_defs.len() - 1;
+        let p = if is_last { "    └── " } else { "    ├── " };
+        println!("  {}  {}", color::gray(&format!("    {}", p)), color::gray(&format!("({})", if *display_name == *name { name.clone() } else { format!("{} ({})", display_name, name) })));
+    }
+    println!("  {}    {}",
+        color::gray("    "),
+        color::gray(&format!("地址: {}/tools", base_url)),
+    );
+
+    // 社区源
+    let _ = run_tree_community();
+
+    println!();
+    Ok(())
+}
+
+fn run_tree_community() -> anyhow::Result<()> {
+    let config_dir = paths::config_dir();
+    let cfg = config::SourceConfig::new(config_dir);
+    let entries = cfg.load();
+
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    println!();
+    println!("  {}", color::bold_cyan("第三方社区源"));
+    for (i, entry) in entries.iter().enumerate() {
+        let is_last = i == entries.len() - 1;
+        let prefix = if is_last { "└── " } else { "├── " };
+        let connector = if is_last { "    " } else { "│   " };
+        let status = if entry.enabled { "已启用" } else { "已禁用" };
+
+        let local_dir = paths::community_source_named(&entry.name);
+        let mut defs: Vec<(String, String)> = Vec::new();
+        if local_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&local_dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                        if let Ok(sd) = software::parse_json(&p) {
+                            let dn = if sd.display_name.is_empty() { sd.name.clone() } else { sd.display_name };
+                            defs.push((sd.name.clone(), dn));
+                        }
+                    }
+                }
+            }
+        }
+        defs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        println!("  {} {} ({})",
+            color::gray(prefix),
+            color::cyan(&entry.name),
+            color::gray(status),
+        );
+
+        for (j, (name, display_name)) in defs.iter().enumerate() {
+            let is_last_def = j == defs.len() - 1;
+            let def_prefix = if is_last_def {
+                format!("{}    └── {}", connector, display_name)
+            } else {
+                format!("{}    ├── {}", connector, display_name)
+            };
+            println!("  {}  {}", color::gray(&def_prefix), color::gray(&format!("({})", name)));
+        }
+
+        println!("  {}    {}",
+            connector,
+            color::gray(&format!("地址: {}", entry.url)),
+        );
+    }
+    Ok(())
+}
+
+fn run_info(name: &str) -> anyhow::Result<()> {
+    let name_string = name.to_string();
+    let source_root = paths::source_dir();
+    let config_dir = paths::config_dir();
+    let cfg = config::SourceConfig::new(config_dir);
+
+    // 检查是否是社区源
+    let entries = cfg.load();
+    if let Some(entry) = entries.iter().find(|e| e.name == name) {
+        let local_dir = paths::community_source_named(name);
+        let count = count_json_files(&local_dir);
+        let status = if entry.enabled { color::green("已启用") } else { color::gray("已禁用") };
+        let defs = if local_dir.is_dir() {
+            let mut names: Vec<String> = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&local_dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                        if let Ok(sd) = software::parse_json(&p) {
+                            let name_str = if sd.display_name.is_empty() { sd.name.clone() } else { format!("{} ({})", sd.display_name, sd.name) };
+                            names.push(name_str);
+                        }
+                    }
+                }
+            }
+            names.sort();
+            names
+        } else {
+            Vec::new()
+        };
+
+        println!();
+        println!("  {}  {}", color::bold_cyan(name), color::gray("社区源"));
+        println!("  {}", color::gray("─".repeat(50)));
+        println!("  {}  {}", color::gray("状态:"), status);
+        println!("  {}  {}", color::gray("地址:"), color::gray(&entry.url));
+        println!("  {}  {} 个软件定义", color::gray("软件数:"), color::yellow(&count.to_string()));
+
+        if !defs.is_empty() {
+            println!();
+            println!("  {}", color::gray("软件列表:"));
+            for d in &defs {
+                println!("    {}", d);
+            }
+        }
+        println!();
+        return Ok(());
+    }
+
+    // 检查是否是内置分类源
+    if let Some((_, label, _)) = paths::CATEGORY_META.iter().find(|(n, _, _)| *n == name_string) {
+        let dir = source_root.join(&name_string);
+        let count = count_json_files(&dir);
+        let defs = if dir.is_dir() {
+            let mut names: Vec<String> = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                        if let Ok(sd) = software::parse_json(&p) {
+                            let name_str = if sd.display_name.is_empty() { sd.name.clone() } else { format!("{} ({})", sd.display_name, sd.name) };
+                            names.push(name_str);
+                        }
+                    }
+                }
+            }
+            names.sort();
+            names
+        } else {
+            Vec::new()
+        };
+
+        println!();
+        println!("  {}  {}", color::bold_cyan(&name_string), color::gray(&format!("内置源 - {}", label)));
+        println!("  {}", color::gray("─".repeat(50)));
+        println!("  {}  {} 个软件定义", color::gray("软件数:"), color::yellow(&count.to_string()));
+        if count > 0 {
+            println!("  {}  {}", color::gray("更新方式:"), color::cyan("as source update"));
+        }
+        if !defs.is_empty() {
+            println!();
+            println!("  {}", color::gray("软件列表:"));
+            for d in &defs {
+                println!("    {}", d);
+            }
+        }
+        println!();
+        return Ok(());
+    }
+
+    // 检查是否是 tools
+    let tools_dir = paths::tools_source_dir();
+    let tools_count = count_json_files(&tools_dir);
+    if name_string == "tools" {
+        println!();
+        println!("  {}  {}", color::bold_cyan("tools"), color::gray("内置源 - 自研工具"));
+        println!("  {}", color::gray("─".repeat(50)));
+        println!("  {}  {} 个工具定义", color::gray("工具数:"), color::yellow(&tools_count.to_string()));
+        println!();
+        return Ok(());
+    }
+
+    anyhow::bail!("未找到源 '{}'", name_string)
 }
 
 fn run_toggle(name: &str, enabled: bool) -> anyhow::Result<()> {

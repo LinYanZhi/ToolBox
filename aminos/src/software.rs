@@ -99,16 +99,19 @@ pub fn update_sources() -> anyhow::Result<()> {
         format!("https://ghproxy.net/{}", crate::repo::SOURCE_RAW_URL),
         format!("https://cdn.jsdelivr.net/gh/{}@main", crate::repo::SOURCE_REPO),
         crate::repo::SOURCE_RAW_URL.to_string(),
-    ]
-    .into_iter()
-    .map(|s| s.to_string())
-    .collect();
+    ];
 
-    // 1. 同步第三方软件源定义到 source/apps/
+    // 1. 同步所有分类源
     println!("{}", color::bold_cyan("同步软件源..."));
-    let apps_builtin: Vec<String> = builtin.iter().map(|u| format!("{}/apps", u)).collect();
-    let apps_repo = config::SourceRepo::new(apps_builtin);
-    config::source::update_sources(&paths::apps_source_dir(), &apps_repo)?;
+    for (i, cat) in paths::CATEGORIES.iter().enumerate() {
+        let (_, label, _) = paths::CATEGORY_META[i];
+        let urls: Vec<String> = builtin.iter().map(|u| format!("{}/{}", u, cat)).collect();
+        let repo = config::SourceRepo::new(urls);
+        let dest = paths::category_dir(cat);
+        if let Err(e) = config::source::update_sources(&dest, &repo) {
+            eprintln!("  {} 同步 {} ({}) 失败: {}", color::red("错误"), label, cat, e);
+        }
+    }
 
     // 2. 同步自研工具源定义到 source/tools/
     println!("{}", color::bold_cyan("同步工具源..."));
@@ -137,49 +140,47 @@ pub fn update_sources() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Read a single third-party software definition from source/apps/.
+/// 在所有分类目录中查找软件定义。
 pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
     let lower = name.to_lowercase();
-    let dir = paths::apps_source_dir();
-    if !dir.is_dir() {
-        bail!("未找到源定义。请先运行: as source -u");
-    }
 
-    // 1. Exact match
-    let exact = dir.join(format!("{}.json", lower));
-    if exact.exists() {
-        return parse_json(&exact);
-    }
+    // 遍历所有分类目录
+    for cat_dir in paths::app_category_dirs() {
+        if !cat_dir.is_dir() {
+            continue;
+        }
 
-    // Collect all .json files
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") && path.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                candidates.push(path);
+        // 1. Exact match filename
+        let exact = cat_dir.join(format!("{}.json", lower));
+        if exact.exists() {
+            return parse_json(&exact);
+        }
+
+        // 2. 文件名大小写不敏感
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = fs::read_dir(&cat_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "json") && path.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                    candidates.push(path);
+                }
             }
         }
-    }
-
-    // 2. Case-insensitive filename match
-    for p in &candidates {
-        if p.file_stem()
-            .and_then(|s| s.to_str())
-            .map_or(false, |s| s.to_lowercase() == lower)
-        {
-            return parse_json(p);
-        }
-    }
-
-    // 3-4. display_name / aliases match
-    for p in &candidates {
-        if let Ok(sd) = parse_json(p) {
-            if sd.display_name.to_lowercase() == lower {
-                return Ok(sd);
+        for p in &candidates {
+            if p.file_stem().and_then(|s| s.to_str()).map_or(false, |s| s.to_lowercase() == lower) {
+                return parse_json(p);
             }
-            if sd.aliases.iter().any(|a| a.to_lowercase() == lower) {
-                return Ok(sd);
+        }
+
+        // 3-4. display_name / aliases match
+        for p in &candidates {
+            if let Ok(sd) = parse_json(p) {
+                if sd.display_name.to_lowercase() == lower {
+                    return Ok(sd);
+                }
+                if sd.aliases.iter().any(|a| a.to_lowercase() == lower) {
+                    return Ok(sd);
+                }
             }
         }
     }
@@ -295,12 +296,15 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
     }
 
     let mut defs: Vec<SoftwareDef> = Vec::new();
-    let apps_dir = paths::apps_source_dir();
-    if apps_dir.is_dir() {
-        read_defs_from_dir(&apps_dir, &mut defs);
+
+    // 遍历所有分类目录
+    for cat_dir in paths::app_category_dirs() {
+        if cat_dir.is_dir() {
+            read_defs_from_dir(&cat_dir, &mut defs);
+        }
     }
 
-    // 合并社区源（不缓存，动态读取）
+    // 合并社区源
     let mut seen: std::collections::HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
     let config_dir = paths::config_dir();
     let source_cfg = config::SourceConfig::new(config_dir);
@@ -321,7 +325,7 @@ pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
         }
     }
 
-    // 写入缓存（仅内置部分）
+    // 写入缓存
     if let Ok(mut cache) = DEFS_CACHE.lock() {
         *cache = Some(defs.clone());
     }
@@ -476,7 +480,7 @@ pub fn read_tool_source_updated() -> String {
     }
 }
 
-fn parse_json(path: &PathBuf) -> anyhow::Result<SoftwareDef> {
+pub fn parse_json(path: &PathBuf) -> anyhow::Result<SoftwareDef> {
     let data = fs::read_to_string(path)
         .with_context(|| format!("读取文件失败: {}", path.display()))?;
     serde_json::from_str(&data)

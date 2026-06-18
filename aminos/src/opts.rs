@@ -188,6 +188,9 @@ pub struct CacheOpts {
 }
 
 #[derive(Subcommand)]
+#[command(
+    styles = styles(),
+)]
 pub enum SourceCommand {
     /// 更新所有源（内置 + 第三方社区源）
     Update,
@@ -215,6 +218,12 @@ pub enum SourceCommand {
     },
     /// 列出所有已配置的源
     List,
+    /// 以树状方式浏览各分类下的软件
+    Tree,
+    /// 查看源详细信息
+    Info {
+        name: String,
+    },
     /// 启用一个第三方源
     Enable {
         name: String,
@@ -226,6 +235,9 @@ pub enum SourceCommand {
 }
 
 #[derive(Subcommand)]
+#[command(
+    styles = styles(),
+)]
 pub enum DownloaderCommand {
     /// 列出所有下载后端
     List {
