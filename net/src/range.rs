@@ -101,7 +101,7 @@ pub fn parallel_download(
         let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
-                .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta}")
+                .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {msg:.cyan}")
                 .unwrap()
                 .progress_chars("━━━"),
         );
@@ -125,6 +125,7 @@ pub fn parallel_download(
                 let cur = pb_progress.load(Ordering::Relaxed);
                 bar.set_position(cur);
                 bar.set_prefix(crate::download::format_decimal_progress(cur, total_size));
+                crate::download::set_progress_eta(&bar);
                 if cur >= total_size {
                     break;
                 }
@@ -317,6 +318,7 @@ pub(crate) fn no_range_download(
                 ctx.bar.set_prefix(crate::download::format_decimal_progress(
                     ctx.bar.position(), total_size,
                 ));
+                crate::download::set_progress_eta(&ctx.bar);
             }
         }
     }
@@ -354,7 +356,7 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
         let bar = crate::download::progress().add(indicatif::ProgressBar::new(total_size));
         bar.set_style(
             indicatif::ProgressStyle::default_bar()
-                .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta}")
+                .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {msg:.cyan}")
                 .unwrap()
                 .progress_chars("━━━"),
         );
@@ -383,6 +385,7 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
                 ctx.bar.set_prefix(crate::download::format_decimal_progress(
                     ctx.bar.position(), total_size,
                 ));
+                crate::download::set_progress_eta(&ctx.bar);
             }
         }
     }

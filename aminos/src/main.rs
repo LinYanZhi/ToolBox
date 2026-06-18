@@ -30,19 +30,19 @@ fn main() {
     color::enable_ansi();
     net::backend::set_tools_bin_dir(paths::tools_bin_dir());
 
-    // 拦截 `as tool` / `as downloader` + 无参数，手动打印帮助
+    // 拦截 `as tool` / `as downloader` / `as install` / `as info` / `as uninstall` + 无参数，手动打印帮助
     //（clap 把 `arg_required_else_help` 嵌套子命令的帮助写 stderr，exit 非零 → 红色）
     {
         let args: Vec<String> = std::env::args().collect();
         if args.len() == 2 {
             let sub = &args[1].to_lowercase();
-            if sub == "tool" {
-                print_tool_help();
-                return;
-            }
-            if sub == "downloader" {
-                print_downloader_help();
-                return;
+            match sub.as_str() {
+                "tool" => { print_tool_help(); return; }
+                "downloader" => { print_downloader_help(); return; }
+                "install" => { print_install_help(); return; }
+                "info" => { print_info_help(); return; }
+                "uninstall" => { print_uninstall_help(); return; }
+                _ => {}
             }
         }
     }
@@ -95,6 +95,36 @@ fn print_tool_help() {
 /// 手动打印 `as downloader` 帮助
 fn print_downloader_help() {
     let args: Vec<&str> = vec!["as.exe", "downloader", "--help"];
+    if let Err(e) = Cli::try_parse_from(args) {
+        if e.kind() == clap::error::ErrorKind::DisplayHelp {
+            let _ = e.print();
+        }
+    }
+}
+
+/// 手动打印 `as install` 帮助
+fn print_install_help() {
+    let args: Vec<&str> = vec!["as.exe", "install", "--help"];
+    if let Err(e) = Cli::try_parse_from(args) {
+        if e.kind() == clap::error::ErrorKind::DisplayHelp {
+            let _ = e.print();
+        }
+    }
+}
+
+/// 手动打印 `as info` 帮助
+fn print_info_help() {
+    let args: Vec<&str> = vec!["as.exe", "info", "--help"];
+    if let Err(e) = Cli::try_parse_from(args) {
+        if e.kind() == clap::error::ErrorKind::DisplayHelp {
+            let _ = e.print();
+        }
+    }
+}
+
+/// 手动打印 `as uninstall` 帮助
+fn print_uninstall_help() {
+    let args: Vec<&str> = vec!["as.exe", "uninstall", "--help"];
     if let Err(e) = Cli::try_parse_from(args) {
         if e.kind() == clap::error::ErrorKind::DisplayHelp {
             let _ = e.print();

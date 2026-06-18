@@ -51,7 +51,7 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
                                 let dn = reg.get("display_name").map(|s| s.as_str()).unwrap_or(&n);
                                 let ver = reg.get("version").map(|s| s.as_str()).unwrap_or("未知");
                                 let pub_ = reg.get("publisher").map(|s| s.as_str()).unwrap_or("");
-                                eprintln!("  {} 已在系统中找到: {}", color::green("OK"), dn);
+                                eprintln!("  已在系统中找到: {}", dn);
                                 eprintln!("    版本: {}", ver);
                                 if !pub_.is_empty() {
                                     eprintln!("    发行商: {}", pub_);

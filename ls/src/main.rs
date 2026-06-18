@@ -41,7 +41,7 @@ struct Cli {
     no_color: bool,
 
     /// 排序方式: default(目录优先+名称), name, suffix(扩展名), size, create(创建时间), update(修改时间)
-    #[arg(short = 's', long = "sort", default_value = "default")]
+    #[arg(short = 's', long = "sort", default_value = "default", value_parser = ["default", "name", "suffix", "size", "create", "update"])]
     sort: String,
 
     /// 按文件大小排序（从大到小，等同于 -s size）
@@ -234,7 +234,10 @@ fn main() {
     if cli.only_files {
         items.retain(|item| item.is_file);
     } else if cli.only_dirs {
-        items.retain(|item| item.is_dir);
+        items.retain(|item| {
+            item.is_dir
+                || matches!(item.link_type, links::LinkType::Symlink | links::LinkType::Junction)
+        });
     }
 
     // 排序（-S 优先级高于 -s）
@@ -248,8 +251,8 @@ fn main() {
     }
 
     // 输出
-    if cli.abs_path || cli.long {
-        // 长格式或绝对路径：每行一个
+    if cli.abs_path || cli.long || cli.right_align {
+        // 长格式、绝对路径或右对齐：每行一个
         let max_width = if cli.right_align {
             items.iter().map(|item| item.name.display_width()).max().unwrap_or(0)
         } else {
@@ -845,7 +848,10 @@ fn print_recursive(root: &Path, formatter: &Formatter, cli: &Cli, sort_key: &str
         if cli.only_files {
             items.retain(|item| item.is_file);
         } else if cli.only_dirs {
-            items.retain(|item| item.is_dir);
+            items.retain(|item| {
+                item.is_dir
+                    || matches!(item.link_type, links::LinkType::Symlink | links::LinkType::Junction)
+            });
         }
 
         sort_items(&mut items, sort_key);
@@ -854,9 +860,13 @@ fn print_recursive(root: &Path, formatter: &Formatter, cli: &Cli, sort_key: &str
         let display_path = dir.to_string_lossy().replace("\\\\?\\", "").replace("\\??\\", "");
         println!("{}:", display_path);
 
-        if cli.long || cli.abs_path {
+        if cli.long || cli.abs_path || cli.right_align {
             // 长格式输出
-            let max_width = 0;
+            let max_width = if cli.right_align {
+                items.iter().map(|item| item.name.display_width()).max().unwrap_or(0)
+            } else {
+                0
+            };
             let max_size_width = if cli.size {
                 items.iter().map(|item| color::format_size(item.size).len()).max().unwrap_or(0)
             } else {

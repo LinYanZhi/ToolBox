@@ -52,7 +52,7 @@ pub fn try_aria2c_download(
 
     // ── 第二步：分片失败 → 不分片模式（单线程重试） ──
     if let Some(ref ctx) = pb {
-        eprintln!("  > {} (单线程重试)", ctx.name);
+        eprintln!("  使用 {}（单线程重试）", ctx.name);
     }
     // 清理分片模式留下的残留文件
     let _ = std::fs::remove_file(target_path);
@@ -159,6 +159,9 @@ fn run_aria2c(
                 };
                 // 不把速度塞进 prefix 了，speed 由模板的 {decimal_bytes_per_sec} 统一显示
                 ctx.bar.set_prefix(prefix);
+                if total > 0 {
+                    crate::download::set_progress_eta(&ctx.bar);
+                }
             }
         }
     });

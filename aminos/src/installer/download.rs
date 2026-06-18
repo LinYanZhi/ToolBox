@@ -27,7 +27,7 @@ pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], ren
     // 2) 检查缓存
     let target = dl.join(&filename);
     if target.is_file() && !renew {
-        println!("  使用缓存: {}", target.display());
+        println!("  使用缓存文件: {}", target.display());
         return Ok(target);
     }
 
@@ -42,7 +42,7 @@ pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], ren
                 if fname.starts_with(&base) && fname != filename {
                     let p = entry.path();
                     if p.is_file() {
-                        println!("  使用缓存: {}", p.display());
+                        println!("  使用缓存文件: {}", p.display());
                         return Ok(p);
                     }
                 }

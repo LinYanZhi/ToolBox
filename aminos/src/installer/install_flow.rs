@@ -62,7 +62,7 @@ pub fn install_software_by_def(
         if let Some(ref detection) = vi.detection {
             if let Some(result) = registry::detect_installed(detection) {
                 let installed_ver = result.get("DisplayVersion").map(|s| s.as_str()).unwrap_or(&ver);
-                println!("! {} {} 已安装在系统中。", display, installed_ver);
+                println!("{} {} 已安装在系统中", display, installed_ver);
                 println!("  如需重新安装，请先执行: {} {}", cmd_names::UNINSTALL, name);
                 return Ok(());
             }
@@ -72,12 +72,12 @@ pub fn install_software_by_def(
     // 4. Download
     let installer_path = get_installer_path(name, &ver, &vi.urls, opts.renew)?;
     if opts.download_only {
-        eprintln!("OK {} {} 下载完成", display, ver);
+        println!("{} {} 下载完成", display, ver);
         return Ok(());
     }
 
     // 5. Install
-    eprintln!("\n> 安装 {} {} ...", display, ver);
+    println!("\n安装 {} {}...", display, ver);
     let (installed, portable_install_path) = run_installer(name, &ver, &installer_path, vi, opts.gui)?;
     if !installed {
         bail!("安装未完成（用户取消或安装失败）");
@@ -110,7 +110,7 @@ pub fn install_software_by_def(
         "",
     )?;
 
-    println!("\nOK {} {} 安装完成", display, canonical_version);
+    println!("\n{} {} 安装完成", display, canonical_version);
     if provenance == "pe" && canonical_version != ver {
         println!("  {}", color::gray(format!("(源声明 v{}, PE 真实 v{})", ver, canonical_version)));
     }
@@ -201,11 +201,11 @@ pub(crate) fn install_self_tool(
 ) -> anyhow::Result<()> {
     let installer_path = get_installer_path(name, ver, &vi.urls, opts.renew)?;
     if opts.download_only {
-        eprintln!("OK {} {} 下载完成", display, ver);
+        println!("{} {} 下载完成", display, ver);
         return Ok(());
     }
 
-    println!("\n> 安装 {} {} ...", display, ver);
+    println!("\n安装 {} {}...", display, ver);
 
     fs::create_dir_all(paths::tools_dir())?;
     fs::create_dir_all(paths::tools_bin_dir())?;
@@ -238,7 +238,7 @@ pub(crate) fn install_self_tool(
         name, ver, tool_dir.to_string_lossy().as_ref(), "source", ver, &vi.installer_type, &sha256,
     )?;
 
-    println!("\nOK {} {} 安装完成", display, ver);
+    println!("\n{} {} 安装完成", display, ver);
     println!("  位置: {}", tool_dir.display());
 
     let bin_dir = paths::tools_bin_dir();

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use clap::{Parser, CommandFactory, builder::styling};
+use clap::{Parser, Subcommand, builder::styling};
 
 fn styles() -> styling::Styles {
     styling::Styles::styled()
@@ -23,8 +23,6 @@ fn styles() -> styling::Styles {
     styles = styles(),
     color = clap::ColorChoice::Always,
     arg_required_else_help = false,
-    disable_help_flag = true,
-    disable_version_flag = true,
 )]
 struct Cli {
     /// 左对齐变量名
@@ -39,17 +37,18 @@ struct Cli {
     #[arg(short = 's', long = "style")]
     style: bool,
 
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
     /// 打开系统环境变量对话框
-    #[arg(value_name = "命令")]
-    command: Option<String>,
-
-    /// 显示帮助信息
-    #[arg(short = 'h', long = "help", global = true)]
-    help: bool,
-
-    /// 显示版本号
-    #[arg(short = 'V', long = "version", global = true)]
-    version: bool,
+    Gui {
+        /// 以管理员权限打开（提权）
+        #[arg(short = 'r', long = "root")]
+        root: bool,
+    },
 }
 
 struct Rule {
@@ -124,18 +123,6 @@ fn main() {
 
     let cli = Cli::parse();
 
-    if cli.help {
-        let cmd = <Cli as CommandFactory>::command();
-        let _ = cmd.next_help_heading("选项:").print_help();
-        println!();
-        return;
-    }
-
-    if cli.version {
-        println!("ss 0.0.1");
-        return;
-    }
-
     if cli.style {
         print_styles();
         return;
@@ -145,11 +132,25 @@ fn main() {
     let left_align = cli.left;
 
     if let Some(cmd) = &cli.command {
-        if cmd == "gui" {
-            let _ = std::process::Command::new("rundll32.exe")
-                .args(["sysdm.cpl,EditEnvironmentVariables"])
-                .spawn();
-            return;
+        match cmd {
+            Commands::Gui { root: true } => {
+                // 提权打开
+                let _ = std::process::Command::new("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-Command",
+                        "Start-Process -FilePath 'rundll32.exe' -ArgumentList 'sysdm.cpl,EditEnvironmentVariables' -Verb RunAs",
+                    ])
+                    .spawn();
+                return;
+            }
+            Commands::Gui { root: false } => {
+                // 普通打开
+                let _ = std::process::Command::new("rundll32.exe")
+                    .args(["sysdm.cpl,EditEnvironmentVariables"])
+                    .spawn();
+                return;
+            }
         }
     }
 

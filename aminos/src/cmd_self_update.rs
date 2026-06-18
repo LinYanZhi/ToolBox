@@ -81,7 +81,7 @@ Write-Host 'OK as 已更新到 {}'
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", &ps_path.to_string_lossy()])
         .spawn()?;
 
-    println!("  OK 更新脚本已启动，as 将在重启后完成更新");
+    println!("  更新脚本已启动，as 将在重启后完成更新");
     println!("  当前终端可继续使用");
 
     Ok(())

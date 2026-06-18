@@ -86,7 +86,7 @@ pub fn run_info(name: &str, _show_urls: bool) -> anyhow::Result<()> {
     }
 
     // ── 无源定义：回退到注册表搜索 ──
-    eprintln!("    [i] 未找到「{}」的源定义，正在搜索注册表...", name);
+    eprintln!("  未找到 {} 的源定义，正在搜索注册表...", name);
     let reg_all = crate::registry::scan_all_installed_unfiltered();
     let name_lower = name.to_lowercase();
     let matches: Vec<_> = reg_all.into_iter()

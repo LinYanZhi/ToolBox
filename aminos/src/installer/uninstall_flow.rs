@@ -79,14 +79,14 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
                     let still_installed = registry::detect_installed(detection);
                     if still_installed.is_some() {
                         if force {
-                            eprintln!("  ! 注册表条目仍存在（--force，继续清理记录）");
+                            eprintln!("  注册表条目仍存在（--force，继续清理记录）");
                         } else {
-                            eprintln!("  ! 卸载可能未完成（注册表条目仍存在）");
+                            eprintln!("  卸载可能未完成（注册表条目仍存在）");
                             eprintln!("  如需强制清理，请使用 --force");
                             return Ok(());
                         }
                     } else {
-                        println!("  OK 注册表确认已卸载");
+                        println!("  注册表确认已卸载");
                     }
                 }
             }
@@ -94,12 +94,12 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
 
         // 删除安装记录
         software::remove_installation_record(name)?;
-        println!("  OK {} 卸载完成", display);
+        println!("  {} 卸载完成", display);
         return Ok(());
     }
 
     // ── 无源定义：回退到注册表搜索 ──
-    eprintln!("  [i] 未找到「{}」的源定义，正在搜索注册表...", name);
+    eprintln!("  未找到 {} 的源定义，正在搜索注册表...", name);
     let reg_all = registry::scan_all_installed_unfiltered();
     let name_lower = name.to_lowercase();
     let matches: Vec<_> = reg_all.into_iter()
@@ -111,7 +111,7 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
         .collect();
 
     if matches.is_empty() {
-        bail!("  ! 未在注册表中找到匹配「{}」的软件", name);
+        bail!("  未在注册表中找到匹配「{}」的软件", name);
     }
 
     for info in &matches {
@@ -145,9 +145,9 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
         .collect();
 
     if still_there.is_empty() {
-        println!("  OK 注册表确认已卸载");
+        println!("  注册表确认已卸载");
     } else if !force {
-        eprintln!("  ! 以下软件在注册表中仍存在条目，卸载可能未完成:");
+        eprintln!("  以下软件在注册表中仍存在条目，卸载可能未完成:");
         for entry in &still_there {
             let dn = entry.get("display_name").map(|s| s.as_str()).unwrap_or("?");
             println!("     - {}", dn);
@@ -155,14 +155,14 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
         eprintln!("  如需强制清理，请使用 --force");
         return Ok(());
     } else {
-        eprintln!("  ! 注册表条目仍存在（--force，继续）");
+        eprintln!("  注册表条目仍存在（--force，继续）");
     }
 
     if software::remove_installation_record(name).is_ok() {
         println!("  已清理安装记录");
     }
 
-    println!("  OK {} 卸载完成", name);
+    println!("  {} 卸载完成", name);
     Ok(())
 }
 

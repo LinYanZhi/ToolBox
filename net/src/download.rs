@@ -15,10 +15,6 @@ use crate::verify::verify_downloaded_file;
 
 const CHUNK: usize = 64 * 1024;
 
-// ── ANSI 颜色常量（用于进度条表格） ──
-const C_RESET: &str = "\x1b[0m";
-const C_GREEN: &str = "\x1b[32m";
-
 /// 格式化下载进度为 "cur/total UNIT"（1 位小数，十进制，无末尾零）。
 /// 例: "12.5/12.5 MB"，"1.2/1.2 GB"
 pub(crate) fn format_decimal_progress(cur: u64, total: u64) -> String {
@@ -36,6 +32,28 @@ pub(crate) fn format_decimal_progress(cur: u64, total: u64) -> String {
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     };
     format!("{}/{} {}", fmt(cur_f), fmt(total_f), unit)
+}
+
+/// 将秒数格式化为 HH:MM:SS。
+pub(crate) fn format_eta_hms(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    format!("{}:{:02}:{:02}", h, m, s)
+}
+
+/// 在进度条上设置 ETA（HH:MM:SS 格式），基于已用时间和当前进度估算。
+pub(crate) fn set_progress_eta(bar: &indicatif::ProgressBar) {
+    let pos = bar.position();
+    let len = bar.length().unwrap_or(0);
+    let elapsed = bar.elapsed().as_secs_f64();
+    if len > 0 && pos > 0 && elapsed > 0.0 {
+        let fraction = pos as f64 / len as f64;
+        let eta_secs = (elapsed / fraction - elapsed) as u64;
+        bar.set_message(format_eta_hms(eta_secs));
+    } else {
+        bar.set_message("--:--:--");
+    }
 }
 
 /// 全局进度条管理器，确保同一时间多个进度条不会在终端打架。
@@ -269,9 +287,9 @@ pub fn download_with_fallback(
     // 清理上次残留的临时文件
     let _ = std::fs::remove_file(target_path.with_extension("tmp"));
 
-    // ── 进度条模板（无 msg，消息用 eprintln 单独打印） ──
+    // ── 进度条模板 ──
     let tracked_style = indicatif::ProgressStyle::default_bar()
-        .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {eta}")
+        .template("{bar:26.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {msg:.cyan}")
         .unwrap()
         .progress_chars("━━━");
 
@@ -303,7 +321,7 @@ pub fn download_with_fallback(
         let ctx = ProgressCtx::new(bar, sname);
         let cancel = Cancel::new();
 
-        eprintln!("  >> {} ({})", sname, backend.thread_label());
+        eprintln!("  使用 {} ({} 线程)...", sname, backend.thread_label());
 
         // 逐 URL 尝试
         for url in urls {
@@ -343,7 +361,7 @@ pub fn download_with_fallback(
                         .map(|m| m.len()).unwrap_or(0);
                     let elapsed = start.elapsed();
 
-                    eprintln!("  OK {}", sname);
+                    eprintln!("  {} 下载完成", sname);
 
                     return Ok(DownloadReport {
                         strategy_used: sname.to_string(),
@@ -366,7 +384,7 @@ pub fn download_with_fallback(
             ctx.bar.finish();
         }
         if let Some(ref err) = last_error {
-            eprintln!("  ! {} 失败: {}", sname, err);
+            eprintln!("  {} 下载失败: {}", sname, err);
         }
     }
 
@@ -456,7 +474,7 @@ pub(crate) fn download_with_ureq(
             if attempt == 0 && set_cookie.is_some() {
                 // 首次遇到 HTML + Set-Cookie → cookie 挑战
                 cookie = Some(set_cookie.unwrap());
-                eprintln!("       ! Cookie 挑战，重试中...");
+                eprintln!("      Cookie 验证，重试中...");
                 last_err = None;
                 continue;
             }
@@ -465,13 +483,13 @@ pub(crate) fn download_with_ureq(
                 // 尝试剥离 tads 参数（JS 挑战的清理逻辑）
                 if let Some(pos) = current_url.find("?tads") {
                     current_url = current_url[..pos].to_string();
-                    eprintln!("       ! 清理 URL 参数重试...");
+                    eprintln!("      清理 URL 参数重试...");
                     last_err = None;
                     continue;
                 }
                 if let Some(pos) = current_url.find("&tads") {
                     current_url = current_url[..pos].to_string();
-                    eprintln!("       ! 清理 URL 参数重试...");
+                    eprintln!("      清理 URL 参数重试...");
                     last_err = None;
                     continue;
                 }
@@ -520,6 +538,7 @@ pub(crate) fn download_with_ureq(
                 pb.inc(n as u64);
                 if total > 0 {
                     pb.set_prefix(crate::download::format_decimal_progress(pb.position(), total));
+                    crate::download::set_progress_eta(pb);
                 }
             }
         }
@@ -553,7 +572,7 @@ fn probe_alive_urls(urls: &[String]) -> Vec<String> {
     let total = urls.len();
     if total == 0 { return vec![]; }
 
-    eprintln!("    {}>>{} 并行探测 {} 个地址（8s 封顶）", C_GREEN, C_RESET, total);
+    eprintln!("    正在探测 {} 个地址的可达性（8 秒超时）...", total);
 
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let probe_timeout = Duration::from_secs(8);
@@ -613,7 +632,7 @@ pub fn download_with_url_fallback(
     // ── Phase 1: 并行探测，收集可达地址 ──
     let alive = probe_alive_urls(&expanded);
     let (immediate, deferred) = if alive.is_empty() {
-        eprintln!("    ! 全部探测无响应（8s 超时），降级为全部地址参与");
+        eprintln!("    地址探测无响应（8 秒超时），全部地址参与下载");
         (expanded, vec![])
     } else {
         let deferred: Vec<String> = expanded
@@ -630,7 +649,7 @@ pub fn download_with_url_fallback(
         if deferred.is_empty() {
             return Err(first_err);
         }
-        eprintln!("    ! 初始地址全部失败，降级到 {} 个未探测地址重试...", deferred.len());
+        eprintln!("    初始地址均不可用，使用 {} 个备选地址重试...", deferred.len());
         cleanup_strategy_temp(target_path);
         download_with_fallback(&deferred, target_path, config)
     })

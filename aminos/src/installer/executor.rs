@@ -148,7 +148,7 @@ pub(crate) fn install_portable(name: &str, version: &str, archive_path: &Path) -
     }
 
     let _ = fs::remove_dir(&staging);
-    println!("  OK 已解压到 {}", target.display());
+    println!("  已解压到 {}", target.display());
     Ok(target)
 }
 
