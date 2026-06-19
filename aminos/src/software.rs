@@ -455,6 +455,23 @@ pub fn remove_installation_record(name: &str) -> anyhow::Result<()> {
 
 // ── Helpers ──────────────────────────────────────────────
 
+/// 检查是否有任何缓存的源定义文件（至少一个分类目录非空）。
+pub fn has_any_source() -> bool {
+    paths::app_category_dirs().iter().any(|dir| {
+        if !dir.is_dir() {
+            return false;
+        }
+        dir.read_dir()
+            .map(|mut entries| entries.any(|e| {
+                e.ok().and_then(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    Some(name.ends_with(".json") && name != "index.json")
+                }).unwrap_or(false)
+            }))
+            .unwrap_or(false)
+    })
+}
+
 /// 读取源索引中的 `updated` 字段（源最后更新时间）。
 pub fn read_source_updated() -> String {
     read_index_updated(&paths::apps_source_dir().join("index.json"))

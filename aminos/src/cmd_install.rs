@@ -83,7 +83,12 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
                                 eprintln!("    如需提交源定义，请前往: {}", crate::repo::SOURCE_GITHUB_URL);
                             }
                         } else {
-                            eprintln!("  {} {}: 未找到源定义，且未在注册表中找到匹配", color::yellow("跳过"), name);
+                            if !crate::software::has_any_source() {
+                                eprintln!("  {} {}: 未找到源定义，请先同步软件源", color::yellow("跳过"), name);
+                                eprintln!("    {}", color::cyan(cmd_names::SOURCE_UPDATE_HINT));
+                            } else {
+                                eprintln!("  {} {}: 未找到源定义，且未在注册表中找到匹配", color::yellow("跳过"), name);
+                            }
                         }
                     }
                 }

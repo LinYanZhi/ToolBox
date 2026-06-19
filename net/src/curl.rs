@@ -45,7 +45,13 @@ fn run_curl(curl: &Path, url: &str, target_path: &Path, insecure: bool, cancel: 
 
     let hostname = url.split("://").nth(1).and_then(|s| s.split('/').next()).unwrap_or("");
     if !hostname.is_empty() {
-        cmd.arg("--referer").arg(format!("https://{}/", hostname));
+        // 部分 CDN 防盗链要求 Referer 为原始站点
+        let referer = if hostname.contains("baidupcs.com") {
+            "https://pan.baidu.com/"
+        } else {
+            &format!("https://{}/", hostname)
+        };
+        cmd.arg("--referer").arg(referer);
     }
 
     cmd.arg(url);

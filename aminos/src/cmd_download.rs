@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use color::*;
+use crate::cmd_names;
 use crate::opts::DownloadOpts;
 use crate::paths;
 
@@ -140,5 +141,9 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         return Ok(());
     }
 
-    anyhow::bail!("未找到软件或工具 '{}'，请检查名称是否正确", name)
+    if !crate::software::has_any_source() {
+        anyhow::bail!("未找到软件或工具 '{}'，请先同步软件源\n  请运行: {}", name, cmd_names::SOURCE_UPDATE_HINT)
+    } else {
+        anyhow::bail!("未找到软件或工具 '{}'，请检查名称是否正确", name)
+    }
 }

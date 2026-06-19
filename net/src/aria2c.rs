@@ -107,8 +107,14 @@ fn run_aria2c(
     let hostname = url.split("://").nth(1)
         .and_then(|s| s.split('/').next()).unwrap_or("");
     if !hostname.is_empty() {
+        // 部分 CDN 防盗链要求 Referer 为原始站点（而非 CDN 域名）
+        let referer = if hostname.contains("baidupcs.com") {
+            "https://pan.baidu.com/"
+        } else {
+            &format!("https://{}/", hostname)
+        };
         cmd.arg("--header");
-        cmd.arg(format!("Referer: https://{}/", hostname));
+        cmd.arg(format!("Referer: {}", referer));
     }
 
     cmd.arg(url);
