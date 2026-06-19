@@ -2,6 +2,29 @@ use crate::opts::InstallOpts;
 use crate::cmd_names;
 use color;
 
+/// 无参数时显示自定义用法
+pub fn print_usage() {
+    println!();
+    println!("  {}  {}", color::bold_cyan("install"), color::gray("安装指定软件"));
+    println!();
+    println!("  {} {}", color::gray("用法:"), color::bold("as install [选项] <软件名称...>"));
+    println!();
+    println!("  {}", color::gray("选项:"));
+    println!("    -v, --ver <版本>    指定版本号");
+    println!("    -g, --gui            使用图形界面安装（不静默）");
+    println!("    -r, --renew          强制重新下载");
+    println!("    -d, --download-only  仅下载，不安装");
+    println!("        --type <TYPE>    安装类型：portable 或 installer");
+    println!("    -u, --upgrade        检测更新，卸载旧版后安装新版");
+    println!("    -h, --help           显示帮助");
+    println!();
+    println!("  {}", color::gray("示例:"));
+    println!("    {}  {}", color::bold("as install 7zip"), color::gray("安装 7-Zip（最新版）"));
+    println!("    {}  {}", color::bold("as install vscode python git"), color::gray("同时安装多个软件"));
+    println!("    {}  {}", color::bold("as install 7zip -v 1.0.0"), color::gray("安装指定版本"));
+    println!();
+}
+
 pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
     for name in &opts.names {
         let n = name.to_lowercase();

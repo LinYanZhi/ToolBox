@@ -93,28 +93,37 @@ fn detect_powershell() -> bool {
     }
 }
 
-/// 获取父进程名称
+/// 获取父进程名称（通过 PowerShell Get-CimInstance，兼容 Windows 11 24H2+）
 fn get_parent_process_name() -> Option<String> {
     #[cfg(windows)]
     {
         use std::process::Command;
         let pid = std::process::id();
-        let output = Command::new("wmic")
-            .args(["process", "where", &format!("ProcessId={}", pid), "get", "ParentProcessId"])
-            .output()
-            .ok()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let parent_pid = stdout
-            .lines()
-            .nth(1)
-            .and_then(|l| l.trim().parse::<u32>().ok())?;
 
-        let output = Command::new("wmic")
-            .args(["process", "where", &format!("ProcessId={}", parent_pid), "get", "Name"])
+        // Get-CimInstance 是 wmic 的现代替代，Windows 11 24H2 已移除 wmic
+        let cmd = format!(
+            "(Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId={}').ParentProcessId",
+            pid
+        );
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &cmd])
             .output()
             .ok()?;
-        let name = String::from_utf8_lossy(&output.stdout);
-        name.lines().nth(1).map(|l| l.trim().to_string())
+        let parent_pid = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .ok()?;
+
+        let cmd2 = format!(
+            "(Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId={}').Name",
+            parent_pid
+        );
+        let output2 = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &cmd2])
+            .output()
+            .ok()?;
+        let name = String::from_utf8_lossy(&output2.stdout).trim().to_string();
+        if name.is_empty() { None } else { Some(name) }
     }
     #[cfg(not(windows))]
     { None }

@@ -30,20 +30,39 @@ fn main() {
     color::enable_ansi();
     net::backend::set_tools_bin_dir(paths::tools_bin_dir());
 
-    // 拦截 `as tool` / `as downloader` / `as install` / `as info` / `as uninstall` + 无参数，手动打印帮助
-    //（clap 把 `arg_required_else_help` 嵌套子命令的帮助写 stderr，exit 非零 → 红色）
+    // ── 拦截无参数子命令，避免 clap 写 stderr（PowerShell 会变红） ──────────
+    //
+    // 规则：自动检测——子命令有 arg_required_else_help 或包含嵌套子命令，就拦截。
+    //       纯靠 clap API（is_arg_required_else_help_set / has_subcommands），
+    //       不需要手动维护列表，加新子命令后拦截自动生效。
+    //
+    // 拦截后先查白名单 print_custom_subcommand_help()（自定义样式），
+    // 没注册白名单则 fallback 到 clap 帮助（带 styles() 颜色，不丑）。
+    //
+    // ⚠️  开发注意事项：
+    //   - 子命令「所有参数可选」（如 cache、list），clap 不会报错，根本进不了这里。
+    //     所以你想让 cache 显示自定义缓存列表，什么都不用改。
+    //   - 子命令「需要参数」（如 install、info、uninstall），
+    //     拦截后会先调 print_custom_subcommand_help()。
+    //     如果想给它配自定义用法输出（而不是 clap 帮助），
+    //     去它模块里加个 pub fn print_usage()，
+    //     再在下方 print_custom_subcommand_help() 白名单注册一行即可。
+    //   - 如果只想改个颜色/clap 帮助的样式，别来这里改——
+    //     去 opts.rs 的 styles() 函数里调整，所有 clap 帮助统一生效。
+    //   - 记得保持白名单按字母序排列，方便查找。
     {
         let args: Vec<String> = std::env::args().collect();
         if args.len() == 2 {
             let sub = &args[1].to_lowercase();
-            match sub.as_str() {
-                "tool" | "downloader" | "install" | "info" | "uninstall" | "source" | "cache" => {
-                    let mut cmd = <Cli as clap::CommandFactory>::command();
-                    let _ = cmd.find_subcommand_mut(sub).map(|c| c.print_help());
-                    println!();
+            let mut cmd = <Cli as clap::CommandFactory>::command();
+            if let Some(subcmd) = cmd.find_subcommand_mut(&sub) {
+                if subcmd.has_subcommands() || subcmd.is_arg_required_else_help_set() {
+                    if !print_custom_subcommand_help(&sub) {
+                        let _ = subcmd.print_help();
+                        println!();
+                    }
                     return;
                 }
-                _ => {}
             }
         }
     }
@@ -164,6 +183,26 @@ fn dispatch_tool(tool: ToolCli) -> i32 {
         ToolCli::Remove(opts) => {
             help::run(|| cmd_tool::run_remove(&opts.name))
         }
+    }
+}
+
+/// 无参数子命令的白名单分发表。
+///
+/// 返回 true 表示已处理，false 表示无自定义处理（调用方应 fallback 到 clap 帮助）。
+///
+/// ⚠️  开发注意事项：
+///   - 这里是「白名单」——想自定义无参数输出的子命令才加到这里。
+///     没加的不出 bug，只是 fallback 到 clap 帮助（带 styles() 颜色）。
+///   - 添加新子命令时需要：
+///     1. 在对应模块实现 `pub fn print_usage()`
+///     2. 在此函数注册一行，如 `"xxx" => { cmd_xxx::print_usage(); true }`
+///   - 保持按字母序排列，方便查找。
+fn print_custom_subcommand_help(name: &str) -> bool {
+    match name {
+        "install" => { cmd_install::print_usage(); true }
+        "info" => { cmd_info::print_usage(); true }
+        "uninstall" => { cmd_uninstall::print_usage(); true }
+        _ => false,
     }
 }
 

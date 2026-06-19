@@ -2,6 +2,23 @@ use crate::{registry, software};
 use anyhow::bail;
 use color;
 
+/// 无参数时显示自定义用法
+pub fn print_usage() {
+    println!();
+    println!("  {}  {}", color::bold_cyan("info"), color::gray("查看软件详细信息"));
+    println!();
+    println!("  {} {}", color::gray("用法:"), color::bold("as info [选项] <软件名称>"));
+    println!();
+    println!("  {}", color::gray("选项:"));
+    println!("    -u, --urls   显示所有下载地址");
+    println!("    -h, --help   显示帮助");
+    println!();
+    println!("  {}", color::gray("示例:"));
+    println!("    {}  {}", color::bold("as info 7zip"), color::gray("查看 7-Zip 的详细信息"));
+    println!("    {}  {}", color::bold("as info 7zip --urls"), color::gray("查看 7-Zip 所有下载地址"));
+    println!();
+}
+
 pub fn run_info(name: &str, _show_urls: bool) -> anyhow::Result<()> {
     let sd = software::read_software_def(name).ok();
 

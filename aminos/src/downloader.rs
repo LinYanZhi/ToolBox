@@ -1,22 +1,9 @@
 use color::DisplayWidth;
 use crate::{paths, cmd_names};
 
-/// 估算单个字符的显示宽度（CJK 等宽字符占 2）。
+/// 估算单个字符的显示宽度（委托给 color::DisplayWidth 实现）。
 fn char_display_width(c: char) -> usize {
-    // 简单判断 CJK / 全角字符
-    if ('\u{1100}'..='\u{115f}').contains(&c)
-        || ('\u{2e80}'..='\u{9fff}').contains(&c)
-        || ('\u{ac00}'..='\u{d7a3}').contains(&c)
-        || ('\u{f900}'..='\u{faff}').contains(&c)
-        || ('\u{fe30}'..='\u{fe6f}').contains(&c)
-        || ('\u{ff01}'..='\u{ff60}').contains(&c)
-        || ('\u{ffe0}'..='\u{ffe6}').contains(&c)
-        || ('\u{1f000}'..='\u{1f9ff}').contains(&c)
-    {
-        2
-    } else {
-        1
-    }
+    c.to_string().display_width()
 }
 
 /// 运行 `as downloader` 子命令。

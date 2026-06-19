@@ -457,26 +457,16 @@ pub fn remove_installation_record(name: &str) -> anyhow::Result<()> {
 
 /// 读取源索引中的 `updated` 字段（源最后更新时间）。
 pub fn read_source_updated() -> String {
-    let index_path = paths::apps_source_dir().join("index.json");
-    if !index_path.is_file() {
-        return String::new();
-    }
-    #[derive(serde::Deserialize)]
-    struct IndexMeta {
-        #[serde(default)]
-        updated: String,
-    }
-    match std::fs::read_to_string(&index_path)
-        .and_then(|s| Ok(serde_json::from_str::<IndexMeta>(&s).map(|m| m.updated).unwrap_or_default()))
-    {
-        Ok(u) => u,
-        Err(_) => String::new(),
-    }
+    read_index_updated(&paths::apps_source_dir().join("index.json"))
 }
 
 /// 读取工具源索引中的 `updated` 字段。
 pub fn read_tool_source_updated() -> String {
-    let index_path = paths::tools_source_dir().join("index.json");
+    read_index_updated(&paths::tools_source_dir().join("index.json"))
+}
+
+/// 从指定 index.json 中读取 `updated` 字段。
+fn read_index_updated(index_path: &std::path::Path) -> String {
     if !index_path.is_file() {
         return String::new();
     }
@@ -485,7 +475,7 @@ pub fn read_tool_source_updated() -> String {
         #[serde(default)]
         updated: String,
     }
-    match std::fs::read_to_string(&index_path)
+    match std::fs::read_to_string(index_path)
         .and_then(|s| Ok(serde_json::from_str::<IndexMeta>(&s).map(|m| m.updated).unwrap_or_default()))
     {
         Ok(u) => u,
@@ -550,11 +540,14 @@ fn software_color_map(name: &str) -> Option<&'static str> {
         "iobitunlocker"  => "yellow",
         "wepe"           => "bright-blue",
         // ── 效率增强 ──
-        "7zip"           => "gray",
-        "snipaste"       => "bright-yellow",
-        "pixpin"         => "bright-blue",
-        "ttime"          => "bright-green",
-        "utools"         => "gray",
+        "7zip"             => "gray",
+        "baidunetdisk"     => "bright-red",
+        "pixpin"           => "bright-blue",
+        "quarkclouddrive"  => "bright-blue",
+        "snipaste"         => "bright-yellow",
+        "ttime"            => "bright-green",
+        "utools"           => "gray",
+        "xunlei"           => "bright-blue",
         // ── 远程控制 ──
         "sunlogin"       => "bright-red",
         "todesk"         => "bright-blue",

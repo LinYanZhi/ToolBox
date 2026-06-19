@@ -33,6 +33,10 @@ pub fn scan_download_cache() -> HashMap<String, (&'static str, &'static str)> {
                 (fname.clone(), false)
             };
 
+            // 先尝试通过已知源定义的前缀匹配（如 "7zip-26.01.exe" → "7zip"），
+            // 匹配不到时回退到取第一个 "-" 前的部分（文件名格式为 {name}-{version}.ext）。
+            // 注意：如果软件名本身含 "-"（如 "my-app"），此回退会截断名称，
+            // 但因为有源定义匹配优先，仅对无源定义匹配的缓存文件走此路径，风险很低。
             let name_part = defs.iter()
                 .find(|sd| {
                     let prefix = format!("{}-", sd.name);
@@ -338,8 +342,21 @@ fn render_grouped(rows: &[Row]) {
 // ── 公开入口 ────────────────────────────────────────────
 
 pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
-    let source = paths::apps_source_dir();
-    if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
+    // 检查是否有缓存的源定义（至少一个分类目录非空）
+    let has_defs = paths::app_category_dirs().iter().any(|dir| {
+        if !dir.is_dir() {
+            return false;
+        }
+        dir.read_dir()
+            .map(|mut entries| entries.any(|e| {
+                e.ok().and_then(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    Some(name.ends_with(".json") && name != "index.json")
+                }).unwrap_or(false)
+            }))
+            .unwrap_or(false)
+    });
+    if !has_defs {
         println!("{}", color::yellow("  未找到源定义。首次使用请运行:"));
         println!("  {}\n", cmd_names::SOURCE_UPDATE_HINT);
         return Ok(());

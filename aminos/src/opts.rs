@@ -30,6 +30,13 @@ pub struct Cli {
     pub command: Option<Commands>,
 }
 
+/// 子命令定义。
+///
+/// 关于拦截与自定义输出的行为，见 main.rs 中拦截块的注释。
+///
+/// 这里的属性控制 clap 自身的行为：
+///   - `arg_required_else_help = true` → 无参数时 clap 会报错退出（main.rs 拦截后接管）
+///   - 不加此属性，且所有参数可选（如 Cache、List）→ 直接跑 run_*，不会被拦截
 #[derive(Subcommand)]
 pub enum Commands {
     /// 安装指定软件
