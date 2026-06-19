@@ -179,16 +179,21 @@ impl AgentConfig {
             .unwrap_or("");
 
         if !hostname.is_empty() {
-            let referer = match hostname {
-                "download.jetbrains.com" => "https://www.jetbrains.com/".to_string(),
-                "dldir1.qq.com" => "https://work.weixin.qq.com/".to_string(),
-                "softwareupdate.vmware.com" => "https://www.vmware.com/".to_string(),
-                "dl.google.com" => "https://www.google.com/".to_string(),
-                "redirector.gvt1.com" => "https://developer.android.com/".to_string(),
-                "download.trae.com.cn" => "https://www.trae.com.cn/".to_string(),
-                "download.cursor.com" => "https://www.cursor.com/".to_string(),
-                "sunlogin.oray.com" | "dl.oray.com" => "https://sunlogin.oray.com/".to_string(),
-                _ => format!("https://{}/", hostname),
+            // 部分 CDN 防盗链要求 Referer 为原始站点，而非 CDN 域名
+            let referer = if hostname.contains("baidupcs.com") {
+                "https://pan.baidu.com/".to_string()
+            } else {
+                match hostname {
+                    "download.jetbrains.com" => "https://www.jetbrains.com/".to_string(),
+                    "dldir1.qq.com" => "https://work.weixin.qq.com/".to_string(),
+                    "softwareupdate.vmware.com" => "https://www.vmware.com/".to_string(),
+                    "dl.google.com" => "https://www.google.com/".to_string(),
+                    "redirector.gvt1.com" => "https://developer.android.com/".to_string(),
+                    "download.trae.com.cn" => "https://www.trae.com.cn/".to_string(),
+                    "download.cursor.com" => "https://www.cursor.com/".to_string(),
+                    "sunlogin.oray.com" | "dl.oray.com" => "https://sunlogin.oray.com/".to_string(),
+                    _ => format!("https://{}/", hostname),
+                }
             };
             headers.push(("Referer", referer));
         }

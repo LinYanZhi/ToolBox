@@ -97,6 +97,28 @@ pub fn verify_downloaded_file(path: &Path) -> bool {
         _ => return false,
     };
 
+    // 先读前 4KB 做内容检测
+    let mut header = [0u8; 4096];
+    let n = match std::fs::File::open(path).and_then(|mut f| f.read(&mut header)) {
+        Ok(n) => n,
+        _ => return false,
+    };
+
+    // 内容明显是 HTML/文本错误页 → 拒绝（反盗链页面）
+    let header_lower: Vec<u8> = header[..n.min(100)].iter().map(|&b| b.to_ascii_lowercase()).collect();
+    if header_lower.starts_with(b"<html") || header_lower.starts_with(b"<!doctype") || header_lower.starts_with(b"<!" ) {
+        return false;
+    }
+
+    if header_lower.starts_with(b"<") && header_lower.contains(&b'>') {
+        // 以 < 开头且很快出现 >，极可能是 HTML，拒绝
+        if let Some(pos) = header_lower.iter().position(|&b| b == b'>') {
+            if pos < 200 {
+                return false;
+            }
+        }
+    }
+
     let fmt = detect_format(path);
 
     match fmt {
@@ -105,15 +127,7 @@ pub fn verify_downloaded_file(path: &Path) -> bool {
         Some(FileFormat::Zip | FileFormat::SevenZ | FileFormat::Rar
             | FileFormat::Gz | FileFormat::Xz | FileFormat::Bz2) => file_size >= 4096,
         Some(FileFormat::Iso) => file_size >= 1024 * 1024, // 1MB
-        // 魔数不认识 → 回退：读取前 4KB，且大小 > 1KB（防空文件）
-        None => {
-            let mut file = match std::fs::File::open(path) {
-                Ok(f) => f,
-                _ => return false,
-            };
-            let mut buf = [0u8; 4096];
-            let n = file.read(&mut buf).ok().unwrap_or(0);
-            n >= 100 && file_size >= 1024
-        }
+        // 魔数不认识 → 回退：大小 > 1KB（防空文件）
+        None => n >= 100 && file_size >= 1024,
     }
 }
