@@ -93,8 +93,8 @@ pub fn run_cache(_list: bool, clear: bool, open: bool) -> anyhow::Result<()> {
 
     println!("\n{}", color::gray(format!("共 {} 个文件，{} 空间", entries.len(), format_size(total_size))));
 
-    println!("{}", color::gray(format!("  {} -c  清除缓存", cmd_names::CACHE)));
-    println!("{}", color::gray(format!("  {} -o   在资源管理器中打开", cmd_names::CACHE)));
+    println!("{}", color::gray(format!("  {}  清除缓存", cmd_names::CACHE_CLEAR)));
+    println!("{}", color::gray(format!("  {}  在资源管理器中打开", cmd_names::CACHE_OPEN)));
     Ok(())
 }
 

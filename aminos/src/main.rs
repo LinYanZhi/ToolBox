@@ -207,58 +207,58 @@ fn print_custom_subcommand_help(name: &str) -> bool {
 }
 
 fn print_examples() {
-    let examples = vec![
+    let examples: Vec<(&str, &str, Vec<(&str, &str)>)> = vec![
         ("install", "安装指定软件", vec![
-            ("as install 7zip", "安装 7-Zip（最新版）"),
-            ("as install vscode python git", "同时安装多个软件"),
-            ("as install 7zip -v 1.0.0", "安装指定版本"),
-            ("as install 7zip --gui", "使用图形界面向导安装"),
-            ("as install 7zip --renew", "强制重新下载并安装"),
-            ("as install 7zip --download-only", "仅下载，不安装"),
-            ("as install 7zip --type portable", "指定安装类型为便携版"),
-            ("as install 7zip -u", "检测更新，卸载旧版后安装新版"),
+            (cmd_names::INSTALL, "安装 7-Zip（最新版）"),
+            (cmd_names::INSTALL, "同时安装多个软件"),
+            (cmd_names::INSTALL, "安装指定版本"),
+            (cmd_names::INSTALL, "使用图形界面向导安装"),
+            (cmd_names::INSTALL, "强制重新下载并安装"),
+            (cmd_names::INSTALL, "仅下载，不安装"),
+            (cmd_names::INSTALL, "指定安装类型为便携版"),
+            (cmd_names::INSTALL, "检测更新，卸载旧版后安装新版"),
         ]),
         ("list", "列出已安装的软件", vec![
-            ("as list", "仅列出已安装的软件"),
-            ("as list -a", "列出全部（已安装 + 源中可用）"),
-            ("as list -g", "按分类分组显示"),
-            ("as list --categories", "查看分类概览"),
-            ("as list -s 压缩", "搜索名称、别名或描述"),
-            ("as list -f 开发工具", "按分类过滤"),
+            (cmd_names::LIST, "仅列出已安装的软件"),
+            (cmd_names::LIST, "列出全部（已安装 + 源中可用）"),
+            (cmd_names::LIST, "按分类分组显示"),
+            (cmd_names::LIST, "查看分类概览"),
+            (cmd_names::LIST, "搜索名称、别名或描述"),
+            (cmd_names::LIST, "按分类过滤"),
         ]),
         ("info", "查看软件详细信息", vec![
-            ("as info 7zip", "查看 7-Zip 的详细信息"),
-            ("as info 7zip --urls", "查看 7-Zip 所有下载地址"),
+            (cmd_names::INFO, "查看 7-Zip 的详细信息"),
+            (cmd_names::INFO, "查看 7-Zip 所有下载地址"),
         ]),
         ("download", "下载软件或文件", vec![
-            ("as download 7zip", "通过软件名称下载最新版"),
-            ("as download <url>", "通过链接直接下载文件"),
-            ("as download -o", "打开下载目录"),
-            ("as download <url> --target ./tmp", "下载到指定目录"),
+            (cmd_names::DOWNLOAD, "通过软件名称下载最新版"),
+            (cmd_names::DOWNLOAD, "通过链接直接下载文件"),
+            (cmd_names::DOWNLOAD, "打开下载目录"),
+            (cmd_names::DOWNLOAD, "下载到指定目录"),
         ]),
         ("uninstall", "卸载指定软件", vec![
             ("as uninstall 7zip", "弹出卸载窗口卸载 7-Zip"),
             ("as uninstall 7zip --force", "强制删除（跳过卸载器）"),
         ]),
         ("cache", "管理下载缓存", vec![
-            ("as cache", "列出缓存文件"),
-            ("as cache -c", "清除所有缓存"),
-            ("as cache -o", "打开缓存目录"),
+            (cmd_names::CACHE, "列出缓存文件"),
+            (cmd_names::CACHE_CLEAR, "清除所有缓存"),
+            (cmd_names::CACHE_OPEN, "打开缓存目录"),
         ]),
         ("source", "管理软件源", vec![
-            ("as source -u", "更新所有源"),
-            ("as source --speedtest", "测速所有源"),
-            ("as source -o", "打开源目录"),
-            ("as source -c", "清空所有源"),
+            (cmd_names::SOURCE_UPDATE, "更新所有源"),
+            (cmd_names::SOURCE_SPEEDTEST, "测速所有源"),
+            (cmd_names::SOURCE_OPEN, "打开源目录"),
+            (cmd_names::SOURCE_CLEAR, "清空所有源"),
         ]),
         ("downloader", "管理下载引擎后端", vec![
-            ("as downloader --list", "列出所有后端"),
+            (cmd_names::DOWNLOADER_LIST, "列出所有后端"),
             ("as downloader set curl on", "启用 curl"),
             ("as downloader set curl off", "禁用 curl"),
-            ("as downloader -o", "打开配置目录"),
+            (cmd_names::DOWNLOADER_OPEN, "打开配置目录"),
         ]),
         ("tool init", "初始化 as 环境", vec![
-            ("as tool init", "打印 tools/bin 加入 PATH 的配置提示"),
+            (cmd_names::TOOL_INIT, "打印 tools/bin 加入 PATH 的配置提示"),
             ("as tool init -g", "写入用户 PATH 注册表"),
         ]),
         ("tool add", "安装/升级自研工具", vec![
@@ -267,17 +267,18 @@ fn print_examples() {
             ("as tool add as --upgrade", "升级 as 自身"),
         ]),
         ("tool", "管理自研工具", vec![
-            ("as tool list", "列出自研工具"),
+            (cmd_names::TOOL_LIST, "列出自研工具"),
             ("as tool remove ls", "移除 ls 工具"),
         ]),
     ];
 
     println!("{}", color::bold_green("使用示例"));
     println!();
-    for (cmd, desc, entries) in examples {
-        println!("  {}   {}", color::bold_cyan(cmd), desc);
-        for (example_msg, help_msg) in entries {
-            println!("    {}  {}", color::bold(example_msg), color::gray(help_msg));
+    for group in examples {
+        let (display, desc, entries) = group;
+        println!("  {}   {}", color::bold_cyan(display), desc);
+        for &(ex, help) in entries.iter() {
+            println!("    {}  {}", color::bold(ex), color::gray(help));
         }
         println!();
     }

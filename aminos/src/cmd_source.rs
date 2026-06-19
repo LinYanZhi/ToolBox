@@ -1,4 +1,4 @@
-use crate::{paths, software};
+use crate::{paths, software, cmd_names};
 
 pub fn run_source(cmd: &crate::opts::SourceCommand) -> anyhow::Result<()> {
     match cmd {
@@ -92,7 +92,7 @@ fn run_list() -> anyhow::Result<()> {
     let base_url = crate::repo::SOURCE_RAW_URL;
 
     println!();
-    println!("  {}  ({} 更新)", color::bold_cyan("软件源列表"), color::gray("as source update"));
+    println!("  {}  ({} 更新)", color::bold_cyan("软件源列表"), color::gray(cmd_names::SOURCE_UPDATE));
     println!("  {}", color::gray("─".repeat(56)));
 
     // 内置源（分类）
@@ -135,10 +135,10 @@ fn run_list() -> anyhow::Result<()> {
     if entries.is_empty() {
         println!();
         println!("  {}", color::gray("暂无第三方社区源"));
-        println!("  使用 {} 添加社区源", color::yellow("as source add <名称> <URL>"));
+        println!("  使用 {} 添加社区源", color::yellow(&format!("{} <名称> <URL>", cmd_names::SOURCE_ADD)));
     } else {
         println!();
-        println!("  {}  ({} 管理)", color::bold_cyan("第三方社区源"), color::gray("as source add|remove|enable|disable"));
+        println!("  {}  ({} 管理)", color::bold_cyan("第三方社区源"), color::gray(&format!("{} add|remove|enable|disable", cmd_names::SOURCE)));
         for entry in &entries {
             let status_mark = if entry.enabled { color::green("●") } else { color::gray("○") };
             let status_label = if entry.enabled { color::green("已启用") } else { color::gray("已禁用") };
@@ -413,7 +413,7 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         println!("  {}", color::gray("─".repeat(50)));
         println!("  {}  {} 个软件定义", color::gray("软件数:"), color::yellow(&count.to_string()));
         if count > 0 {
-            println!("  {}  {}", color::gray("更新方式:"), color::cyan("as source update"));
+            println!("  {}  {}", color::gray("更新方式:"), color::cyan(cmd_names::SOURCE_UPDATE));
         }
         if !defs.is_empty() {
             println!();

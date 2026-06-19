@@ -203,7 +203,7 @@ pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
         return Ok(sd);
     }
 
-    bail!("未找到软件 '{}' 的定义。请先运行: as source -u", name)
+    bail!("未找到软件 '{}' 的定义。请先运行: {}", name, cmd_names::SOURCE_UPDATE_HINT)
 }
 
 /// 在第三方社区源中查找软件定义。
