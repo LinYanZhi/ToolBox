@@ -73,11 +73,17 @@ pub fn run_install(opts: InstallOpts) -> anyhow::Result<()> {
 /// 升级模式：检测是否已安装，卸载旧版后安装新版
 fn upgrade_and_install(name: &str, sd: &crate::software::SoftwareDef, opts: &InstallOpts) -> anyhow::Result<()> {
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
-    let ver = opts.version.as_deref().unwrap_or(&sd.default_version);
+    let ver = opts.version.as_deref().map(|v| v.to_string())
+        .or_else(|| sd.single_version().map(|v| v.to_string()))
+        .or_else(|| sd.first_version().map(|v| v.to_string()))
+        .ok_or_else(|| {
+            let available: Vec<&str> = sd.versions.keys().map(|v| v.as_str()).collect();
+            anyhow::anyhow!("{}: 有多个版本，请用 --version 指定\n  可用版本: {}", name, available.join(", "))
+        })?;
 
     // 检查是否已安装
     let installed = {
-        let vi = match sd.versions.get(ver) {
+        let vi = match sd.versions.get(&ver) {
             Some(vi) => vi,
             None => {
                 eprintln!("  {} 版本 {} 未找到定义", display, ver);
@@ -105,7 +111,7 @@ fn upgrade_and_install(name: &str, sd: &crate::software::SoftwareDef, opts: &Ins
         eprintln!("  继续安装新版本...");
     } else {
         // 卸载后检查软件是否仍在系统中（用户可能取消了卸载）
-        let vi = sd.versions.get(ver).unwrap();
+        let vi = sd.versions.get(&ver).unwrap();
         if let Some(ref detection) = vi.detection {
             if crate::registry::detect_installed(detection).is_some() {
                 println!("  卸载未完成，已跳过安装");

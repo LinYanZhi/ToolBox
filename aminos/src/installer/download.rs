@@ -12,7 +12,8 @@ use crate::paths;
 ///
 /// 先检查缓存目录，匹配已下载的文件。未命中则下载并用魔数修正扩展名。
 /// 返回下载后的完整路径。
-pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool) -> anyhow::Result<PathBuf> {
+/// `preferred_downloader` 为软件定义中指定的首选后端（如 "ureq"），为空时使用默认策略。
+pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], renew: bool, preferred_downloader: &str) -> anyhow::Result<PathBuf> {
     let dl = paths::downloads_dir();
     fs::create_dir_all(&dl)?;
 
@@ -52,7 +53,12 @@ pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], ren
 
     // 3) 下载到临时文件
     let tmp = dl.join(format!("{}.downloading", filename));
-    net::download::download_with_url_fallback(name, urls, &tmp, &net::DownloadConfig::default().renew(renew))?;
+    let config = if preferred_downloader.is_empty() {
+        net::DownloadConfig::default().renew(renew)
+    } else {
+        net::DownloadConfig::with_preferred_backend(preferred_downloader).renew(renew)
+    };
+    net::download::download_with_url_fallback(name, urls, &tmp, &config)?;
 
     // 4) 魔数修正扩展名（仅当 URL 探测失败、用猜测文件名时）
     let corrected = if needs_magic_fix {

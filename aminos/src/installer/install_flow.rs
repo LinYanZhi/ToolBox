@@ -70,7 +70,7 @@ pub fn install_software_by_def(
     }
 
     // 4. Download
-    let installer_path = get_installer_path(name, &ver, &vi.urls, opts.renew)?;
+    let installer_path = get_installer_path(name, &ver, &vi.urls, opts.renew, &sd.downloader)?;
     if opts.download_only {
         println!("{} {} 下载完成", display, ver);
         return Ok(());
@@ -134,6 +134,12 @@ fn resolve_version(
         return Ok(v.clone());
     }
 
+    // 只有单版本 → 自动选择
+    if let Some(v) = sd.single_version() {
+        return Ok(v.to_string());
+    }
+
+    // 多版本：按安装类型分组，让用户选择
     let mut by_type: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
     for (vk, vi) in &sd.versions {
         let itype = if vi.installer_type.is_empty() { "installer" } else { &vi.installer_type };
@@ -183,23 +189,35 @@ fn resolve_version(
                 println!("  已选择: {} {}", color::bold_green(label_of_type(options[idx].0)), color::cyan(vers[0]));
                 Ok(vers[0].to_string())
             }
-            None => Ok(sd.default_version.clone()),
+            None => {
+                let available: Vec<&str> = sd.versions.keys().map(|v| v.as_str()).collect();
+                bail!("请指定版本: 可用版本 {}", available.join(", "))
+            }
         };
     }
 
-    Ok(sd.default_version.clone())
+    // 单类型但有多个版本
+    if by_type.len() == 1 {
+        let (_, vers) = by_type.into_iter().next().unwrap();
+        let available: Vec<&str> = vers.clone();
+        bail!("{}: 有多个版本，请用 --version 指定\n  可用版本: {}", display, available.join(", "))
+    }
+
+    // 没有版本（不可能发生）
+    let available: Vec<&str> = sd.versions.keys().map(|v| v.as_str()).collect();
+    bail!("{}: 无可用的版本定义\n  可用版本: {}", display, available.join(", "))
 }
 
 /// 安装自研工具：下载 ZIP → 解压到 tools/{name}/ → 硬链接到 tools/bin/{name}.exe
 pub(crate) fn install_self_tool(
     name: &str,
-    _sd: &SoftwareDef,
+    sd: &SoftwareDef,
     display: &str,
     ver: &str,
     vi: &VersionInfo,
     opts: &opts::InstallOpts,
 ) -> anyhow::Result<()> {
-    let installer_path = get_installer_path(name, ver, &vi.urls, opts.renew)?;
+    let installer_path = get_installer_path(name, ver, &vi.urls, opts.renew, &sd.downloader)?;
     if opts.download_only {
         println!("{} {} 下载完成", display, ver);
         return Ok(());
@@ -268,7 +286,15 @@ pub fn install_tool(name: &str, opts: &opts::InstallOpts) -> anyhow::Result<()> 
     let sd = software::read_tool_def(name)?;
     let display = if sd.display_name.is_empty() { name } else { &sd.display_name };
 
-    let ver = opts.version.clone().unwrap_or_else(|| sd.default_version.clone());
+    let ver = opts.version.clone().unwrap_or_else(|| {
+        sd.single_version()
+            .or_else(|| sd.first_version())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| {
+                let available: Vec<&str> = sd.versions.keys().map(|v| v.as_str()).collect();
+                panic!("{}: 有多个版本，请用 --version 指定\n  可用版本: {}", name, available.join(", "))
+            })
+    });
 
     let vi = match sd.versions.get(&ver) {
         Some(vi) => vi,

@@ -122,7 +122,8 @@ fn run_list() -> anyhow::Result<()> {
         color::yellow(&tools_count.to_string()),
         color::gray("(tools)"),
     );
-    println!("    {}", color::gray(&format!("{}/tools", base_url)));
+    let github_url = crate::repo::SOURCE_GITHUB_URL;
+    println!("    {}", color::gray(&format!("{}/tree/main/tools", github_url)));
 
     println!("  {} 共计 {} 个软件定义", color::gray("─"), total_builtin);
 
@@ -165,13 +166,8 @@ fn run_tree() -> anyhow::Result<()> {
 
     println!();
     println!("  {}", color::bold_cyan("软件源"));
-    println!("  {}", color::gray("─".repeat(56)));
 
-    let meta_len = paths::CATEGORY_META.len();
-    let all_items: Vec<(&str, &str, &str)> = paths::CATEGORY_META.iter().map(|(a, b, c)| (*a, *b, *c)).collect();
-
-    for (i, (dir_name, label, desc)) in all_items.iter().enumerate() {
-        let is_last_dir = i == meta_len - 1;
+    for (dir_name, label, desc) in paths::CATEGORY_META {
         let dir = source_root.join(dir_name);
         let count = count_json_files(&dir);
 
@@ -190,14 +186,14 @@ fn run_tree() -> anyhow::Result<()> {
         }
         defs.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let prefix = if is_last_dir { "└── " } else { "├── " };
-        let connector = if is_last_dir { "    " } else { "│   " };
+        let prefix = "├── ";
+        let connector = "│   ";
         println!("  {} {}",
             color::gray(prefix),
             color::cyan(label),
         );
         println!("  {} {}  {}",
-            connector,
+            color::gray(connector),
             color::gray(&format!("[{}] {}", dir_name, desc)),
             color::gray(&format!("({} 个)", count)),
         );
@@ -214,17 +210,17 @@ fn run_tree() -> anyhow::Result<()> {
         }
 
         if defs.is_empty() && count > 0 {
-            println!("  {}    {} ({} 个文件, 暂未同步)", connector, color::gray("└──"), count);
+            println!("  {}    {} ({} 个文件, 暂未同步)", color::gray(connector), color::gray("└──"), count);
         }
 
         println!("  {}    {}",
-            connector,
+            color::gray(connector),
             color::gray(&format!("地址: {}/apps/{}", base_url, dir_name)),
         );
-        println!("  {}", connector);
+        println!("  {}", color::gray(connector));
     }
 
-    // 自研工具
+    // 自研工具（作为同级节点，用 └── 结尾）
     let tools_dir = paths::tools_source_dir();
     let tools_count = count_json_files(&tools_dir);
     let mut tool_defs: Vec<software::SoftwareDef> = Vec::new();
@@ -266,11 +262,11 @@ fn run_tree() -> anyhow::Result<()> {
             );
         }
     }
+    let github_url = crate::repo::SOURCE_GITHUB_URL;
     println!("  {}    {}",
         color::gray("    "),
-        color::gray(&format!("地址: {}/tools", base_url)),
+        color::gray(&format!("地址: {}/tree/main/tools", github_url)),
     );
-    println!("  {}", color::gray("    "));
 
     // 社区源
     let _ = run_tree_community();
@@ -330,9 +326,10 @@ fn run_tree_community() -> anyhow::Result<()> {
         }
 
         println!("  {}    {}",
-            connector,
+            color::gray(connector),
             color::gray(&format!("地址: {}", entry.url)),
         );
+        println!("  {}", color::gray(connector));
     }
     Ok(())
 }

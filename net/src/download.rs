@@ -155,6 +155,17 @@ impl Default for DownloadConfig {
 }
 
 impl DownloadConfig {
+    /// 创建一个优先使用指定后端尝试的配置，失败后回退到默认策略。
+    pub fn with_preferred_backend(downloader: &str) -> Self {
+        let preferred = parse_backend_name(downloader);
+        let mut strategies = Vec::with_capacity(Self::default().strategies.len() + 1);
+        if let Some(strat) = preferred {
+            strategies.push(strat);
+        }
+        strategies.extend(Self::default().strategies);
+        Self { strategies, ..Self::default() }
+    }
+
     /// 快速创建只包含指定策略的配置。
     pub fn with_strategies(strategies: Vec<DownloadStrategy>) -> Self {
         Self {
@@ -173,6 +184,24 @@ impl DownloadConfig {
     pub fn verify(mut self, verify: bool) -> Self {
         self.verify = verify;
         self
+    }
+}
+
+/// 将后端名称字符串转换为对应的 DownloadStrategy。
+/// 用于 SoftwareDef::downloader 字段指定的首选下载后端。
+/// 支持的值：rust-ureq, curl, powershell, rust-range, aria2c, bits, ps-invoke
+fn parse_backend_name(name: &str) -> Option<DownloadStrategy> {
+    use crate::agent::Fingerprint;
+    match name.trim().to_lowercase().as_str() {
+        "rust-ureq" | "ureq" => Some(DownloadStrategy::Ureq { fingerprint: Fingerprint::Chrome120, insecure: false }),
+        "rust-ureq-insecure" | "rust-ureq_ins" | "ureq-insecure" | "ureq_ins" => Some(DownloadStrategy::Ureq { fingerprint: Fingerprint::Chrome120, insecure: true }),
+        "curl" => Some(DownloadStrategy::Curl),
+        "powershell" | "webclient" => Some(DownloadStrategy::PowerShell),
+        "ps-invoke" | "invoke-webrequest" => Some(DownloadStrategy::PowerShellInvoke),
+        "bits" | "bitstransfer" => Some(DownloadStrategy::BitsTransfer),
+        "rust-range" | "rustrange" | "range" => Some(DownloadStrategy::RustRange { threads: 16 }),
+        "aria2c" => Some(DownloadStrategy::Aria2c),
+        _ => None,
     }
 }
 

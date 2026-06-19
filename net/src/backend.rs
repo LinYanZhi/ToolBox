@@ -121,9 +121,9 @@ impl Default for RustRangeBackend {
 }
 
 impl DownloadBackend for RustRangeBackend {
-    fn id(&self) -> &'static str { "RustRange" }
+    fn id(&self) -> &'static str { "rust-range" }
     fn supported_platforms(&self) -> &[Platform] { &[Platform::Windows, Platform::Linux, Platform::Macos] }
-    fn priority(&self) -> u8 { 2 }  // Aria2c(1) → RustRange(2) 原生多线程
+    fn priority(&self) -> u8 { 2 }  // Aria2c(1) → rust-range(2) 原生多线程
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "多线程" }
     fn health_check(&self) -> bool { true } // 纯 Rust，始终可用
@@ -172,10 +172,10 @@ impl UreqBackend {
 
 impl DownloadBackend for UreqBackend {
     fn id(&self) -> &'static str {
-        if self.insecure { "ureq(insecure)" } else { "ureq" }
+        if self.insecure { "rust-ureq(insecure)" } else { "rust-ureq" }
     }
     fn display_name(&self) -> &'static str {
-        if self.insecure { "ureq(ins)" } else { "ureq" }
+        if self.insecure { "rust-ureq(ins)" } else { "rust-ureq" }
     }
     fn supported_platforms(&self) -> &[Platform] { &[Platform::Windows, Platform::Linux, Platform::Macos] }
     fn priority(&self) -> u8 {
@@ -186,7 +186,7 @@ impl DownloadBackend for UreqBackend {
     fn health_check(&self) -> bool { true }
     fn description(&self) -> &'static str {
         if self.insecure {
-            "Ureq 的跳过 TLS 证书验证版本，用于自签名证书或代理 MITM 场景。"
+            "Rust Ureq 的跳过 TLS 证书验证版本，用于自签名证书或代理 MITM 场景。"
         } else {
             "纯 Rust 单线程下载器，模拟完整浏览器指纹。内置 Cookie/JS 挑战绕过机制，反反爬能力强。"
         }
@@ -388,18 +388,18 @@ fn which_path(name: &str) -> Option<String> {
 
 /// 该后端是否为纯内置实现（无外部二进制依赖）。
 pub fn backend_is_builtin(name: &str) -> bool {
-    matches!(name, "RustRange" | "Ureq" | "UreqInsecure")
+    matches!(name, "rust-range" | "RustRange" | "rust-ureq" | "Ureq" | "rust-ureq(insecure)" | "UreqInsecure")
 }
 
 /// 查询指定后端是否处于可用状态（health_check 通过）。
 pub fn backend_is_available(name: &str) -> bool {
     match name {
-        "RustRange" => true, // 纯 Rust
-        "Aria2c" => get_tools_bin_dir()
+        "rust-range" | "RustRange" => true, // 纯 Rust
+        "aria2c" | "Aria2c" => get_tools_bin_dir()
             .map(|dir| dir.join("aria2c.exe").is_file())
             .unwrap_or(false),
-        "Ureq" | "UreqInsecure" => true,
-        "PowerShell" | "PowerShellInvoke" | "BitsTransfer" => {
+        "rust-ureq" | "Ureq" | "rust-ureq(insecure)" | "UreqInsecure" => true,
+        "powershell" | "PowerShell" | "ps-invoke" | "PowerShellInvoke" | "bits" | "BitsTransfer" => {
             which_path("powershell").is_some()
                 || std::path::Path::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe").is_file()
         }
@@ -415,37 +415,37 @@ pub fn backend_binary_path(name: &str) -> Option<String> {
         return None; // 纯内置，无二进制
     }
     match name {
-        "Aria2c" => {
+        "aria2c" | "Aria2c" => {
             get_tools_bin_dir()
                 .map(|dir| dir.join("aria2c.exe"))
                 .filter(|p| p.is_file())
                 .and_then(|p| p.to_str().map(|s| s.to_string()))
         }
-        "PowerShell" | "PowerShellInvoke" | "BitsTransfer" => {
+        "powershell" | "PowerShell" | "ps-invoke" | "PowerShellInvoke" | "bits" | "BitsTransfer" => {
             which_path("powershell")
                 .or_else(|| Some("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".into()))
         }
-        "Curl" => which_path("curl"),
+        "curl" | "Curl" => which_path("curl"),
         _ => None,
     }
 }
 
 /// 查询指定后端是否支持 Range 分片下载。
 pub fn backend_supports_range(name: &str) -> bool {
-    matches!(name, "RustRange" | "Aria2c" | "Curl" | "BitsTransfer")
+    matches!(name, "rust-range" | "RustRange" | "aria2c" | "Aria2c" | "curl" | "Curl" | "bits" | "BitsTransfer")
 }
 
 /// 查询指定后端的详细说明。
 pub fn backend_description(name: &str) -> &'static str {
     match name {
-        "RustRange" => "纯 Rust 实现的多线程分片下载器，零外部依赖。支持 Range 分片和断点续传。",
-        "Aria2c" => "基于 aria2c 的高性能多线程下载器，支持 Range 分片。需安装（as tool install aria2c）。",
-        "Ureq" => "纯 Rust 单线程下载器，模拟完整浏览器指纹。内置 Cookie/JS 挑战绕过机制，反反爬能力强。",
-        "UreqInsecure" => "Ureq 的跳过 TLS 证书验证版本，用于自签名证书或代理 MITM 场景。",
-        "PowerShell" => "调用 System.Net.WebClient 下载。使用 Windows Schannel TLS 栈，JA3 指纹独特，可绕过部分 CDN 反爬。",
-        "PowerShellInvoke" => "调用 PowerShell Invoke-WebRequest 下载。带完整浏览器请求头，HTTP 栈与 PowerShell 后端相同。",
-        "BitsTransfer" => "使用 Windows BITS 后台智能传输服务，系统级下载。支持分片续传，进程退出后仍可继续下载。",
-        "Curl" => "调用系统 curl.exe 下载，Windows 10/11 自带。作为最终兜底方案，失败时自动尝试跳过证书验证。",
+        "rust-range" | "RustRange" => "纯 Rust 实现的多线程分片下载器，零外部依赖。支持 Range 分片和断点续传。",
+        "aria2c" | "Aria2c" => "基于 aria2c 的高性能多线程下载器，支持 Range 分片。需安装（as tool install aria2c）。",
+        "rust-ureq" | "Ureq" => "纯 Rust 单线程下载器，模拟完整浏览器指纹。内置 Cookie/JS 挑战绕过机制，反反爬能力强。",
+        "rust-ureq(insecure)" | "UreqInsecure" => "Rust Ureq 的跳过 TLS 证书验证版本，用于自签名证书或代理 MITM 场景。",
+        "powershell" | "PowerShell" => "调用 System.Net.WebClient 下载。使用 Windows Schannel TLS 栈，JA3 指纹独特，可绕过部分 CDN 反爬。",
+        "ps-invoke" | "PowerShellInvoke" => "调用 PowerShell Invoke-WebRequest 下载。带完整浏览器请求头，HTTP 栈与 PowerShell 后端相同。",
+        "bits" | "BitsTransfer" => "使用 Windows BITS 后台智能传输服务，系统级下载。支持分片续传，进程退出后仍可继续下载。",
+        "curl" | "Curl" => "调用系统 curl.exe 下载，Windows 10/11 自带。作为最终兜底方案，失败时自动尝试跳过证书验证。",
         _ => "",
     }
 }

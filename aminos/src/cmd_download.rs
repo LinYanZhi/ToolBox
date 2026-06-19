@@ -79,7 +79,8 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
 
     // 先尝试第三方软件源
     if let Ok(sd) = crate::software::read_software_def(&n) {
-        let ver = &sd.default_version;
+        let ver = sd.single_version().or_else(|| sd.first_version())
+            .ok_or_else(|| anyhow::anyhow!("{}: 有多个版本，请用 --version 指定", name))?;
         let vi = match sd.versions.get(ver) {
             Some(vi) => vi,
             None => anyhow::bail!("{}: 版本 {} 未定义下载地址", name, ver),
@@ -98,14 +99,20 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         for url in &vi.urls {
             println!("  {}", gray(url));
         }
-        net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &net::DownloadConfig::default())?;
+        let config = if sd.downloader.is_empty() {
+            net::DownloadConfig::default()
+        } else {
+            net::DownloadConfig::with_preferred_backend(&sd.downloader)
+        };
+        net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &config)?;
         println!("{} {}", green("下载完成"), gray(dest.to_string_lossy()));
         return Ok(());
     }
 
     // 再尝试工具源
     if let Ok(sd) = crate::software::read_tool_def(&n) {
-        let ver = &sd.default_version;
+        let ver = sd.single_version().or_else(|| sd.first_version())
+            .ok_or_else(|| anyhow::anyhow!("{}: 有多个版本，请用 --version 指定", name))?;
         let vi = match sd.versions.get(ver) {
             Some(vi) => vi,
             None => anyhow::bail!("{}: 版本 {} 未定义下载地址", name, ver),
@@ -123,7 +130,12 @@ fn download_by_name(name: &str, target_dir: &std::path::Path) -> anyhow::Result<
         for url in &vi.urls {
             println!("  {}", gray(url));
         }
-        net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &net::DownloadConfig::default())?;
+        let config = if sd.downloader.is_empty() {
+            net::DownloadConfig::default()
+        } else {
+            net::DownloadConfig::with_preferred_backend(&sd.downloader)
+        };
+        net::download::download_with_url_fallback(&sd.name, &vi.urls, &dest, &config)?;
         println!("{} {}", green("下载完成"), gray(dest.to_string_lossy()));
         return Ok(());
     }

@@ -108,7 +108,7 @@ fn build_rows(
         }
         let (category, installer) = if let Some(sd) = defs.iter().find(|sd| name_matches(&rn, sd)) {
             let cat = if sd.category.is_empty() { "未分类".to_string() } else { sd.category.clone() };
-            let ins = sd.versions.get(&sd.default_version)
+            let ins = sd.versions.get(sd.first_version().unwrap_or(""))
                 .map(|vi| installer_marker(&vi.installer_type))
                 .unwrap_or("EXE");
             (cat, ins)
@@ -143,7 +143,8 @@ fn build_rows(
         let name = &sd.name;
         let display = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
         let category = if sd.category.is_empty() { "未分类".to_string() } else { sd.category.clone() };
-        let installer = sd.versions.get(&sd.default_version)
+        let default_ver = sd.single_version().or_else(|| sd.first_version()).unwrap_or("多版本");
+        let installer = sd.versions.get(default_ver)
             .map(|vi| installer_marker(&vi.installer_type))
             .unwrap_or("EXE");
         let already = reg_installed.iter().any(|r| {
@@ -164,7 +165,7 @@ fn build_rows(
             continue;
         }
         rows.push(Row {
-            name: display.to_string(), version: sd.default_version.clone(),
+            name: display.to_string(), version: sd.single_version().unwrap_or("多版本").to_string(),
             install_status: "未安装", install_color: color::ansi::GRAY,
             dl_status, dl_color,
             src_label: "有", src_color: color::ansi::GREEN,

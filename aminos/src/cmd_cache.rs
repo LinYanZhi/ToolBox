@@ -49,7 +49,7 @@ pub fn run_cache(_list: bool, clear: bool, open: bool) -> anyhow::Result<()> {
                         name.starts_with(&prefix)
                     });
                     match matched_sd {
-                        Some(sd) if sd.default_version != pe_ver => {
+                        Some(sd) if sd.single_version().map(|v| v != pe_ver).unwrap_or(false) => {
                             color::yellow(" !")
                         }
                         Some(_) => {

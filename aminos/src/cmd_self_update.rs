@@ -12,7 +12,8 @@ pub fn run_self_update() -> anyhow::Result<()> {
     // 读取 as 自身的源定义（优先 app 源，回退到工具源）
     let sd = software::read_software_def("as")
         .or_else(|_| software::read_tool_def("as"))?;
-    let ver = &sd.default_version;
+    let ver = sd.single_version().or_else(|| sd.first_version())
+        .ok_or_else(|| anyhow::anyhow!("as: 未找到版本定义"))?;
     let vi = sd.versions.get(ver)
         .ok_or_else(|| anyhow::anyhow!("as 版本 {} 未定义", ver))?;
 

@@ -25,14 +25,14 @@ pub fn list_backend_states() -> Vec<(String, bool, Option<u8>)> {
         }
         eprintln!("  已创建默认配置文件: {}", path.display());
         return vec![
-            ("Aria2c".into(), true, None),
-            ("RustRange".into(), true, Some(16)),
-            ("Ureq".into(), true, None),
-            ("UreqInsecure".into(), true, None),
-            ("PowerShell".into(), true, None),
-            ("PowerShellInvoke".into(), true, None),
-            ("BitsTransfer".into(), true, None),
-            ("Curl".into(), true, None),
+            ("aria2c".into(), true, None),
+            ("rust-range".into(), true, Some(16)),
+            ("rust-ureq".into(), true, None),
+            ("rust-ureq(insecure)".into(), true, None),
+            ("powershell".into(), true, None),
+            ("ps-invoke".into(), true, None),
+            ("bits".into(), true, None),
+            ("curl".into(), true, None),
         ];
     }
     let content = match std::fs::read_to_string(&path) {
@@ -186,19 +186,19 @@ impl DownloaderConfig {
                 continue;
             }
             match entry.name.as_str() {
-                "RustRange" => {
+                "rust-range" | "RustRange" => {
                     backends.push(Box::new(RustRangeBackend {
                         threads: entry.threads.unwrap_or(16),
                         resume: entry.resume.unwrap_or(true),
                     }) as Box<dyn DownloadBackend>);
                 }
-                "Aria2c" => backends.push(Box::new(Aria2cBackend)),
-                "Ureq" => backends.push(Box::new(UreqBackend::normal())),
-                "UreqInsecure" => backends.push(Box::new(UreqBackend::insecure())),
-                "PowerShell" => backends.push(Box::new(PowerShellBackend)),
-                "PowerShellInvoke" => backends.push(Box::new(PowerShellInvokeBackend)),
-                "BitsTransfer" => backends.push(Box::new(BitsBackend)),
-                "Curl" => backends.push(Box::new(CurlBackend)),
+                "aria2c" | "Aria2c" => backends.push(Box::new(Aria2cBackend)),
+                "rust-ureq" | "Ureq" => backends.push(Box::new(UreqBackend::normal())),
+                "rust-ureq(insecure)" | "UreqInsecure" => backends.push(Box::new(UreqBackend::insecure())),
+                "powershell" | "PowerShell" => backends.push(Box::new(PowerShellBackend)),
+                "ps-invoke" | "PowerShellInvoke" => backends.push(Box::new(PowerShellInvokeBackend)),
+                "bits" | "BitsTransfer" => backends.push(Box::new(BitsBackend)),
+                "curl" | "Curl" => backends.push(Box::new(CurlBackend)),
                 "RustSingle" => {
                     // RustSingle 已合并到 RustRange，静默跳过
                 }
@@ -262,14 +262,14 @@ impl Default for TomlConfig {
 /// 默认的后端策略列表（代码维护的权威列表）。
 fn default_strategies() -> Vec<TomlStrategy> {
     vec![
-        TomlStrategy { name: "Aria2c".into(), enabled: true, threads: None, resume: None },
-        TomlStrategy { name: "RustRange".into(), enabled: true, threads: Some(16), resume: Some(true) },
-        TomlStrategy { name: "Ureq".into(), enabled: true, threads: None, resume: None },
-        TomlStrategy { name: "UreqInsecure".into(), enabled: true, threads: None, resume: None },
-        TomlStrategy { name: "PowerShell".into(), enabled: true, threads: None, resume: None },
-        TomlStrategy { name: "PowerShellInvoke".into(), enabled: true, threads: None, resume: None },
-        TomlStrategy { name: "BitsTransfer".into(), enabled: true, threads: None, resume: None },
-        TomlStrategy { name: "Curl".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "aria2c".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "rust-range".into(), enabled: true, threads: Some(16), resume: Some(true) },
+        TomlStrategy { name: "rust-ureq".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "rust-ureq(insecure)".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "powershell".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "ps-invoke".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "bits".into(), enabled: true, threads: None, resume: None },
+        TomlStrategy { name: "curl".into(), enabled: true, threads: None, resume: None },
     ]
 }
 

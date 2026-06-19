@@ -22,7 +22,7 @@ pub fn run_add(opts: ToolAddOpts) -> anyhow::Result<()> {
             };
 
             let display = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
-            let source_ver = &sd.default_version;
+            let source_ver = sd.single_version().or_else(|| sd.first_version()).unwrap_or("unknown");
             let installed_db = software::read_installed_db().unwrap_or_default();
             let current_ver = installed_db.get(&n)
                 .map(|rec| rec.version.clone())
@@ -92,13 +92,16 @@ pub fn run_list() -> anyhow::Result<()> {
         .max(10);
 
     let max_ver_w = defs.iter()
-        .map(|d| d.default_version.display_width())
+        .map(|d| {
+            let v = d.single_version().or_else(|| d.first_version()).unwrap_or("-");
+            v.display_width()
+        })
         .max()
         .unwrap_or(10);
 
     for def in &defs {
         let name = if def.display_name.is_empty() { &def.name } else { &def.display_name };
-        let ver = &def.default_version;
+        let ver = def.single_version().or_else(|| def.first_version()).unwrap_or("-");
         let installed = db.contains_key(&def.name);
         let status = if installed {
             color::green(format!("{}  {}",

@@ -26,8 +26,6 @@ pub struct VersionInfo {
     #[serde(default)]
     pub install_args: Vec<String>,
     #[serde(default)]
-    pub uninstall_args: Vec<String>,
-    #[serde(default)]
     pub detection: Option<Detection>,
     #[serde(default)]
     pub shortcut_candidates: Vec<String>,
@@ -55,19 +53,30 @@ pub struct SoftwareDef {
     pub category: String,
     #[serde(default)]
     pub homepage: String,
-    #[serde(default)]
-    pub default_version: String,
     /// 软件类型：空/未设置 = 第三方软件, "self" = 自研工具
     #[serde(default)]
     pub kind: String,
-    /// 源定义最后更新时间（ISO 日期，如 "2026-06-15"）
+    /// 首选下载后端（如 "ureq", "curl", "powershell", "rustrange"）。
+    /// 设置后优先使用此后端下载，失败时回退到默认策略链。
     #[serde(default)]
-    pub updated: String,
-    /// 显示颜色（参考软件图标颜色），如 "green", "blue", "red" 等。
-    /// 供 tree/list 命令按颜色渲染软件名称。
-    #[serde(default)]
-    pub color: String,
+    pub downloader: String,
     pub versions: HashMap<String, VersionInfo>,
+}
+
+impl SoftwareDef {
+    /// 当 versions 只有一个版本时返回该版本 key，否则返回 None。
+    pub fn single_version(&self) -> Option<&str> {
+        if self.versions.len() == 1 {
+            self.versions.keys().next().map(|s| s.as_str())
+        } else {
+            None
+        }
+    }
+
+    /// 获取第一个版本 key（用于多版本软件的无默认场景）。
+    pub fn first_version(&self) -> Option<&str> {
+        self.versions.keys().next().map(|s| s.as_str())
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -492,9 +501,81 @@ pub fn parse_json(path: &PathBuf) -> anyhow::Result<SoftwareDef> {
 }
 
 /// 根据软件定义中的 color 字段将文本着色。
-/// 若未配置或颜色名不认识，默认用 cyan 兜底。
+/// 优先使用代码内置的软件色彩映射表，未命中时使用 cyan 兜底。
 pub fn paint_software(text: &str, def: &SoftwareDef) -> String {
-    paint_by_color_name(text, &def.color)
+    let color_name = software_color_map(&def.name)
+        .unwrap_or("cyan");
+    paint_by_color_name(text, color_name)
+}
+
+/// 软件→颜色的内置映射表（与 JSON 解耦，统一管理）。
+fn software_color_map(name: &str) -> Option<&'static str> {
+    Some(match name {
+        // ── 编辑器 ──
+        "vscode"         => "bright-blue",
+        "trae"           => "bright-green",
+        "cursor"         => "white",
+        "notepadpp"      => "bright-green",
+        // ── 浏览器 ──
+        "chrome"         => "white",
+        "edge"           => "bright-green",
+        "firefox"        => "bright-yellow",
+        // ── IDE ──
+        "pycharm"        => "yellow",
+        "datagrip"       => "bright-blue",
+        "visual-studio"  => "bright-magenta",
+        // ── 开发工具 ──
+        "git"            => "yellow",
+        "yingdao"        => "bright-red",
+        "nvm"            => "green",
+        "python"         => "yellow",
+        "vmware"         => "bright-yellow",
+        // ── 影音 ──
+        "potplayer"      => "bright-yellow",
+        "obs"            => "white",
+        "steam"          => "blue",
+        "netease-music"  => "bright-red",
+        // ── 办公软件 ──
+        "wps"            => "bright-red",
+        "pdfgear"        => "red",
+        "microsoft-office" => "white",
+        // ── 社交聊天 ──
+        "dingtalk"       => "blue",
+        "wechat"         => "green",
+        "wecom"          => "bright-blue",
+        "feishu"         => "bright-blue",
+        // ── 系统工具 ──
+        "everything"     => "bright-yellow",
+        "spacesniffer"   => "bright-yellow",
+        "iobitunlocker"  => "yellow",
+        "wepe"           => "bright-blue",
+        // ── 效率增强 ──
+        "7zip"           => "gray",
+        "snipaste"       => "bright-yellow",
+        "pixpin"         => "bright-blue",
+        "ttime"          => "bright-green",
+        "utools"         => "gray",
+        // ── 远程控制 ──
+        "sunlogin"       => "bright-red",
+        "todesk"         => "bright-blue",
+        "uuremote"       => "cyan",
+        // ── 安全防护 ──
+        "huorong"        => "yellow",
+        "watt-toolkit"   => "bright-blue",
+        // ── 网络工具 ──
+        "clash-verge"    => "bright-magenta",
+        "flclash"        => "bright-blue",
+        // ── 自研工具（全部灰色） ──
+        "as"             => "gray",
+        "ls"             => "gray",
+        "lsd"            => "gray",
+        "eza"            => "gray",
+        "pp"             => "gray",
+        "ss"             => "gray",
+        "uv"             => "gray",
+        "aria2c"         => "gray",
+        _ => return None,
+    })
 }
 
 /// 根据颜色名字符串将文本着色。

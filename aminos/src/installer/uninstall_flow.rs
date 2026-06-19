@@ -28,7 +28,7 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
             return uninstall_self_tool(name, display);
         }
 
-        let version = sd.default_version.as_str();
+        let version = sd.single_version().or_else(|| sd.first_version()).unwrap_or("unknown");
         let vi = sd.versions.get(version);
         let is_portable = vi.map(|v| v.installer_type == "portable").unwrap_or(false);
         let installed_info = vi.and_then(|v| v.detection.as_ref())
