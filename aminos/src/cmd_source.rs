@@ -108,7 +108,7 @@ fn run_list() -> anyhow::Result<()> {
             color::yellow(&count.to_string()),
             color::gray(&format!("({})", dir_name)),
         );
-        println!("    {}", color::gray(&format!("{}/{}", base_url, dir_name)));
+        println!("    {}", color::gray(&format!("{}/apps/{}", base_url, dir_name)));
     }
 
     // 自研工具
@@ -175,39 +175,42 @@ fn run_tree() -> anyhow::Result<()> {
         let dir = source_root.join(dir_name);
         let count = count_json_files(&dir);
 
-        let mut defs: Vec<(String, String)> = Vec::new();
+        let mut defs: Vec<software::SoftwareDef> = Vec::new();
         if dir.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for e in entries.flatten() {
                     let p = e.path();
                     if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                         if let Ok(sd) = software::parse_json(&p) {
-                            let dn = if sd.display_name.is_empty() { sd.name.clone() } else { sd.display_name };
-                            defs.push((sd.name.clone(), dn));
+                            defs.push(sd);
                         }
                     }
                 }
             }
         }
-        defs.sort_by(|a, b| a.0.cmp(&b.0));
+        defs.sort_by(|a, b| a.name.cmp(&b.name));
 
         let prefix = if is_last_dir { "└── " } else { "├── " };
         let connector = if is_last_dir { "    " } else { "│   " };
-        println!("  {} {} {}  {}",
+        println!("  {} {}",
             color::gray(prefix),
             color::cyan(label),
+        );
+        println!("  {} {}  {}",
+            connector,
             color::gray(&format!("[{}] {}", dir_name, desc)),
             color::gray(&format!("({} 个)", count)),
         );
 
-        for (j, (name, display_name)) in defs.iter().enumerate() {
+        for (j, sd) in defs.iter().enumerate() {
             let is_last_def = j == defs.len() - 1;
-            let def_prefix = if is_last_def {
-                format!("{}    └── {}", connector, display_name)
-            } else {
-                format!("{}    ├── {}", connector, display_name)
-            };
-            println!("  {}  {}", color::gray(&def_prefix), color::gray(&format!("({})", name)));
+            let branch = if is_last_def { "└── " } else { "├── " };
+            let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+            println!("  {}  {}  {}",
+                color::gray(&format!("{}    {}", connector, branch)),
+                software::paint_software(dn, sd),
+                color::gray(&format!("({})", sd.name)),
+            );
         }
 
         if defs.is_empty() && count > 0 {
@@ -216,42 +219,58 @@ fn run_tree() -> anyhow::Result<()> {
 
         println!("  {}    {}",
             connector,
-            color::gray(&format!("地址: {}/{}", base_url, dir_name)),
+            color::gray(&format!("地址: {}/apps/{}", base_url, dir_name)),
         );
+        println!("  {}", connector);
     }
 
     // 自研工具
     let tools_dir = paths::tools_source_dir();
     let tools_count = count_json_files(&tools_dir);
-    let mut tool_defs: Vec<(String, String)> = Vec::new();
+    let mut tool_defs: Vec<software::SoftwareDef> = Vec::new();
     if tools_dir.is_dir() {
         if let Ok(entries) = std::fs::read_dir(&tools_dir) {
             for e in entries.flatten() {
                 let p = e.path();
                 if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                     if let Ok(sd) = software::parse_json(&p) {
-                        let dn = if sd.display_name.is_empty() { sd.name.clone() } else { sd.display_name };
-                        tool_defs.push((sd.name.clone(), dn));
+                        tool_defs.push(sd);
                     }
                 }
             }
         }
     }
-    tool_defs.sort_by(|a, b| a.0.cmp(&b.0));
-    println!("  {} {}  {}",
+    tool_defs.sort_by(|a, b| a.name.cmp(&b.name));
+    println!("  {} {}",
         color::gray("└── "),
         color::cyan("自研工具"),
+    );
+    println!("  {} {}",
+        color::gray("    "),
         color::gray(&format!("(tools, {} 个)", tools_count)),
     );
-    for (j, (name, display_name)) in tool_defs.iter().enumerate() {
+    for (j, sd) in tool_defs.iter().enumerate() {
         let is_last = j == tool_defs.len() - 1;
-        let p = if is_last { "    └── " } else { "    ├── " };
-        println!("  {}  {}", color::gray(&format!("    {}", p)), color::gray(&format!("({})", if *display_name == *name { name.clone() } else { format!("{} ({})", display_name, name) })));
+        let branch = if is_last { "└── " } else { "├── " };
+        let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+        if sd.display_name.is_empty() {
+            println!("  {}  {}",
+                color::gray(&format!("    {}    {}", "", branch)),
+                software::paint_software(dn, sd),
+            );
+        } else {
+            println!("  {}  {}  {}",
+                color::gray(&format!("    {}    {}", "", branch)),
+                software::paint_software(dn, sd),
+                color::gray(&format!("({})", sd.name)),
+            );
+        }
     }
     println!("  {}    {}",
         color::gray("    "),
         color::gray(&format!("地址: {}/tools", base_url)),
     );
+    println!("  {}", color::gray("    "));
 
     // 社区源
     let _ = run_tree_community();
@@ -278,36 +297,36 @@ fn run_tree_community() -> anyhow::Result<()> {
         let status = if entry.enabled { "已启用" } else { "已禁用" };
 
         let local_dir = paths::community_source_named(&entry.name);
-        let mut defs: Vec<(String, String)> = Vec::new();
+        let mut defs: Vec<software::SoftwareDef> = Vec::new();
         if local_dir.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&local_dir) {
                 for e in entries.flatten() {
                     let p = e.path();
                     if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                         if let Ok(sd) = software::parse_json(&p) {
-                            let dn = if sd.display_name.is_empty() { sd.name.clone() } else { sd.display_name };
-                            defs.push((sd.name.clone(), dn));
+                            defs.push(sd);
                         }
                     }
                 }
             }
         }
-        defs.sort_by(|a, b| a.0.cmp(&b.0));
+        defs.sort_by(|a, b| a.name.cmp(&b.name));
 
-        println!("  {} {} ({})",
+        println!("  {} {}  {}",
             color::gray(prefix),
             color::cyan(&entry.name),
             color::gray(status),
         );
 
-        for (j, (name, display_name)) in defs.iter().enumerate() {
+        for (j, sd) in defs.iter().enumerate() {
             let is_last_def = j == defs.len() - 1;
-            let def_prefix = if is_last_def {
-                format!("{}    └── {}", connector, display_name)
-            } else {
-                format!("{}    ├── {}", connector, display_name)
-            };
-            println!("  {}  {}", color::gray(&def_prefix), color::gray(&format!("({})", name)));
+            let branch = if is_last_def { "└── " } else { "├── " };
+            let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+            println!("  {}  {}  {}",
+                color::gray(&format!("{}    {}", connector, branch)),
+                software::paint_software(dn, sd),
+                color::gray(&format!("({})", sd.name)),
+            );
         }
 
         println!("  {}    {}",
@@ -331,20 +350,19 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         let count = count_json_files(&local_dir);
         let status = if entry.enabled { color::green("已启用") } else { color::gray("已禁用") };
         let defs = if local_dir.is_dir() {
-            let mut names: Vec<String> = Vec::new();
+            let mut defs: Vec<software::SoftwareDef> = Vec::new();
             if let Ok(entries) = std::fs::read_dir(&local_dir) {
                 for e in entries.flatten() {
                     let p = e.path();
                     if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                         if let Ok(sd) = software::parse_json(&p) {
-                            let name_str = if sd.display_name.is_empty() { sd.name.clone() } else { format!("{} ({})", sd.display_name, sd.name) };
-                            names.push(name_str);
+                            defs.push(sd);
                         }
                     }
                 }
             }
-            names.sort();
-            names
+            defs.sort_by(|a, b| a.name.cmp(&b.name));
+            defs
         } else {
             Vec::new()
         };
@@ -359,8 +377,12 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         if !defs.is_empty() {
             println!();
             println!("  {}", color::gray("软件列表:"));
-            for d in &defs {
-                println!("    {}", d);
+            for sd in &defs {
+                let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+                println!("    {}  {}",
+                    software::paint_software(dn, sd),
+                    color::gray(&format!("({})", sd.name)),
+                );
             }
         }
         println!();
@@ -372,20 +394,19 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         let dir = source_root.join(&name_string);
         let count = count_json_files(&dir);
         let defs = if dir.is_dir() {
-            let mut names: Vec<String> = Vec::new();
+            let mut defs: Vec<software::SoftwareDef> = Vec::new();
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for e in entries.flatten() {
                     let p = e.path();
                     if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
                         if let Ok(sd) = software::parse_json(&p) {
-                            let name_str = if sd.display_name.is_empty() { sd.name.clone() } else { format!("{} ({})", sd.display_name, sd.name) };
-                            names.push(name_str);
+                            defs.push(sd);
                         }
                     }
                 }
             }
-            names.sort();
-            names
+            defs.sort_by(|a, b| a.name.cmp(&b.name));
+            defs
         } else {
             Vec::new()
         };
@@ -400,8 +421,12 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         if !defs.is_empty() {
             println!();
             println!("  {}", color::gray("软件列表:"));
-            for d in &defs {
-                println!("    {}", d);
+            for sd in &defs {
+                let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+                println!("    {}  {}",
+                    software::paint_software(dn, sd),
+                    color::gray(&format!("({})", sd.name)),
+                );
             }
         }
         println!();

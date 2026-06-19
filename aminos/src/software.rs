@@ -63,6 +63,10 @@ pub struct SoftwareDef {
     /// 源定义最后更新时间（ISO 日期，如 "2026-06-15"）
     #[serde(default)]
     pub updated: String,
+    /// 显示颜色（参考软件图标颜色），如 "green", "blue", "red" 等。
+    /// 供 tree/list 命令按颜色渲染软件名称。
+    #[serde(default)]
+    pub color: String,
     pub versions: HashMap<String, VersionInfo>,
 }
 
@@ -105,7 +109,7 @@ pub fn update_sources() -> anyhow::Result<()> {
     println!("{}", color::bold_cyan("同步软件源..."));
     for (i, cat) in paths::CATEGORIES.iter().enumerate() {
         let (_, label, _) = paths::CATEGORY_META[i];
-        let urls: Vec<String> = builtin.iter().map(|u| format!("{}/{}", u, cat)).collect();
+        let urls: Vec<String> = builtin.iter().map(|u| format!("{}/apps/{}", u, cat)).collect();
         let repo = config::SourceRepo::new(urls);
         let dest = paths::category_dir(cat);
         if let Err(e) = config::source::update_sources(&dest, &repo) {
@@ -485,4 +489,37 @@ pub fn parse_json(path: &PathBuf) -> anyhow::Result<SoftwareDef> {
         .with_context(|| format!("读取文件失败: {}", path.display()))?;
     serde_json::from_str(&data)
         .with_context(|| format!("解析 JSON 失败: {}", path.display()))
+}
+
+/// 根据软件定义中的 color 字段将文本着色。
+/// 若未配置或颜色名不认识，默认用 cyan 兜底。
+pub fn paint_software(text: &str, def: &SoftwareDef) -> String {
+    paint_by_color_name(text, &def.color)
+}
+
+/// 根据颜色名字符串将文本着色。
+pub fn paint_by_color_name(text: &str, color_name: &str) -> String {
+    match color_name {
+        "green"       => color::green(text),
+        "blue"        => color::blue(text),
+        "red"         => color::red(text),
+        "cyan"        => color::cyan(text),
+        "yellow"      => color::yellow(text),
+        "magenta"     => color::magenta(text),
+        "gray"        => color::gray(text),
+        "white"       => color::white(text),
+        "black"       => color::black(text),
+        "bold-green"  => color::bold_green(text),
+        "bold-blue"   => color::bold_blue(text),
+        "bold-cyan"   => color::bold_cyan(text),
+        "bold-red"    => color::bold_red(text),
+        "bold-yellow" => color::bold_yellow(text),
+        "bright-green"   => color::bright_green(text),
+        "bright-blue"    => color::bright_blue(text),
+        "bright-cyan"    => color::bright_cyan(text),
+        "bright-red"     => color::bright_red(text),
+        "bright-yellow"  => color::bright_yellow(text),
+        "bright-magenta" => color::bright_magenta(text),
+        _ => color::cyan(text), // 默认兜底
+    }
 }
