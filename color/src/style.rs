@@ -65,6 +65,7 @@ pub const WHITE:   Style = Style::new(37);
 // ── 明亮色（90-97）───────────────────────────────────
 
 pub const GRAY:          Style = Style::new(90);
+pub const BRIGHT_BLACK:  Style = Style::new(90);
 pub const BRIGHT_RED:    Style = Style::new(91);
 pub const BRIGHT_GREEN:  Style = Style::new(92);
 pub const BRIGHT_YELLOW: Style = Style::new(93);
@@ -104,6 +105,7 @@ make_paint_fn! {
     cyan    => CYAN,
     white   => WHITE,
     gray    => GRAY,
+    bright_black  => BRIGHT_BLACK,
     bright_red    => BRIGHT_RED,
     bright_green  => BRIGHT_GREEN,
     bright_yellow => BRIGHT_YELLOW,

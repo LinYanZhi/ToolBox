@@ -14,6 +14,55 @@ pub(crate) fn label_of_type(itype: &str) -> String {
     }
 }
 
+/// 多源检测软件是否已安装（不依赖进程退出码）。
+///
+/// 检测顺序（优先级从高到低）：
+///   1. 注册表 detection（display_name + publisher 匹配）
+///   2. 快捷方式文件是否存在（shortcut_candidates）
+///   3. 候选安装目录是否存在（install_dir_candidates）
+///
+/// 返回 `true` 表示检测到软件已安装。
+pub(crate) fn check_software_detected(vi: &crate::software::VersionInfo) -> bool {
+    // 1. Registry detection（最可靠）
+    if let Some(ref detection) = vi.detection {
+        if crate::registry::detect_installed(detection).is_some() {
+            return true;
+        }
+    }
+
+    // 2. Shortcut candidates（桌面/开始菜单快捷方式）
+    for lnk in &vi.shortcut_candidates {
+        let expanded = expand_env_vars(lnk);
+        if Path::new(&expanded).exists() {
+            return true;
+        }
+    }
+
+    // 3. Install dir candidates
+    for candidate in &vi.install_dir_candidates {
+        let expanded = expand_env_vars(candidate);
+        if Path::new(&expanded).is_dir() {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// 检测便携版是否已通过 as 安装到 apps/{name}-{version} 目录。
+pub(crate) fn check_portable_installed(name: &str, version: &str) -> bool {
+    let dir_name = format!("{}-{}", name, version);
+    let target = crate::paths::apps_dir().join(&dir_name);
+    target.is_dir()
+}
+
+/// 多源检测软件是否已卸载（注册表条目消失 + 快捷方式 + 安装目录）。
+///
+/// 与 `check_software_detected()` 互补，用于卸载后的确认。
+pub(crate) fn check_software_removed(vi: &crate::software::VersionInfo) -> bool {
+    !check_software_detected(vi)
+}
+
 /// 查找安装路径（3 级回退：注册表 → 候选目录 → 快捷方式）。
 pub(crate) fn find_install_path(
     _name: &str,
@@ -133,17 +182,6 @@ pub(crate) fn find_entry_point_exe(install_dir: &str, vi: &crate::software::Vers
 
     // 4. 回退：第一个 exe
     Some(candidates[0].to_string_lossy().to_string())
-}
-
-/// 询问用户是否已完成卸载。
-pub(crate) fn prompt_uninstall_done(display: &str) -> bool {
-    use std::io::Write;
-    print!("  是否已完成 {} 的卸载? [y/N] ", display);
-    let _ = std::io::stdout().flush();
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).ok();
-    let trimmed = input.trim().to_lowercase();
-    trimmed == "y" || trimmed == "yes"
 }
 
 /// 在单个目录中查找已知的卸载程序。

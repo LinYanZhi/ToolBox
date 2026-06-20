@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
+use color;
 
 use sha2::{Sha256, Digest};
 
@@ -51,7 +52,12 @@ pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], ren
         }
     }
 
-    // 3) 下载到临时文件
+    // 3) 展示下载链接
+    if let Some(first_url) = urls.first() {
+        println!("  下载: {}", color::bright_black(first_url));
+    }
+
+    // 4) 下载到临时文件
     let tmp = dl.join(format!("{}.downloading", filename));
     let config = if preferred_downloader.is_empty() {
         net::DownloadConfig::default().renew(renew)
@@ -60,7 +66,7 @@ pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], ren
     };
     net::download::download_with_url_fallback(name, urls, &tmp, &config)?;
 
-    // 4) 魔数修正扩展名（仅当 URL 探测失败、用猜测文件名时）
+    // 5) 魔数修正扩展名（仅当 URL 探测失败、用猜测文件名时）
     let corrected = if needs_magic_fix {
         match net::detect_format(&tmp) {
             Some(fmt) => {
@@ -90,7 +96,7 @@ pub(crate) fn get_installer_path(name: &str, version: &str, urls: &[String], ren
         p
     };
 
-    // 5) 最终验证
+    // 6) 最终验证
     if !net::verify_downloaded_file(&corrected) {
         let _ = std::fs::remove_file(&corrected);
         bail!("{}: 下载后验证失败（文件损坏或反盗链页面）", name);

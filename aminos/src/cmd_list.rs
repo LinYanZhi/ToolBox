@@ -93,6 +93,96 @@ fn installer_marker(t: &str) -> &'static str {
     }
 }
 
+/// 对无源定义的注册表条目进行启发式分类。
+fn classify_by_keyword(display_name: &str) -> &'static str {
+    let dn = display_name.to_lowercase();
+
+    // 游戏
+    let game_kw = [
+        "red dead", "subnautica", "rockstar", "paradox", "深海迷航",
+        "红怪", "饥荒", "vnite", "launcher",
+    ];
+    if game_kw.iter().any(|k| dn.contains(k)) {
+        return "游戏";
+    }
+
+    // 开发工具 & 语言
+    let dev_kw = [
+        "python", "git", "visual studio", "jetbrains", "intellij",
+        "pycharm", "datagrip", "vscode", "notepad++", "nvm",
+        "node.js", "nodejs", "jdk", "openjdk", "dotnet", "sdk",
+        "cmake", "mingw", "docker", "kubernetes", "vmware",
+        "workstation", "影刀",
+    ];
+    if dev_kw.iter().any(|k| dn.contains(k)) {
+        return "开发工具";
+    }
+
+    // 网络工具
+    let net_kw = [
+        "infatica", "sakura", "frp", "加速器", "clash", "flclash",
+        "vpn", "proxy", "网络", "远程", "向日葵", "todesk",
+    ];
+    if net_kw.iter().any(|k| dn.contains(k)) {
+        return "网络工具";
+    }
+
+    // 影音
+    let media_kw = [
+        "potplayer", "vlc", "mpv", "ffmpeg", "k-lite", "codec",
+        "spotify", "网易云", "netease", "obs", "steam", "影音",
+    ];
+    if media_kw.iter().any(|k| dn.contains(k)) {
+        return "影音";
+    }
+
+    // 办公
+    let office_kw = [
+        "office", "wps", "word", "excel", "powerpoint", "outlook",
+        "onenote", "pdf", "adobe", "foxit", "pdfgear",
+    ];
+    if office_kw.iter().any(|k| dn.contains(k)) {
+        return "办公";
+    }
+
+    // 社交聊天
+    let social_kw = [
+        "微信", "wechat", "qq", "tim", "钉钉", "dingtalk", "飞书",
+        "feishu", "lark", "企业微信", "slack", "discord", "telegram",
+    ];
+    if social_kw.iter().any(|k| dn.contains(k)) {
+        return "社交聊天";
+    }
+
+    // 浏览器
+    let browser_kw = [
+        "chrome", "edge", "firefox", "safari", "opera", "brave",
+        "chromium", "浏览器",
+    ];
+    if browser_kw.iter().any(|k| dn.contains(k)) {
+        return "浏览器";
+    }
+
+    // 系统工具
+    let sys_kw = [
+        "everything", "space", "unlocker", "iobit", "driver",
+        "directx", "visual c++", ".net", "manager",
+    ];
+    if sys_kw.iter().any(|k| dn.contains(k)) {
+        return "系统工具";
+    }
+
+    // 效率增强
+    let enhance_kw = [
+        "utools", "snipaste", "pixpin", "ttime", "7-zip", "7zip",
+    ];
+    if enhance_kw.iter().any(|k| dn.contains(k)) {
+        return "效率增强";
+    }
+
+    "其他"
+}
+
 // ── 构建行数据 ──────────────────────────────────────────
 
 fn build_rows(
@@ -117,7 +207,7 @@ fn build_rows(
                 .unwrap_or("EXE");
             (cat, ins)
         } else {
-            ("其他".to_string(), "")
+            (classify_by_keyword(&rn).to_string(), "")
         };
         let has_source = defs.iter().any(|sd| name_matches(&rn, sd));
         let src_label = if has_source { "有" } else { "无" };

@@ -5,23 +5,23 @@ use color;
 /// 无参数时显示自定义用法
 pub fn print_usage() {
     println!();
-    println!("  {}  {}", color::bold_cyan("install"), color::gray("安装指定软件"));
+    println!("  {}  {}", color::bold_cyan("install"), color::bright_black("安装指定软件"));
     println!();
-    println!("  {} {}", color::gray("用法:"), color::bold(&format!("{} [选项] <软件名称...>", cmd_names::INSTALL)));
+    println!("  {} {}", color::bright_black("用法:"), color::bold(&format!("{} [选项] <软件名称...>", cmd_names::INSTALL)));
     println!();
-    println!("  {}", color::gray("选项:"));
-    println!("    -v, --ver <版本>    指定版本号");
-    println!("    -g, --gui            使用图形界面安装（不静默）");
-    println!("    -r, --renew          强制重新下载");
-    println!("    -d, --download-only  仅下载，不安装");
-    println!("        --type <TYPE>    安装类型：portable 或 installer");
-    println!("    -u, --upgrade        检测更新，卸载旧版后安装新版");
-    println!("    -h, --help           显示帮助");
+    println!("  {}", color::bright_black("选项:"));
+    println!("    {} {} {}", color::cyan("-v"), color::cyan("--ver <版本>"), color::bright_black("指定版本号"));
+    println!("    {} {} {}", color::cyan("-g"), color::cyan("--gui"), color::bright_black("使用图形界面安装（不静默）"));
+    println!("    {} {} {}", color::cyan("-r"), color::cyan("--renew"), color::bright_black("强制重新下载"));
+    println!("    {} {} {}", color::cyan("-d"), color::cyan("--download-only"), color::bright_black("仅下载，不安装"));
+    println!("        {} {}", color::cyan("--type <TYPE>"), color::bright_black("安装类型：portable 或 installer"));
+    println!("    {} {} {}", color::cyan("-u"), color::cyan("--upgrade"), color::bright_black("检测更新，卸载旧版后安装新版"));
+    println!("    {} {}", color::cyan("-h"), color::bright_black("显示帮助"));
     println!();
-    println!("  {}", color::gray("示例:"));
-    println!("    {}  {}", color::bold(&format!("{} 7zip", cmd_names::INSTALL)), color::gray("安装 7-Zip（最新版）"));
-    println!("    {}  {}", color::bold(&format!("{} vscode python git", cmd_names::INSTALL)), color::gray("同时安装多个软件"));
-    println!("    {}  {}", color::bold(&format!("{} 7zip -v 1.0.0", cmd_names::INSTALL)), color::gray("安装指定版本"));
+    println!("  {}", color::bright_black("示例:"));
+    println!("    {}  {}", color::bold(&format!("{} 7zip", cmd_names::INSTALL)), color::bright_black("安装 7-Zip（最新版）"));
+    println!("    {}  {}", color::bold(&format!("{} vscode python git", cmd_names::INSTALL)), color::bright_black("同时安装多个软件"));
+    println!("    {}  {}", color::bold(&format!("{} 7zip -v 1.0.0", cmd_names::INSTALL)), color::bright_black("安装指定版本"));
     println!();
 }
 

@@ -1,6 +1,7 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use anyhow::bail;
 
@@ -9,7 +10,7 @@ use crate::software;
 
 use super::detect::resolve_real_uninstaller;
 use super::helpers::{
-    prompt_uninstall_done, scan_dirs_for_uninstaller, parse_cmdline,
+    scan_dirs_for_uninstaller, parse_cmdline,
 };
 
 /// 卸载主入口（供 cmd_uninstall、cmd_install 调用）。
@@ -41,26 +42,29 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
         }
 
         if is_portable {
-            // 便携版：先询问确认
-            if !prompt_uninstall_done(display) {
-                println!("  已取消");
-                return Ok(());
-            }
+            // 便携版：直接删除目录
             let dir_name = format!("{}-{}", name, version);
             let portable_dir = paths::apps_dir().join(&dir_name);
             if portable_dir.exists() {
                 fs::remove_dir_all(&portable_dir)?;
-                println!("  已删除便携版目录");
+                println!("  已删除便携版目录: {}", portable_dir.display());
             }
         } else if let Some(ref info) = installed_info {
             let dir_candidates: &[String] = vi.map(|v| v.install_dir_candidates.as_slice()).unwrap_or(&[]);
-            let ok = run_uninstall(name, info, dir_candidates)?;
-            if !ok {
-                return Ok(());
-            }
-            // 卸载程序已启动，询问用户确认
-            if !prompt_uninstall_done(display) {
-                println!("  已取消");
+            if let Some(uninstaller_path) = run_uninstall(name, info, dir_candidates)? {
+                if let Some(vi) = vi {
+                    let removed = spawn_uninstall_and_poll(&uninstaller_path, vi)?;
+                    if !removed {
+                        if force {
+                            eprintln!("  卸载检测超时，--force 跳过继续清理");
+                        } else {
+                            eprintln!("  卸载可能未完成");
+                            return Ok(());
+                        }
+                    }
+                }
+            } else {
+                println!("  ! 未找到卸载程序，请手动卸载或使用 --force");
                 return Ok(());
             }
         }
@@ -70,26 +74,6 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
         if app_lnk.exists() {
             fs::remove_file(&app_lnk)?;
             println!("  已删除快捷方式");
-        }
-
-        // 注册表二次确认（安装版且有 detection 配置时）
-        if !is_portable {
-            if let Some(ref vi) = vi {
-                if let Some(ref detection) = vi.detection {
-                    let still_installed = registry::detect_installed(detection);
-                    if still_installed.is_some() {
-                        if force {
-                            eprintln!("  注册表条目仍存在（--force，继续清理记录）");
-                        } else {
-                            eprintln!("  卸载可能未完成（注册表条目仍存在）");
-                            eprintln!("  如需强制清理，请使用 --force");
-                            return Ok(());
-                        }
-                    } else {
-                        println!("  注册表确认已卸载");
-                    }
-                }
-            }
         }
 
         // 删除安装记录
@@ -117,47 +101,31 @@ pub fn uninstall_software(name: &str, force: bool) -> anyhow::Result<()> {
     for info in &matches {
         let dn = info.get("display_name").map(|s| s.as_str()).unwrap_or(name);
         println!("  找到: {}", dn);
-        let ok = run_uninstall(name, info, &[])?;
-        if !ok {
-            println!("  跳过: {}", dn);
+        let uninstall_str = info.get("UninstallString").or_else(|| info.get("uninstall_string"));
+        match uninstall_str {
+            Some(cmd) => {
+                let args = parse_cmdline(cmd);
+                if !args.is_empty() && Path::new(&args[0]).exists() {
+                    println!("  已启动卸载程序");
+                    let _ = Command::new(&args[0]).args(&args[1..]).spawn();
+                } else {
+                    println!("  ! 卸载程序不存在，请手动卸载或使用 --force");
+                }
+            }
+            None => {
+                println!("  ! 未找到卸载命令，请手动卸载或使用 --force");
+            }
         }
     }
 
-    // 无源卸载：尝试清理 apps/ 目录中的快捷方式
+    // 清理 apps/ 目录中的快捷方式
     let app_lnk = paths::apps_dir().join(format!("{}.lnk", name));
     if app_lnk.exists() {
-        if prompt_uninstall_done(name) {
-            fs::remove_file(&app_lnk)?;
-            println!("  已删除快捷方式: {}", app_lnk.display());
-        } else {
-            println!("  已取消");
-            return Ok(());
-        }
+        fs::remove_file(&app_lnk)?;
+        println!("  已删除快捷方式: {}", app_lnk.display());
     }
 
-    // 卸载后二次确认：重新扫描注册表
-    let still_there: Vec<_> = registry::scan_all_installed_unfiltered().into_iter()
-        .filter(|entry| {
-            entry.get("display_name")
-                .map(|dn| dn.to_lowercase().contains(&name_lower))
-                .unwrap_or(false)
-        })
-        .collect();
-
-    if still_there.is_empty() {
-        println!("  注册表确认已卸载");
-    } else if !force {
-        eprintln!("  以下软件在注册表中仍存在条目，卸载可能未完成:");
-        for entry in &still_there {
-            let dn = entry.get("display_name").map(|s| s.as_str()).unwrap_or("?");
-            println!("     - {}", dn);
-        }
-        eprintln!("  如需强制清理，请使用 --force");
-        return Ok(());
-    } else {
-        eprintln!("  注册表条目仍存在（--force，继续）");
-    }
-
+    // 删除安装记录
     if software::remove_installation_record(name).is_ok() {
         println!("  已清理安装记录");
     }
@@ -200,7 +168,7 @@ fn run_uninstall(
     _name: &str,
     info: &std::collections::HashMap<String, String>,
     install_dir_candidates: &[String],
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<Option<PathBuf>> {
     let uninstall_str = match info.get("UninstallString").or_else(|| info.get("uninstall_string")) {
         Some(s) => s.clone(),
         None => return try_fallback_uninstaller(install_dir_candidates),
@@ -218,56 +186,58 @@ fn run_uninstall(
         return try_fallback_uninstaller(install_dir_candidates);
     }
 
-    gui_mode_uninstall(&real_args)
+    Ok(Some(PathBuf::from(&real_args[0])))
 }
 
-/// GUI 模式卸载：启动卸载程序，由注册表二次确认兜底。
-fn gui_mode_uninstall(cmd_args: &[String]) -> anyhow::Result<bool> {
-    println!("  已启动卸载程序");
-    match Command::new(&cmd_args[0]).args(&cmd_args[1..]).spawn() {
-        Ok(_) => {
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            Ok(true)
-        }
-        Err(e) if e.raw_os_error() == Some(740) => {
-            println!("  需要管理员权限，正在提权...");
-            let exe = cmd_args[0].replace('\'', "''");
-            let args = if cmd_args.len() > 1 {
-                format!(" -ArgumentList '{}'", cmd_args[1..].join(" ").replace('\'', "''"))
-            } else {
-                String::new()
-            };
-            let ps = format!(
-                "Start-Process -FilePath '{}'{} -Verb RunAs -ErrorAction SilentlyContinue -WindowStyle Normal",
-                exe, args,
-            );
-            let _ = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &ps])
-                .status();
-            Ok(true)
-        }
-        Err(e) => {
-            eprintln!("  启动卸载程序失败: {}", e);
-            Ok(false)
-        }
-    }
-}
-
-/// 当注册表 UninstallString 不可用时，回退到候选安装目录中查找并运行卸载程序。
-fn try_fallback_uninstaller(install_dir_candidates: &[String]) -> anyhow::Result<bool> {
+/// 回退到候选安装目录中查找卸载程序。
+fn try_fallback_uninstaller(install_dir_candidates: &[String]) -> anyhow::Result<Option<PathBuf>> {
     if install_dir_candidates.is_empty() {
-        println!("  ! 未找到卸载程序，请手动卸载");
-        return Ok(false);
+        return Ok(None);
     }
-    println!("  [i] 注册表卸载程序不可用，尝试在候选安装目录中查找...");
-    let found = match scan_dirs_for_uninstaller(install_dir_candidates) {
-        Some(f) => f,
-        None => {
-            println!("  ! 未找到卸载程序，请手动卸载");
+    Ok(scan_dirs_for_uninstaller(install_dir_candidates))
+}
+
+/// 启动卸载程序并轮询检测直到软件被移除（或超时）。
+///
+/// 与安装流程同理：不等待卸载器进程退出，而是轮询检测
+/// 注册表条目/快捷方式/安装目录是否消失。
+fn spawn_uninstall_and_poll(
+    exe_path: &Path,
+    vi: &crate::software::VersionInfo,
+) -> anyhow::Result<bool> {
+    println!("  已启动卸载程序");
+    println!("  等待卸载完成...");
+
+    let _ = Command::new(exe_path).spawn();
+
+    let timeout = Duration::from_secs(60);
+    let start = Instant::now();
+    let mut printed_dot = false;
+
+    loop {
+        // 检测软件是否已被移除
+        if super::helpers::check_software_removed(vi) {
+            if !printed_dot {
+                println!();
+            }
+            println!("  检测到软件已卸载");
+            return Ok(true);
+        }
+
+        if start.elapsed() > timeout {
+            if !printed_dot {
+                println!();
+            }
+            eprintln!("  等待卸载超时（{} 秒），注册表条目可能仍存在", timeout.as_secs());
             return Ok(false);
         }
-    };
-    println!("  找到卸载程序: {}", found.display());
-    let found_str = found.to_string_lossy().to_string();
-    gui_mode_uninstall(&[found_str])
+
+        if !printed_dot {
+            print!("  ");
+            printed_dot = true;
+        }
+        print!(".");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }

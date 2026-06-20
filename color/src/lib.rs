@@ -43,10 +43,10 @@ pub use ansi::{enable_ansi, strip_ansi};
 pub use format::format_size;
 pub use style::{
     black, blue, bold, bold_blue, bold_bright_cyan, bold_cyan, bold_green, bold_magenta, bold_red,
-    bold_yellow, bright_blue, bright_cyan, bright_green, bright_magenta, bright_red,
+    bold_yellow, bright_black, bright_blue, bright_cyan, bright_green, bright_magenta, bright_red,
     bright_yellow, cyan, gray, green, magenta, red, white, yellow, BLACK, BLUE, BOLD, BOLD_BLUE,
-    BOLD_BRIGHT_CYAN, BOLD_CYAN, BOLD_GREEN, BOLD_MAGENTA, BOLD_RED, BOLD_YELLOW, BRIGHT_BLUE,
-    BRIGHT_CYAN, BRIGHT_GREEN, BRIGHT_MAGENTA, BRIGHT_RED, BRIGHT_WHITE, BRIGHT_YELLOW, CYAN,
-    GRAY, GREEN, MAGENTA, RED, Style, WHITE, YELLOW,
+    BOLD_BRIGHT_CYAN, BOLD_CYAN, BOLD_GREEN, BOLD_MAGENTA, BOLD_RED, BOLD_YELLOW, BRIGHT_BLACK,
+    BRIGHT_BLUE, BRIGHT_CYAN, BRIGHT_GREEN, BRIGHT_MAGENTA, BRIGHT_RED, BRIGHT_WHITE,
+    BRIGHT_YELLOW, CYAN, GRAY, GREEN, MAGENTA, RED, Style, WHITE, YELLOW,
 };
 pub use width::DisplayWidth;

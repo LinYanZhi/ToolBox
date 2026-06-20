@@ -6,17 +6,17 @@ use color;
 /// 无参数时显示自定义用法
 pub fn print_usage() {
     println!();
-    println!("  {}  {}", color::bold_cyan("info"), color::gray("查看软件详细信息"));
+    println!("  {}  {}", color::bold_cyan("info"), color::bright_black("查看软件详细信息"));
     println!();
-    println!("  {} {}", color::gray("用法:"), color::bold(&format!("{} [选项] <软件名称>", cmd_names::INFO)));
+    println!("  {} {}", color::bright_black("用法:"), color::bold(&format!("{} [选项] <软件名称>", cmd_names::INFO)));
     println!();
-    println!("  {}", color::gray("选项:"));
-    println!("    -u, --urls   显示所有下载地址");
-    println!("    -h, --help   显示帮助");
+    println!("  {}", color::bright_black("选项:"));
+    println!("    {} {}  {}", color::cyan("-u"), color::cyan("--urls"), color::bright_black("显示所有下载地址"));
+    println!("    {} {}  {}", color::cyan("-h"), color::cyan("--help"), color::bright_black("显示帮助"));
     println!();
-    println!("  {}", color::gray("示例:"));
-    println!("    {}  {}", color::bold(&format!("{} 7zip", cmd_names::INFO)), color::gray("查看 7-Zip 的详细信息"));
-    println!("    {}  {}", color::bold(&format!("{} 7zip --urls", cmd_names::INFO)), color::gray("查看 7-Zip 所有下载地址"));
+    println!("  {}", color::bright_black("示例:"));
+    println!("    {}  {}", color::bold(&format!("{} 7zip", cmd_names::INFO)), color::bright_black("查看 7-Zip 的详细信息"));
+    println!("    {}  {}", color::bold(&format!("{} 7zip --urls", cmd_names::INFO)), color::bright_black("查看 7-Zip 所有下载地址"));
     println!();
 }
 

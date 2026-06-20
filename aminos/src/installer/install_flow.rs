@@ -9,7 +9,7 @@ use color;
 
 use super::download::{get_installer_path, file_sha256};
 use super::executor::{run_installer, extract_zip_to};
-use super::helpers::{label_of_type, find_install_path, create_app_shortcut, find_entry_point_exe};
+use super::helpers::{label_of_type, find_install_path, create_app_shortcut, find_entry_point_exe, check_portable_installed};
 use super::windows::{
     sort_versions_desc, is_tools_bin_in_user_path, is_tools_bin_in_session_path,
     detect_powershell,
@@ -57,15 +57,18 @@ pub fn install_software_by_def(
         return install_self_tool(name, sd, display, &ver, vi, opts);
     }
 
-    // 3. Check already installed
+    // 3. Check already installed（多源检测：注册表 + 快捷方式 + 安装目录 + apps/ 便携目录）
     if !opts.download_only {
-        if let Some(ref detection) = vi.detection {
-            if let Some(result) = registry::detect_installed(detection) {
-                let installed_ver = result.get("DisplayVersion").map(|s| s.as_str()).unwrap_or(&ver);
-                println!("{} {} 已安装在系统中", display, installed_ver);
-                println!("  如需重新安装，请先执行: {} {}", cmd_names::UNINSTALL, name);
-                return Ok(());
-            }
+        let installed = check_portable_installed(name, &ver)
+            || super::helpers::check_software_detected(vi);
+        if installed {
+            let display_ver = vi.detection.as_ref()
+                .and_then(|d| registry::detect_installed(d))
+                .and_then(|r| r.get("DisplayVersion").cloned())
+                .unwrap_or_else(|| ver.to_string());
+            println!("{} {} 已安装在系统中", display, display_ver);
+            println!("  如需重新安装，请先执行: {} {}", cmd_names::UNINSTALL, name);
+            return Ok(());
         }
     }
 
