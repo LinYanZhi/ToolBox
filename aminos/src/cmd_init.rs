@@ -64,7 +64,7 @@ pub fn run_init(global: bool) -> anyhow::Result<()> {
             anyhow::bail!("添加 PATH 失败");
         }
 
-        println!("\nOK as 环境初始化完成");
+        println!("OK as 环境初始化完成");
     } else {
         // 默认模式：仅打印提示
         println!();

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use anyhow::bail;
 
@@ -8,10 +9,18 @@ use crate::paths;
 
 use super::detect::detect_installer_type;
 
+/// 安装器进程的最大等待时间（秒）。
+/// 超时后若检测到软件已安装，则视为成功并强制结束进程。
+const INSTALLER_TIMEOUT_SECS: u64 = 180;
+
 /// 执行安装器。
 ///
 /// 便携版：直接解压，返回解压后的路径。
 /// 安装版：运行安装器（静默或 GUI），不返回路径。
+///
+/// 为防止安装器进程挂死不退出，引入超时机制：
+/// 超过 `INSTALLER_TIMEOUT_SECS` 后若进程仍未退出，会检查软件是否已安装（通过注册表检测），
+/// 若已安装则强制结束进程并视为安装成功；否则继续等待。
 pub(crate) fn run_installer(
     name: &str,
     version: &str,
@@ -45,22 +54,70 @@ pub(crate) fn run_installer(
         println!("  静默安装 {} ...", itype);
     }
 
-    let status = cmd.status();
-
-    match status {
-        Ok(s) if s.success() => Ok((true, None)),
-        Ok(s) => {
-            let code = s.code().unwrap_or(-1);
-            if code == 1223 || code == 740 {
-                println!("  需要管理员权限，尝试提权...");
-                return try_elevate(installer_path, &vi.install_args);
-            }
-            eprintln!("  安装程序返回错误码 {}", code);
-            Ok((false, None))
-        }
+    // 使用 spawn + try_wait 轮询以支持超时
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
         Err(e) => {
-            eprintln!("  运行安装程序失败: {}", e);
-            Ok((false, None))
+            eprintln!("  启动安装程序失败: {}", e);
+            return Ok((false, None));
+        }
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(INSTALLER_TIMEOUT_SECS);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // 进程正常退出
+                if status.success() {
+                    return Ok((true, None));
+                }
+                let code = status.code().unwrap_or(-1);
+                if code == 1223 || code == 740 {
+                    // 需要管理员权限 → 杀掉当前进程，尝试提权
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    println!("  需要管理员权限，尝试提权...");
+                    return try_elevate(installer_path, &vi.install_args);
+                }
+                eprintln!("  安装程序返回错误码 {}", code);
+                return Ok((false, None));
+            }
+            Ok(None) => {
+                // 进程仍在运行
+                if Instant::now() >= deadline {
+                    // 超时：检查软件是否已安装
+                    if let Some(ref detection) = vi.detection {
+                        if crate::registry::detect_installed(detection).is_some() {
+                            println!("  安装器进程超时（{} 秒），但软件已安装，强制结束进程...", INSTALLER_TIMEOUT_SECS);
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Ok((true, None));
+                        }
+                    }
+                    // 没有 detection 或未检测到安装 → 阻塞等待（部分安装器安装很久才退出）
+                    println!("  安装器已运行超过 {} 秒，仍在等待进程退出...", INSTALLER_TIMEOUT_SECS);
+                    let status = child.wait();
+                    match status {
+                        Ok(s) if s.success() => return Ok((true, None)),
+                        Ok(s) => {
+                            eprintln!("  安装程序返回错误码 {}", s.code().unwrap_or(-1));
+                            return Ok((false, None));
+                        }
+                        Err(e) => {
+                            eprintln!("  等待安装进程失败: {}", e);
+                            return Ok((false, None));
+                        }
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
+            Err(e) => {
+                eprintln!("  监控安装进程出错: {}", e);
+                let _ = child.wait();
+                return Ok((true, None));
+            }
         }
     }
 }

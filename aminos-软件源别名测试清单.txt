@@ -1,0 +1,168 @@
+as 软件源别名测试清单
+======================
+说明：逐条执行 `as install <别名>`，验证别名是否正确匹配
+
+===== 效率增强 (8) =====
+
+[×] baidunetdisk  | 百度网盘
+    别名: 百度云, baidu cloud, baiduyun, baidu pan, baidu, bd, bdwp
+
+[×] quarkclouddrive | 夸克网盘
+    别名: 夸克, quark, quark pan, quark drive, kk, kkwp
+
+[×] xunlei        | 迅雷
+    别名: thunder, 迅雷12, xunlei12, xunlei download, xl
+
+[×] 7zip          | 7-Zip
+    别名: 7-zip, 7z
+
+[×] snipaste      | Snipaste
+    别名: (无)
+
+[×] pixpin        | PixPin
+    别名: (无)
+
+[×] ttime         | TTime
+    别名: (无)
+
+[×] utools        | uTools
+    别名: (无)
+
+===== 社交/通讯 (5) =====
+
+[×] wechat        | 微信
+    别名: 微信, weixin, wx
+
+[×] wecom         | 企业微信
+    别名: 企业微信, wecom, 企微, work weixin, qywx
+
+[×] dingtalk      | 钉钉
+    别名: dingtalk, 钉钉, dd
+
+[×] feishu        | 飞书
+    别名: 飞书, feishu, lark, fs
+
+[×] netease-music | 网易云音乐
+    别名: netease music, cloudmusic, 网易云, wyy
+
+===== 远程控制 (3) =====
+
+[×] sunlogin      | 向日葵远程控制
+    别名: 向日葵, sunlogin, 向日葵远程控制, oray sunlogin, xrk
+
+[×] uuremote      | 网易UU远程
+    别名: uu远程, uuremote, 网易uu远程, uuyc
+
+[×] todesk        | ToDesk
+    别名: todesk, totodesk
+
+===== 安全 (2) =====
+
+[×] huorong       | 火绒安全软件
+    别名: 火绒, huorong, 火绒安全, 火绒安全软件, hr
+
+[×] watt-toolkit  | Watt Toolkit
+    别名: watt toolkit, steam++, steampp, 瓦特工具箱
+
+===== 编辑器/IDE (5) =====
+
+[×] vscode        | Visual Studio Code
+    别名: code, vsc, visual studio code
+
+[×] cursor        | Cursor
+    别名: cursor ai, cursor-editor
+
+[×] trae          | Trae CN
+    别名: trae, trae cn, 字节trae
+
+[×] notepadpp     | Notepad++
+    别名: notepad++, npp
+
+[×] datagrip      | DataGrip
+    别名: datagrip, jetbrains datagrip
+
+===== IDE (2) =====
+
+[×] pycharm       | PyCharm
+    别名: pycharm, py-charm, jetbrains pycharm
+
+[×] visual-studio | Visual Studio Community 2026
+    别名: visual studio, vs community, vs2026
+
+===== 浏览器 (3) =====
+
+[×] chrome        | Google Chrome
+    别名: (无)
+
+[×] edge          | Microsoft Edge
+    别名: microsoft edge, edge
+
+[×] firefox       | Firefox
+    别名: (无)
+
+===== 办公 (3) =====
+
+[×] wps           | WPS Office
+    别名: wps office, 金山wps, wps
+
+[×] microsoft-office | Microsoft Office LTSC
+    别名: office, microsoft office, office ltsc, 专业增强版
+
+[×] pdfgear       | PDFgear
+    别名: pdfgear
+
+===== 开发工具 (5) =====
+
+[×] git           | Git
+    别名: (无)
+
+[×] python        | Python
+    别名: python3, py
+
+[×] nvm           | NVM for Windows
+    别名: nvm-windows
+
+[×] yingdao       | 影刀RPA
+    别名: 影刀, yingdao, 影刀RPA, shadowbot
+
+[×] vmware        | VMware Workstation
+    别名: vmware, vmware workstation, vmware workstation pro
+
+===== 网络工具 (2) =====
+
+[×] clash-verge   | Clash Verge
+    别名: clash verge, clash-verge, verge
+
+[×] flclash       | FlClash
+    别名: flclash
+
+===== 系统工具 (4) =====
+
+[×] everything    | Everything
+    别名: (无)
+
+[×] spacesniffer  | SpaceSniffer
+    别名: (无)
+
+[×] iobitunlocker | IObit Unlocker
+    别名: iobit unlocker
+
+[×] wepe          | 微PE工具箱
+    别名: 微PE, wepe, 微PE工具箱, wepe工具箱
+
+===== 多媒体/影音 (3) =====
+
+[×] potplayer     | PotPlayer
+    别名: (无)
+
+[×] steam         | Steam
+    别名: (无)
+
+[×] obs           | OBS Studio
+    别名: obs studio, obs-studio, open broadcaster software
+
+========================================
+共 42 个软件，建议优先测试含别名的条目，
+特别是拼音缩写（bd, kk, xl, wx, dd, fs, wyy, hr 等）
+使用命令: as install <别名>
+========================================
