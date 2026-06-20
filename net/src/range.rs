@@ -134,6 +134,15 @@ pub fn parallel_download(
         })
     };
 
+    // ── Per-chunk 停滞检测 ──
+    // 每个分片线程在每次读取后记录当前时间戳，主线程用轮询检测是否有分片长时间无进展.
+    const STALL_TIMEOUT_MS: u64 = 45_000;
+    let chunk_last_active: Arc<Vec<AtomicU64>> = Arc::new({
+        let mut v = Vec::with_capacity(actual);
+        for _ in 0..actual { v.push(AtomicU64::new(0)); }
+        v
+    });
+
     let mut handles = Vec::with_capacity(actual);
     for i in 0..actual {
         let start = i as u64 * chunk_size;
@@ -147,9 +156,10 @@ pub fn parallel_download(
         let progress = Arc::clone(&progress);
         let errors = Arc::clone(&errors);
         let cancel = cancel.clone();
+        let chunk_active = Arc::clone(&chunk_last_active);
 
         handles.push(thread::spawn(move || {
-            let agent_cfg = AgentConfig::normal(30, 600);
+            let agent_cfg = AgentConfig::normal(30, 30);
             let agent = match agent_cfg.build_agent() {
                 Ok(a) => a,
                 Err(e) => {
@@ -180,6 +190,7 @@ pub fn parallel_download(
             };
             let mut buf = [0u8; 65536];
             loop {
+                if cancel.is_cancelled() { return; }
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
@@ -189,6 +200,7 @@ pub fn parallel_download(
                         }
                         cancel.mark_progress();
                         progress.fetch_add(n as u64, Ordering::Relaxed);
+                        chunk_active[i].store(unix_ms(), Ordering::Relaxed);
                     }
                     Err(_) => {
                         errors.lock().unwrap().push(format!("分片 {} 读取失败", i));
@@ -199,25 +211,57 @@ pub fn parallel_download(
         }));
     }
 
-    // 等待所有分片线程完成
-    for h in handles {
-        // 如果已取消，不再等待后续线程
+    // 轮询等待所有分片完成（带停滞超时检测）
+    loop {
         if cancel.is_cancelled() {
+            // 清理并等待线程退出
             let _ = fs::remove_dir_all(&temp_dir);
+            for h in handles.drain(..) { let _ = h.join(); }
             return Err(anyhow::anyhow!("已取消"));
         }
-        match h.join() {
-            Ok(()) => {}
-            Err(e) => {
-                let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = e.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "线程未知错误".to_string()
-                };
-                errors.lock().unwrap().push(format!("线程崩溃: {}", msg));
+
+        let now = unix_ms();
+        let mut all_done = true;
+        let mut stalled_idx = None;
+
+        for (i, h) in handles.iter().enumerate() {
+            if h.is_finished() { continue; }
+            all_done = false;
+            let last = chunk_last_active[i].load(Ordering::Relaxed);
+            // 仅当分片已开始下载（last > 0）且超过超时阈值时判定为停滞
+            if last > 0 && now - last > STALL_TIMEOUT_MS {
+                stalled_idx = Some(i);
+                break;
             }
+        }
+
+        if all_done { break; }
+        if let Some(idx) = stalled_idx {
+            eprintln!("    rust-range: 分片 {} 已停滞超过 {} 秒，切换至其他下载策略...",
+                idx, STALL_TIMEOUT_MS / 1000);
+            cancel.cancel();
+            // 线程因 reader.read() 阻塞可能不会立即退出，短暂等待后继续
+            thread::sleep(std::time::Duration::from_millis(500));
+            let _ = fs::remove_dir_all(&temp_dir);
+            for h in handles.drain(..) { let _ = h.join(); }
+            if !external_pb { pb.bar.finish(); }
+            bail!("多线程下载停滞（分片 {} 无响应）", idx);
+        }
+
+        thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    // 所有线程已结束，调用 join 确认（捕获潜在 panic）
+    for h in handles.drain(..) {
+        if let Err(e) = h.join() {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "线程未知错误".to_string()
+            };
+            errors.lock().unwrap().push(format!("线程崩溃: {}", msg));
         }
     }
 
@@ -270,7 +314,7 @@ pub(crate) fn no_range_download(
         return Err(anyhow::anyhow!("已取消"));
     }
 
-    let agent_cfg = AgentConfig::normal(30, 600);
+    let agent_cfg = AgentConfig::normal(30, 30);
     let agent = agent_cfg.build_agent()?;
     let mut req = agent.get(url);
     req = agent_cfg.apply_headers(req, url);
@@ -332,7 +376,7 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
         return Err(anyhow::anyhow!("已取消"));
     }
 
-    let agent_cfg = AgentConfig::normal(30, 600);
+    let agent_cfg = AgentConfig::normal(30, 30);
     let agent = agent_cfg.build_agent()?;
     let mut req = agent.get(url);
     req = agent_cfg.apply_headers(req, url);
@@ -395,4 +439,12 @@ fn single_thread_fallback(url: &str, target_path: &Path, total_size: u64, cancel
     }
 
     Ok(())
+}
+
+/// 当前 Unix 毫秒时间戳。
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }

@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context};
+use anyhow::bail;
 use color::*;
 use indicatif::MultiProgress;
 
@@ -78,6 +78,17 @@ impl Cancel {
         Self(Arc::new(CancelInner {
             cancelled: AtomicBool::new(false),
             last_progress: AtomicU64::new(0),
+        }))
+    }
+    /// 创建一个与 Ctrl+C 绑定的全局 Cancel 令牌。
+    /// 所有使用 `global()` 的 Cancel 会在用户按下 Ctrl+C 时同时被取消。
+    pub fn global() -> Self {
+        Self(GLOBAL_CANCEL_INNER.get().cloned().unwrap_or_else(|| {
+            // fallback（正常情况下不会走到这里）
+            Arc::new(CancelInner {
+                cancelled: AtomicBool::new(false),
+                last_progress: AtomicU64::new(0),
+            })
         }))
     }
     /// 请求取消
@@ -275,13 +286,24 @@ impl ProgressCtx {
 
 /// Ctrl+C 被按下时设为 true，各环节检查此标志后优雅退出。
 static CTRL_C_PRESSED: AtomicBool = AtomicBool::new(false);
+/// 进程级全局 Cancel，与 Ctrl+C 绑定，后台线程通过 `Cancel::global()` 访问。
+static GLOBAL_CANCEL_INNER: OnceLock<Arc<CancelInner>> = OnceLock::new();
 
 /// 安装 Ctrl+C 处理器（进程生命期仅安装一次）。
 fn install_ctrlc_handler() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        ctrlc::set_handler(|| {
+        // 预创建全局 CancelInner
+        let global = Arc::new(CancelInner {
+            cancelled: AtomicBool::new(false),
+            last_progress: AtomicU64::new(0),
+        });
+        let _ = GLOBAL_CANCEL_INNER.set(global);
+
+        let global_inner = GLOBAL_CANCEL_INNER.get().unwrap().clone();
+        ctrlc::set_handler(move || {
             CTRL_C_PRESSED.store(true, Ordering::Relaxed);
+            global_inner.cancelled.store(true, Ordering::Relaxed);
         })
         .expect("Ctrl+C 信号处理器安装失败");
     });
@@ -349,7 +371,7 @@ pub fn download_with_fallback(
             bar.set_style(tracked_style.clone());
         }
         let ctx = ProgressCtx::new(bar, sname);
-        let cancel = Cancel::new();
+        let cancel = Cancel::global();
 
         eprintln!("    使用 {} ({})", yellow(sname), backend.thread_label());
 
@@ -384,8 +406,18 @@ pub fn download_with_fallback(
 
                     // 移动到目标路径
                     let _ = std::fs::remove_file(target_path);
-                    std::fs::rename(&tmp_path, target_path)
-                        .context("重命名临时文件到目标路径失败")?;
+                    if let Err(e) = std::fs::rename(&tmp_path, target_path) {
+                        // Windows 下 rename 可能因文件锁/跨卷等失败，回退到 copy + remove
+                        match std::fs::copy(&tmp_path, target_path) {
+                            Ok(_) => {
+                                let _ = std::fs::remove_file(&tmp_path);
+                            }
+                            Err(copy_err) => {
+                                let _ = std::fs::remove_file(&tmp_path);
+                                anyhow::bail!("重命名失败（{}），复制也失败: {}", e, copy_err);
+                            }
+                        }
+                    }
 
                     let file_size = std::fs::metadata(target_path)
                         .map(|m| m.len()).unwrap_or(0);
