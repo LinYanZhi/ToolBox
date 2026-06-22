@@ -146,12 +146,9 @@ impl DownloadBackend for Aria2cBackend {
     fn tracked(&self) -> bool { true }
     fn thread_label(&self) -> &'static str { "多线程" }
     fn health_check(&self) -> bool {
-        // aria2c 只能通过 as tool 安装方式使用
-        get_tools_bin_dir()
-            .map(|dir| dir.join("aria2c.exe").is_file())
-            .unwrap_or(false)
+        crate::aria2c::find_aria2c().is_some()
     }
-    fn description(&self) -> &'static str { "基于 aria2c 的高性能多线程下载器，支持 Range 分片。需安装 (as tool install aria2c)。" }
+    fn description(&self) -> &'static str { "基于 aria2c 的高性能多线程下载器，支持 Range 分片。安装到 PATH 中即可自动使用。" }
 
     fn download(&self, url: &str, target_path: &Path, cancel: &Cancel, pb: Option<ProgressCtx>) -> anyhow::Result<()> {
         crate::aria2c::try_aria2c_download(url, target_path, cancel, pb)
@@ -416,9 +413,7 @@ pub fn backend_binary_path(name: &str) -> Option<String> {
     }
     match name {
         "aria2c" | "Aria2c" => {
-            get_tools_bin_dir()
-                .map(|dir| dir.join("aria2c.exe"))
-                .filter(|p| p.is_file())
+            crate::aria2c::find_aria2c()
                 .and_then(|p| p.to_str().map(|s| s.to_string()))
         }
         "powershell" | "PowerShell" | "ps-invoke" | "PowerShellInvoke" | "bits" | "BitsTransfer" => {

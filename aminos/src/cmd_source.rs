@@ -20,47 +20,57 @@ pub fn run_source(cmd: &crate::opts::SourceCommand) -> anyhow::Result<()> {
 }
 
 fn run_update() -> anyhow::Result<()> {
-    software::update_sources()
+    // 嵌入式源无需同步，只更新第三方社区源
+    println!("{}", color::bold_cyan("更新社区源..."));
+    let config_dir = paths::config_dir();
+    let source_cfg = config::SourceConfig::new(config_dir);
+    let entries = source_cfg.load();
+    let mut updated = 0;
+    for entry in &entries {
+        if !entry.enabled {
+            continue;
+        }
+        println!("  {} {}", color::gray("同步:"), color::cyan(&entry.name));
+        let dest = paths::community_source_named(&entry.name);
+        let repo = config::SourceRepo::new(vec![entry.url.clone()]);
+        if let Err(e) = config::source::update_sources(&dest, &repo) {
+            eprintln!("  {} 更新源 '{}' 失败: {}", color::red("错误"), entry.name, e);
+        } else {
+            updated += 1;
+        }
+    }
+    if updated == 0 {
+        println!("  无已启用的社区源。使用 {} 添加", color::yellow(&format!("{} add <名称> <URL>", cmd_names::SOURCE)));
+    } else {
+        println!("  {} 个社区源已更新", color::green(&updated.to_string()));
+    }
+    Ok(())
 }
 
 fn run_clear() -> anyhow::Result<()> {
+    // 嵌入式源不会被清空，只清理社区源缓存
     let dir = paths::source_dir();
-    if !dir.exists() {
-        println!("源目录不存在: {}", dir.display());
+    let comm_dir = dir.join("community");
+    if !comm_dir.exists() {
+        println!("社区源目录不存在: {}", comm_dir.display());
         return Ok(());
     }
-
-    let total = count_files(&dir);
-    // 清空所有分类目录 + tools + community
-    for sub in paths::CATEGORIES {
-        let subdir = dir.join(sub);
-        if subdir.exists() {
-            let _ = std::fs::remove_dir_all(&subdir);
-        }
-        let _ = std::fs::create_dir_all(&subdir);
-    }
-    // tools
-    let tools_dir = dir.join("tools");
-    if tools_dir.exists() {
-        let _ = std::fs::remove_dir_all(&tools_dir);
-    }
-    let _ = std::fs::create_dir_all(&tools_dir);
-    // community
-    let comm_dir = dir.join("community");
-    if comm_dir.exists() {
-        let _ = std::fs::remove_dir_all(&comm_dir);
-    }
-    println!("已清空源缓存（共 {} 个文件）", total);
+    let total = count_files(&comm_dir);
+    let _ = std::fs::remove_dir_all(&comm_dir);
+    let _ = std::fs::create_dir_all(&comm_dir);
+    println!("已清空社区源缓存（共 {} 个文件）", total);
     Ok(())
 }
 
 fn run_open() -> anyhow::Result<()> {
-    let dir = paths::source_dir();
-    if dir.exists() {
-        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-        println!("已在资源管理器中打开: {}", dir.display());
-    } else {
-        println!("源目录不存在: {}", dir.display());
+    let dir = paths::software_json_path();
+    if let Some(parent) = dir.parent() {
+        if parent.exists() {
+            let _ = std::process::Command::new("explorer").arg(parent).spawn();
+            println!("已在资源管理器中打开: {}", parent.display());
+        } else {
+            println!("配置目录不存在: {}", parent.display());
+        }
     }
     Ok(())
 }
@@ -88,44 +98,25 @@ fn run_remove(name: &str) -> anyhow::Result<()> {
 }
 
 fn run_list() -> anyhow::Result<()> {
-    let source_root = paths::source_dir();
-    let base_url = crate::repo::SOURCE_RAW_URL;
+    let all_defs = software::list_software_defs()?;
 
     println!();
-    println!("  {}  ({} 更新)", color::bold_cyan("软件源列表"), color::gray(cmd_names::SOURCE_UPDATE));
+    println!("  {}  (内置, {} 个软件定义)", color::bold_cyan("软件源"), all_defs.len());
     println!("  {}", color::gray("─".repeat(56)));
 
-    // 内置源（分类）
-    let mut total_builtin = 0;
-    for (dir_name, label, desc) in paths::CATEGORY_META {
-        let dir = source_root.join(dir_name);
-        let count = count_json_files(&dir);
-        total_builtin += count;
-        println!("  {} {}  {}  {} 个定义  {}",
-            color::green("✓"),
-            color::cyan(label),
-            color::gray(desc),
-            color::yellow(&count.to_string()),
-            color::gray(&format!("({})", dir_name)),
-        );
-        println!("    {}", color::gray(&format!("{}/apps/{}", base_url, dir_name)));
+    // 按分类统计
+    let mut by_cat: std::collections::BTreeMap<&str, Vec<&software::SoftwareDef>> = std::collections::BTreeMap::new();
+    for sd in &all_defs {
+        let cat = if sd.category.is_empty() { "未分类" } else { sd.category.as_str() };
+        by_cat.entry(cat).or_default().push(sd);
     }
 
-    // 自研工具
-    let tools_dir = paths::tools_source_dir();
-    let tools_count = count_json_files(&tools_dir);
-    total_builtin += tools_count;
-    println!("  {} {}  {}  {} 个定义  {}",
-        color::green("✓"),
-        color::cyan("自研工具"),
-        color::gray("ToolBox 系列 CLI"),
-        color::yellow(&tools_count.to_string()),
-        color::gray("(tools)"),
-    );
-    let github_url = crate::repo::SOURCE_GITHUB_URL;
-    println!("    {}", color::gray(&format!("{}/tree/main/tools", github_url)));
-
-    println!("  {} 共计 {} 个软件定义", color::gray("─"), total_builtin);
+    for (cat, defs) in &by_cat {
+        println!("  {}  {} 个定义",
+            color::cyan(cat),
+            color::yellow(&defs.len().to_string()),
+        );
+    }
 
     // 社区源
     let config_dir = paths::config_dir();
@@ -161,112 +152,41 @@ fn run_list() -> anyhow::Result<()> {
 }
 
 fn run_tree() -> anyhow::Result<()> {
-    let source_root = paths::source_dir();
-    let base_url = crate::repo::SOURCE_RAW_URL;
+    let all_defs = software::list_software_defs()?;
 
     println!();
     println!("  {}", color::bold_cyan("软件源"));
 
-    for (dir_name, label, desc) in paths::CATEGORY_META {
-        let dir = source_root.join(dir_name);
-        let count = count_json_files(&dir);
+    // 按分类分组
+    let mut by_cat: std::collections::BTreeMap<String, Vec<&software::SoftwareDef>> = std::collections::BTreeMap::new();
+    for sd in &all_defs {
+        let cat = if sd.category.is_empty() { "未分类".to_string() } else { sd.category.clone() };
+        by_cat.entry(cat).or_default().push(sd);
+    }
 
-        let mut defs: Vec<software::SoftwareDef> = Vec::new();
-        if dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                        if let Ok(sd) = software::parse_json(&p) {
-                            defs.push(sd);
-                        }
-                    }
-                }
-            }
-        }
-        defs.sort_by(|a, b| a.name.cmp(&b.name));
+    let cat_count = by_cat.len();
+    for (i, (cat, defs)) in by_cat.iter().enumerate() {
+        let is_last_cat = i == cat_count - 1;
+        let cat_prefix = if is_last_cat { "└── " } else { "├── " };
+        let connector = if is_last_cat { "    " } else { "│   " };
 
-        let prefix = "├── ";
-        let connector = "│   ";
-        println!("  {} {}",
-            color::gray(prefix),
-            color::cyan(label),
-        );
         println!("  {} {}  {}",
-            color::gray(connector),
-            color::gray(&format!("[{}] {}", dir_name, desc)),
-            color::gray(&format!("({} 个)", count)),
+            color::gray(cat_prefix),
+            color::cyan(cat),
+            color::gray(&format!("({} 个)", defs.len())),
         );
 
         for (j, sd) in defs.iter().enumerate() {
             let is_last_def = j == defs.len() - 1;
             let branch = if is_last_def { "└── " } else { "├── " };
             let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
-            println!("  {}  {}  {}",
+            println!("  {}  {}",
                 color::gray(&format!("{}    {}", connector, branch)),
                 software::paint_software(dn, sd),
-                color::gray(&format!("({})", sd.name)),
             );
         }
-
-        if defs.is_empty() && count > 0 {
-            println!("  {}    {} ({} 个文件, 暂未同步)", color::gray(connector), color::gray("└──"), count);
-        }
-
-        println!("  {}    {}",
-            color::gray(connector),
-            color::gray(&format!("地址: {}/apps/{}", base_url, dir_name)),
-        );
         println!("  {}", color::gray(connector));
     }
-
-    // 自研工具（作为同级节点，用 └── 结尾）
-    let tools_dir = paths::tools_source_dir();
-    let tools_count = count_json_files(&tools_dir);
-    let mut tool_defs: Vec<software::SoftwareDef> = Vec::new();
-    if tools_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&tools_dir) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                    if let Ok(sd) = software::parse_json(&p) {
-                        tool_defs.push(sd);
-                    }
-                }
-            }
-        }
-    }
-    tool_defs.sort_by(|a, b| a.name.cmp(&b.name));
-    println!("  {} {}",
-        color::gray("└── "),
-        color::cyan("自研工具"),
-    );
-    println!("  {} {}",
-        color::gray("    "),
-        color::gray(&format!("(tools, {} 个)", tools_count)),
-    );
-    for (j, sd) in tool_defs.iter().enumerate() {
-        let is_last = j == tool_defs.len() - 1;
-        let branch = if is_last { "└── " } else { "├── " };
-        let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
-        if sd.display_name.is_empty() {
-            println!("  {}  {}",
-                color::gray(&format!("    {}    {}", "", branch)),
-                software::paint_software(dn, sd),
-            );
-        } else {
-            println!("  {}  {}  {}",
-                color::gray(&format!("    {}    {}", "", branch)),
-                software::paint_software(dn, sd),
-                color::gray(&format!("({})", sd.name)),
-            );
-        }
-    }
-    let github_url = crate::repo::SOURCE_GITHUB_URL;
-    println!("  {}    {}",
-        color::gray("    "),
-        color::gray(&format!("地址: {}/tree/main/tools", github_url)),
-    );
 
     // 社区源
     let _ = run_tree_community();
@@ -284,7 +204,6 @@ fn run_tree_community() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!();
     println!("  {}", color::bold_cyan("第三方社区源"));
     for (i, entry) in entries.iter().enumerate() {
         let is_last = i == entries.len() - 1;
@@ -292,51 +211,47 @@ fn run_tree_community() -> anyhow::Result<()> {
         let connector = if is_last { "    " } else { "│   " };
         let status = if entry.enabled { "已启用" } else { "已禁用" };
 
-        let local_dir = paths::community_source_named(&entry.name);
-        let mut defs: Vec<software::SoftwareDef> = Vec::new();
-        if local_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&local_dir) {
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                        if let Ok(sd) = software::parse_json(&p) {
-                            defs.push(sd);
-                        }
-                    }
-                }
-            }
-        }
-        defs.sort_by(|a, b| a.name.cmp(&b.name));
-
         println!("  {} {}  {}",
             color::gray(prefix),
             color::cyan(&entry.name),
             color::gray(status),
         );
 
-        for (j, sd) in defs.iter().enumerate() {
-            let is_last_def = j == defs.len() - 1;
-            let branch = if is_last_def { "└── " } else { "├── " };
-            let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
-            println!("  {}  {}  {}",
-                color::gray(&format!("{}    {}", connector, branch)),
-                software::paint_software(dn, sd),
-                color::gray(&format!("({})", sd.name)),
+        let local_dir = paths::community_source_named(&entry.name);
+        if local_dir.is_dir() {
+            let mut defs: Vec<String> = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&local_dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
+                        if let Some(name) = p.file_stem().and_then(|s| s.to_str()) {
+                            defs.push(name.to_string());
+                        }
+                    }
+                }
+            }
+            defs.sort();
+            println!("  {}    {}",
+                color::gray(connector),
+                color::gray(&format!("地址: {}", entry.url)),
             );
+            if !defs.is_empty() {
+                for (j, name) in defs.iter().enumerate() {
+                    let is_last_def = j == defs.len() - 1;
+                    let branch = if is_last_def { "└── " } else { "├── " };
+                    println!("  {}  {}",
+                        color::gray(&format!("{}    {}", connector, branch)),
+                        color::cyan(name),
+                    );
+                }
+            }
         }
-
-        println!("  {}    {}",
-            color::gray(connector),
-            color::gray(&format!("地址: {}", entry.url)),
-        );
         println!("  {}", color::gray(connector));
     }
     Ok(())
 }
 
 fn run_info(name: &str) -> anyhow::Result<()> {
-    let name_string = name.to_string();
-    let source_root = paths::source_dir();
     let config_dir = paths::config_dir();
     let cfg = config::SourceConfig::new(config_dir);
 
@@ -346,23 +261,6 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         let local_dir = paths::community_source_named(name);
         let count = count_json_files(&local_dir);
         let status = if entry.enabled { color::green("已启用") } else { color::gray("已禁用") };
-        let defs = if local_dir.is_dir() {
-            let mut defs: Vec<software::SoftwareDef> = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(&local_dir) {
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                        if let Ok(sd) = software::parse_json(&p) {
-                            defs.push(sd);
-                        }
-                    }
-                }
-            }
-            defs.sort_by(|a, b| a.name.cmp(&b.name));
-            defs
-        } else {
-            Vec::new()
-        };
 
         println!();
         println!("  {}  {}", color::bold_cyan(name), color::gray("社区源"));
@@ -370,79 +268,39 @@ fn run_info(name: &str) -> anyhow::Result<()> {
         println!("  {}  {}", color::gray("状态:"), status);
         println!("  {}  {}", color::gray("地址:"), color::gray(&entry.url));
         println!("  {}  {} 个软件定义", color::gray("软件数:"), color::yellow(&count.to_string()));
-
-        if !defs.is_empty() {
-            println!();
-            println!("  {}", color::gray("软件列表:"));
-            for sd in &defs {
-                let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
-                println!("    {}  {}",
-                    software::paint_software(dn, sd),
-                    color::gray(&format!("({})", sd.name)),
-                );
-            }
-        }
         println!();
         return Ok(());
     }
 
-    // 检查是否是内置分类源
-    if let Some((_, label, _)) = paths::CATEGORY_META.iter().find(|(n, _, _)| *n == name_string) {
-        let dir = source_root.join(&name_string);
-        let count = count_json_files(&dir);
-        let defs = if dir.is_dir() {
-            let mut defs: Vec<software::SoftwareDef> = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.extension().map_or(false, |ext| ext == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                        if let Ok(sd) = software::parse_json(&p) {
-                            defs.push(sd);
-                        }
-                    }
-                }
-            }
-            defs.sort_by(|a, b| a.name.cmp(&b.name));
-            defs
-        } else {
-            Vec::new()
-        };
+    // 从内置源中查找匹配的分类或软件
+    let all_defs = software::list_software_defs()?;
 
+    // 按分类名称匹配
+    let cats: std::collections::HashSet<String> = all_defs.iter().map(|sd| {
+        if sd.category.is_empty() { "未分类".to_string() } else { sd.category.clone() }
+    }).collect();
+    if cats.contains(name) {
+        let cat_defs: Vec<&software::SoftwareDef> = all_defs.iter()
+            .filter(|sd| sd.category == name || (sd.category.is_empty() && name == "未分类"))
+            .collect();
         println!();
-        println!("  {}  {}", color::bold_cyan(&name_string), color::gray(&format!("内置源 - {}", label)));
+        println!("  {}  {}", color::bold_cyan(name), color::gray("内置源分类"));
         println!("  {}", color::gray("─".repeat(50)));
-        println!("  {}  {} 个软件定义", color::gray("软件数:"), color::yellow(&count.to_string()));
-        if count > 0 {
-            println!("  {}  {}", color::gray("更新方式:"), color::cyan(cmd_names::SOURCE_UPDATE));
-        }
-        if !defs.is_empty() {
-            println!();
-            println!("  {}", color::gray("软件列表:"));
-            for sd in &defs {
-                let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
-                println!("    {}  {}",
-                    software::paint_software(dn, sd),
-                    color::gray(&format!("({})", sd.name)),
-                );
-            }
+        println!("  {}  {} 个软件定义", color::gray("软件数:"), color::yellow(&cat_defs.len().to_string()));
+        println!();
+        println!("  {}", color::gray("软件列表:"));
+        for sd in &cat_defs {
+            let dn = if sd.display_name.is_empty() { &sd.name } else { &sd.display_name };
+            println!("    {}  {}",
+                software::paint_software(dn, sd),
+                color::gray(&format!("({})", sd.name)),
+            );
         }
         println!();
         return Ok(());
     }
 
-    // 检查是否是 tools
-    let tools_dir = paths::tools_source_dir();
-    let tools_count = count_json_files(&tools_dir);
-    if name_string == "tools" {
-        println!();
-        println!("  {}  {}", color::bold_cyan("tools"), color::gray("内置源 - 自研工具"));
-        println!("  {}", color::gray("─".repeat(50)));
-        println!("  {}  {} 个工具定义", color::gray("工具数:"), color::yellow(&tools_count.to_string()));
-        println!();
-        return Ok(());
-    }
-
-    anyhow::bail!("未找到源 '{}'", name_string)
+    anyhow::bail!("未找到源 '{}'", name)
 }
 
 fn run_toggle(name: &str, enabled: bool) -> anyhow::Result<()> {

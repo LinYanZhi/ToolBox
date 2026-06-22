@@ -11,5 +11,3 @@ native-tls = "0.2"
 indicatif = "0.17"
 color = { path = "../color" }
 ctrlc = "3.4"
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"

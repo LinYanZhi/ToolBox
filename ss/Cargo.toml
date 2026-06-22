@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 color = { path = "../color" }
 clap = { version = "4", features = ["derive"] }
+path-rules = { path = "../path-rules" }

@@ -1,0 +1,1954 @@
+{
+  "version": 1,
+  "builtin": {
+    "7zip": {
+      "name": "7zip",
+      "display_name": "7-Zip",
+      "aliases": [
+        "7-zip",
+        "7z"
+      ],
+      "description": "免费开源的文件压缩/解压工具，支持 7z、ZIP、RAR 等多种格式。",
+      "category": "工具",
+      "homepage": "https://7-zip.org/",
+      "versions": {
+        "26.01": {
+          "urls": [
+            "https://7-zip.org/a/7z2601-x64.exe",
+            "https://github.com/ip7z/7zip/releases/download/26.01/7z2601-x64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\7-Zip"
+          ],
+          "detection": {
+            "display_name": "7-Zip",
+            "publisher": "Igor Pavlov"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\7-Zip.lnk",
+            "%USERPROFILE%\\Desktop\\7-Zip.lnk"
+          ]
+        }
+      }
+    },
+    "aria2c": {
+      "name": "aria2c",
+      "description": "多协议多线程命令行下载工具",
+      "versions": {
+        "1.37.0": {
+          "urls": [
+            "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+          ],
+          "entry_point": "aria2c.exe"
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "as": {
+      "name": "as",
+      "description": "aminos 包管理器自身",
+      "versions": {
+        "0.0.1": {
+          "urls": [
+            "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main/tools/as/as.zip"
+          ],
+          "entry_point": "as.exe",
+          "sha256": "c68adfc79bbb5774a17b38045b8e4bfedefe3ba5d3ef942bf6fcb3108b89750c"
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "baidunetdisk": {
+      "name": "baidunetdisk",
+      "display_name": "百度网盘",
+      "aliases": [
+        "百度云",
+        "baidu cloud",
+        "baiduyun",
+        "baidu pan",
+        "baidu",
+        "bd",
+        "bdwp"
+      ],
+      "description": "百度公司推出的个人云存储服务，支持文件同步、备份、分享和多端访问，提供 AI 智能处理功能。",
+      "category": "效率增强",
+      "homepage": "https://pan.baidu.com",
+      "versions": {
+        "8.5.2.102": {
+          "urls": [
+            "https://issuepcdn.baidupcs.com/issue/netdisk/yunguanjia/BaiduNetdisk_8.5.2.102.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Baidu\\BaiduNetdisk",
+            "C:\\Program Files\\Baidu\\BaiduNetdisk"
+          ],
+          "detection": {
+            "display_name": "百度网盘",
+            "publisher": "Baidu Online Network Technology (Beijing) Co., Ltd."
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\百度网盘.lnk",
+            "%USERPROFILE%\\Desktop\\百度网盘.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\百度网盘\\百度网盘.lnk"
+          ]
+        }
+      }
+    },
+    "chrome": {
+      "name": "chrome",
+      "display_name": "Google Chrome",
+      "description": "Google 推出的快速、安全的现代网页浏览器。",
+      "category": "浏览器",
+      "homepage": "https://www.google.com/chrome/",
+      "versions": {
+        "150.0.7863.0": {
+          "urls": [
+            "https://dl.google.com/chrome/install/latest/chrome_installer.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "msi",
+          "install_args": [],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Google\\Chrome\\Application"
+          ],
+          "detection": {
+            "display_name": "Google Chrome",
+            "publisher": "Google LLC"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Google Chrome.lnk",
+            "%USERPROFILE%\\Desktop\\Google Chrome.lnk"
+          ]
+        }
+      }
+    },
+    "clash-verge": {
+      "name": "clash-verge",
+      "display_name": "Clash Verge",
+      "aliases": [
+        "clash verge",
+        "clash-verge",
+        "verge"
+      ],
+      "description": "基于 Clash 内核的跨平台代理客户端，简洁易用的图形界面。",
+      "category": "网络工具",
+      "homepage": "https://github.com/clash-verge-rev/clash-verge-rev",
+      "versions": {
+        "2.4.4": {
+          "urls": [
+            "https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v2.4.4/Clash.Verge_2.4.4_x64-setup.exe",
+            "https://mirrors.huaweicloud.com/github-release/clash-verge-rev/clash-verge-rev/v2.4.4/Clash.Verge_2.4.4_x64-setup.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "Clash Verge",
+            "publisher": "Clash Verge Rev"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Clash Verge.lnk",
+            "%USERPROFILE%\\Desktop\\Clash Verge.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\Clash Verge\\Clash Verge.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Clash Verge"
+          ]
+        }
+      }
+    },
+    "cursor": {
+      "name": "cursor",
+      "display_name": "Cursor",
+      "aliases": [
+        "cursor ai",
+        "cursor-editor"
+      ],
+      "description": "AI-first 代码编辑器，基于 VS Code 构建，内置 AI 辅助编程功能。",
+      "category": "开发工具",
+      "homepage": "https://cursor.com/",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://downloads.cursor.com/production/81fcf2931d7687b4ff3f3017858d0c6dee7e2a68/win32/x64/system-setup/CursorSetup-x64-3.6.31.exe",
+            "https://api2.cursor.sh/updates/download/golden/win32-x64/cursor/3.6"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "Cursor",
+            "publisher": "Cursor"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Cursor.lnk",
+            "%USERPROFILE%\\Desktop\\Cursor.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\Cursor\\Cursor.lnk"
+          ],
+          "install_dir_candidates": [
+            "%LOCALAPPDATA%\\Programs\\Cursor",
+            "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\Cursor"
+          ]
+        }
+      }
+    },
+    "datagrip": {
+      "name": "datagrip",
+      "display_name": "DataGrip",
+      "aliases": [
+        "datagrip",
+        "jetbrains datagrip"
+      ],
+      "description": "JetBrains 推出的数据库 IDE，支持多种数据库管理系统。",
+      "category": "开发工具",
+      "homepage": "https://www.jetbrains.com/datagrip/",
+      "versions": {
+        "2026.1.3": {
+          "urls": [
+            "https://download.jetbrains.com/datagrip/datagrip-2026.1.3.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "DataGrip",
+            "publisher": "JetBrains"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\DataGrip.lnk",
+            "%USERPROFILE%\\Desktop\\DataGrip.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\JetBrains\\DataGrip *.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\JetBrains\\DataGrip *",
+            "C:\\Program Files (x86)\\JetBrains\\DataGrip *"
+          ]
+        }
+      }
+    },
+    "dingtalk": {
+      "name": "dingtalk",
+      "display_name": "钉钉",
+      "aliases": [
+        "dingtalk",
+        "钉钉",
+        "dd"
+      ],
+      "description": "阿里巴巴出品，专为中国企业打造的智能移动办公平台。",
+      "category": "社交",
+      "homepage": "https://www.dingtalk.com/",
+      "downloader": "rust-ureq",
+      "versions": {
+        "7.5.30.5179102": {
+          "urls": [
+            "https://dtapp-pub.dingtalk.com/dingtalk-desktop/win_installer/Release/DingTalk_v7.5.30.5179102.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "钉钉",
+            "publisher": "阿里巴巴"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\钉钉.lnk",
+            "%USERPROFILE%\\Desktop\\钉钉.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\钉钉\\钉钉.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\DingTalk"
+          ]
+        }
+      }
+    },
+    "edge": {
+      "name": "edge",
+      "display_name": "Microsoft Edge",
+      "aliases": [
+        "microsoft edge",
+        "edge"
+      ],
+      "description": "微软推出的现代网页浏览器，基于 Chromium 内核。",
+      "category": "浏览器",
+      "homepage": "https://www.microsoft.com/edge",
+      "versions": {
+        "1.3.241.13": {
+          "urls": [
+            "https://c2rsetup.officeapps.live.com/c2r/downloadEdge.aspx?platform=Default&source=EdgeStablePage&Channel=Stable&language=zh-cn&brand=M100",
+            "https://go.microsoft.com/fwlink/?LinkID=2093437"
+          ],
+          "arch": "x64",
+          "installer_type": "custom",
+          "install_args": [
+            "--silent",
+            "--install"
+          ],
+          "detection": {
+            "display_name": "Microsoft Edge",
+            "publisher": "Microsoft Corporation"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Microsoft Edge.lnk",
+            "%USERPROFILE%\\Desktop\\Microsoft Edge.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application"
+          ]
+        }
+      }
+    },
+    "everything": {
+      "name": "everything",
+      "display_name": "Everything",
+      "description": "Windows 文件搜索工具，秒级索引和搜索全盘文件。",
+      "category": "工具",
+      "homepage": "https://www.voidtools.com/",
+      "versions": {
+        "1.4.1.1032": {
+          "urls": [
+            "https://www.voidtools.com/Everything-1.4.1.1032.x64-Setup.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Everything"
+          ],
+          "detection": {
+            "display_name": "Everything",
+            "publisher": "voidtools"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Everything.lnk",
+            "%USERPROFILE%\\Desktop\\Everything.lnk"
+          ]
+        }
+      }
+    },
+    "eza": {
+      "name": "eza",
+      "description": "eza — 现代化的 ls 替代品，支持颜色、图标、Git 集成、超链接和树形视图",
+      "versions": {
+        "0.21.4": {
+          "urls": [
+            "https://github.com/eza-community/eza/releases/download/v0.21.4/eza.exe_x86_64-pc-windows-gnu.zip"
+          ],
+          "entry_point": "eza.exe",
+          "sha256": ""
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "feishu": {
+      "name": "feishu",
+      "display_name": "飞书",
+      "aliases": [
+        "飞书",
+        "feishu",
+        "lark",
+        "fs"
+      ],
+      "description": "字节跳动推出的一站式企业协作平台，整合 IM、文档、日历、会议等功能。",
+      "category": "社交",
+      "homepage": "https://www.feishu.cn/",
+      "versions": {
+        "7.69.9": {
+          "urls": [
+            "https://sf3-cn.feishucdn.com/obj/ee-appcenter/ed9143c5/Feishu-win32_x64-7.69.9-signed.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "飞书",
+            "publisher": "字节跳动"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\飞书.lnk",
+            "%USERPROFILE%\\Desktop\\飞书.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\飞书\\飞书.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Feishu",
+            "C:\\Program Files\\Feishu"
+          ]
+        }
+      }
+    },
+    "firefox": {
+      "name": "firefox",
+      "display_name": "Firefox",
+      "description": "Mozilla 推出的注重隐私和开放性的现代网页浏览器。",
+      "category": "浏览器",
+      "homepage": "https://www.mozilla.org/firefox/",
+      "versions": {
+        "152.0.1": {
+          "urls": [
+            "https://download.mozilla.org/?product=firefox-latest-ssl&os=win64&lang=zh-CN"
+          ],
+          "arch": "x64",
+          "installer_type": "custom",
+          "install_args": [],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Mozilla Firefox"
+          ],
+          "detection": {
+            "display_name": "Firefox",
+            "publisher": "Mozilla"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Firefox.lnk",
+            "%USERPROFILE%\\Desktop\\Firefox.lnk"
+          ]
+        }
+      }
+    },
+    "flclash": {
+      "name": "flclash",
+      "display_name": "FlClash",
+      "aliases": [
+        "flclash"
+      ],
+      "description": "基于 Clash Meta 的多平台代理客户端，简洁易用，开源无广告。",
+      "category": "网络工具",
+      "homepage": "https://github.com/chen08209/FlClash",
+      "versions": {
+        "0.8.93": {
+          "urls": [
+            "https://github.com/chen08209/FlClash/releases/download/v0.8.93/FlClash-0.8.93-windows-amd64-setup.exe",
+            "https://dl.p6p.net/FlClash/v0.8.91/FlClash-0.8.91-windows-amd64-setup.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "FlClash",
+            "publisher": "FlClash"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\FlClash.lnk",
+            "%USERPROFILE%\\Desktop\\FlClash.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\FlClash\\FlClash.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\FlClash"
+          ]
+        }
+      }
+    },
+    "git": {
+      "name": "git",
+      "display_name": "Git",
+      "description": "Git for Windows。分布式版本控制系统。",
+      "category": "开发工具",
+      "homepage": "https://git-scm.com/",
+      "versions": {
+        "2.54.0": {
+          "urls": [
+            "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe",
+            "https://mirrors.huaweicloud.com/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe",
+            "https://npmmirror.com/mirrors/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/VERYSILENT",
+            "/NORESTART",
+            "/NOCANCEL",
+            "/SP-",
+            "/CLOSEAPPLICATIONS",
+            "/RESTARTAPPLICATIONS",
+            "/COMPONENTS=icons,ext\\reg\\shellhere,assoc,assoc_sh"
+          ],
+          "detection": {
+            "display_name": "Git",
+            "publisher": "Git"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Git Bash.lnk",
+            "%PUBLIC%\\Desktop\\Git Bash.lnk",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Git\\Git Bash.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Git",
+            "C:\\Program Files (x86)\\Git"
+          ],
+          "uninstall_key": "Git"
+        }
+      }
+    },
+    "huorong": {
+      "name": "huorong",
+      "display_name": "火绒安全软件",
+      "aliases": [
+        "火绒",
+        "huorong",
+        "火绒安全",
+        "火绒安全软件",
+        "hr"
+      ],
+      "description": "火绒推出的免费个人安全防护软件，轻量无广告，集病毒查杀、系统防护于一体。",
+      "category": "安全",
+      "homepage": "https://www.huorong.cn/",
+      "versions": {
+        "6.0.10": {
+          "urls": [
+            "https://down-tencent.huorong.cn/sysdiag-all-x64-6.0.10.2-2026.06.06.1.exe",
+            "https://down7.huorong.cn/sysdiag-all-x64-6.0.10.2-2026.06.06.1.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "火绒安全软件",
+            "publisher": "北京火绒网络科技有限公司"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\火绒安全软件.lnk",
+            "%USERPROFILE%\\Desktop\\火绒安全软件.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\火绒安全软件\\火绒安全软件.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Huorong\\Sysdiag"
+          ]
+        }
+      }
+    },
+    "iobitunlocker": {
+      "name": "iobitunlocker",
+      "display_name": "IObit Unlocker",
+      "aliases": [
+        "iobit unlocker"
+      ],
+      "description": "文件解锁工具，解决「文件被占用」无法删除、移动或重命名的问题。",
+      "category": "工具",
+      "homepage": "https://www.iobitunlocker.com",
+      "versions": {
+        "1.3.0": {
+          "urls": [
+            "https://cdn.iobit.com/dl/unlocker-setup.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/NORESTART"
+          ],
+          "detection": {
+            "display_name": "IObit Unlocker"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\IObit Unlocker.lnk",
+            "%USERPROFILE%\\Desktop\\IObit Unlocker.lnk"
+          ]
+        }
+      }
+    },
+    "ls": {
+      "name": "ls",
+      "description": "Rust 版 ls — 一个轻量级的目录列表工具",
+      "versions": {
+        "0.0.1": {
+          "urls": [
+            "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main/tools/ls/ls.zip"
+          ],
+          "entry_point": "ls.exe",
+          "sha256": "8d16ab8ee44c54c2c0ddca92bda35aa09ed8b44236a9a25bc192e62007fe8ca9"
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "lsd": {
+      "name": "lsd",
+      "description": "LSDeluxe — 现代化的 ls 替代品，支持图标、颜色、树形视图和 Git 集成",
+      "versions": {
+        "1.2.0": {
+          "urls": [
+            "https://github.com/lsd-rs/lsd/releases/download/v1.2.0/lsd-v1.2.0-x86_64-pc-windows-msvc.zip"
+          ],
+          "entry_point": "lsd.exe",
+          "sha256": ""
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "microsoft-office": {
+      "name": "microsoft-office",
+      "display_name": "Microsoft Office LTSC",
+      "aliases": [
+        "office",
+        "microsoft office",
+        "office ltsc",
+        "专业增强版"
+      ],
+      "description": "微软 Office 办公软件套件，包含 Word、Excel、PowerPoint、Outlook 等。",
+      "category": "办公",
+      "homepage": "https://www.microsoft.com/microsoft-365",
+      "versions": {
+        "2024": {
+          "urls": [
+            "https://officecdn.microsoft.com/db/492350f6-3a01-4f97-b9c0-c7c6ddf67d60/media/zh-cn/ProPlus2024Retail.img"
+          ],
+          "arch": "x64",
+          "installer_type": "custom",
+          "install_args": [],
+          "detection": {
+            "display_name": "Microsoft Office LTSC"
+          },
+          "install_dir_candidates": [
+            "C:\\Program Files\\Microsoft Office",
+            "C:\\Program Files (x86)\\Microsoft Office"
+          ]
+        }
+      }
+    },
+    "netease-music": {
+      "name": "netease-music",
+      "display_name": "网易云音乐",
+      "aliases": [
+        "netease music",
+        "cloudmusic",
+        "网易云",
+        "wyy"
+      ],
+      "description": "网易出品的音乐播放器，支持海量曲库、个性推荐、精彩乐评和音乐社区。",
+      "category": "影音",
+      "homepage": "https://music.163.com",
+      "downloader": "rust-ureq",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://d8.music.126.net/dmusic2/NeteaseCloudMusic_Music_official_3.1.35.205293_64.exe",
+            "https://d1.music.126.net/dmusic/cloudmusicsetup3.1.35.205293_64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Netease\\CloudMusic"
+          ],
+          "detection": {
+            "display_name": "网易云音乐",
+            "publisher": "NetEase"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\网易云音乐.lnk",
+            "%USERPROFILE%\\Desktop\\网易云音乐.lnk"
+          ]
+        }
+      }
+    },
+    "notepadpp": {
+      "name": "notepadpp",
+      "display_name": "Notepad++",
+      "aliases": [
+        "notepad++",
+        "npp"
+      ],
+      "description": "免费开源的源代码编辑器，支持 80+ 种编程语言的语法高亮。",
+      "category": "开发工具",
+      "homepage": "https://notepad-plus-plus.org/",
+      "versions": {
+        "8.9.3": {
+          "urls": [
+            "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.3/npp.8.9.3.Installer.x64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Notepad++"
+          ],
+          "detection": {
+            "display_name": "Notepad++",
+            "publisher": "Notepad++ Team"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Notepad++.lnk",
+            "%USERPROFILE%\\Desktop\\Notepad++.lnk"
+          ]
+        }
+      }
+    },
+    "nvm": {
+      "name": "nvm",
+      "display_name": "NVM for Windows",
+      "aliases": [
+        "nvm-windows"
+      ],
+      "description": "Node.js 版本管理器（Windows 版），可安装和切换多个 Node.js 版本。",
+      "category": "开发工具",
+      "homepage": "https://github.com/coreybutler/nvm-windows",
+      "versions": {
+        "1.2.2": {
+          "urls": [
+            "https://github.com/coreybutler/nvm-windows/releases/download/1.2.2/nvm-setup.zip"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/NORESTART"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\nvm-windows",
+            "%USERPROFILE%\\AppData\\Roaming\\nvm"
+          ],
+          "detection": {
+            "display_name": "NVM for Windows",
+            "publisher": "Corey Butler"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\nvm.lnk",
+            "%USERPROFILE%\\Desktop\\nvm.lnk"
+          ]
+        },
+        "1.2.2-noinstall": {
+          "urls": [
+            "https://github.com/coreybutler/nvm-windows/releases/download/1.2.2/nvm-noinstall.zip"
+          ],
+          "arch": "x64",
+          "installer_type": "portable",
+          "entry_point": "nvm.exe"
+        }
+      }
+    },
+    "obs": {
+      "name": "obs",
+      "display_name": "OBS Studio",
+      "aliases": [
+        "obs studio",
+        "obs-studio",
+        "open broadcaster software"
+      ],
+      "description": "免费开源的直播和录制软件，支持多种平台和插件扩展。",
+      "category": "多媒体",
+      "homepage": "https://obsproject.com/",
+      "versions": {
+        "32.1.0": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/obsproject/obs-studio/32.1.0/OBS-Studio-32.1.0-Windows-Installer.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S",
+            "/D=C:\\Program Files\\obs-studio"
+          ],
+          "detection": {
+            "display_name": "OBS Studio",
+            "publisher": "OBS Project"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\OBS Studio.lnk",
+            "%USERPROFILE%\\Desktop\\OBS Studio.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\OBS Studio\\OBS Studio.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\obs-studio"
+          ]
+        }
+      }
+    },
+    "officetoolplus": {
+      "name": "officetoolplus",
+      "display_name": "Office Tool Plus",
+      "aliases": [
+        "otp",
+        "office tool",
+        "office deploy",
+        "otoolplus"
+      ],
+      "description": "强大易用的 Office 部署工具，支持自定义安装、激活和管理 Microsoft Office，集成下载、卸载、转版本等功能。",
+      "category": "办公",
+      "homepage": "https://officetool.plus",
+      "versions": {
+        "11.3.12.0": {
+          "urls": [
+            "https://github.com/YerongAI/Office-Tool/releases/download/v11.3.12.0/Office_Tool_with_runtime_v11.3.12.0_x64.zip"
+          ],
+          "arch": "x64",
+          "installer_type": "portable",
+          "install_args": [],
+          "entry_point": "Office Tool Plus.exe",
+          "shortcut_candidates": []
+        }
+      }
+    },
+    "pdfgear": {
+      "name": "pdfgear",
+      "display_name": "PDFgear",
+      "aliases": [
+        "pdfgear"
+      ],
+      "description": "免费强大的 PDF 编辑、转换、阅读工具，支持 AI 聊天、格式转换、编辑等功能。",
+      "category": "办公",
+      "homepage": "https://www.pdfgear.com/",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://downloadfiles.pdfgear.com/releases/windows/pdfgear_setup_v2.1.16.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "PDFgear",
+            "publisher": "PDFgear"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\PDFgear.lnk",
+            "%USERPROFILE%\\Desktop\\PDFgear.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\PDFgear\\PDFgear.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\PDFgear"
+          ]
+        }
+      }
+    },
+    "pixpin": {
+      "name": "pixpin",
+      "display_name": "PixPin",
+      "aliases": [
+        "pinpix"
+      ],
+      "description": "功能强大的截图贴图工具，支持 OCR、长截图、录屏和标注。",
+      "category": "工具",
+      "homepage": "https://pixpin.cn",
+      "versions": {
+        "3.0.8.0": {
+          "urls": [
+            "https://download.pixpinapp.com/PixPin_cn_zh-cn_3.0.8.0.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/NORESTART"
+          ],
+          "install_dir_candidates": [
+            "%LOCALAPPDATA%\\PixPin"
+          ],
+          "detection": {
+            "display_name": "PixPin"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\PixPin.lnk",
+            "%USERPROFILE%\\Desktop\\PixPin.lnk"
+          ]
+        }
+      }
+    },
+    "potplayer": {
+      "name": "potplayer",
+      "display_name": "PotPlayer",
+      "description": "韩国 Kakao 团队推出的全能视频播放器，内置强大解码器，支持 4K/8K 硬件加速。",
+      "category": "影音",
+      "homepage": "https://potplayer.daum.net",
+      "versions": {
+        "1.7.22898": {
+          "urls": [
+            "https://t1.daumcdn.net/potplayer/PotPlayer/Version/Latest/PotPlayerSetup64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\DAUM\\PotPlayer"
+          ],
+          "detection": {
+            "display_name": "PotPlayer",
+            "publisher": "Kakao Corp."
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\PotPlayer.lnk",
+            "%USERPROFILE%\\Desktop\\PotPlayer.lnk"
+          ]
+        }
+      }
+    },
+    "pp": {
+      "name": "pp",
+      "description": "PATH 环境变量查看器，支持颜色区分不同路径类型",
+      "versions": {
+        "0.0.1": {
+          "urls": [
+            "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main/tools/pp/pp.zip"
+          ],
+          "entry_point": "pp.exe",
+          "sha256": ""
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "pycharm": {
+      "name": "pycharm",
+      "display_name": "PyCharm",
+      "aliases": [
+        "pycharm",
+        "py-charm",
+        "jetbrains pycharm"
+      ],
+      "description": "JetBrains 推出的 Python 专业 IDE，支持智能代码补全、调试、测试等。",
+      "category": "开发工具",
+      "homepage": "https://www.jetbrains.com/pycharm/",
+      "versions": {
+        "2026.1.2": {
+          "urls": [
+            "https://download.jetbrains.com/python/pycharm-2026.1.2.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "PyCharm",
+            "publisher": "JetBrains"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\PyCharm.lnk",
+            "%USERPROFILE%\\Desktop\\PyCharm.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\JetBrains\\PyCharm *.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\JetBrains\\PyCharm *",
+            "C:\\Program Files (x86)\\JetBrains\\PyCharm *"
+          ]
+        }
+      }
+    },
+    "python": {
+      "name": "python",
+      "display_name": "Python",
+      "aliases": [
+        "python3",
+        "py"
+      ],
+      "description": "Python 编程语言（Windows 官方安装版）。",
+      "category": "开发工具",
+      "homepage": "https://www.python.org/",
+      "versions": {
+        "3.14.5": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.14.5/python-3.14.5-amd64.exe",
+            "https://www.python.org/ftp/python/3.14.5/python-3.14.5-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.14",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.14.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.14.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python314",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python314"
+          ]
+        },
+        "3.13.5": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.13.5/python-3.13.5-amd64.exe",
+            "https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.13",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.13.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.13.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python313",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python313"
+          ]
+        },
+        "3.12.10": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.12.10/python-3.12.10-amd64.exe",
+            "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.12",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.12.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.12.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python312",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python312"
+          ]
+        },
+        "3.11.9": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.11.9/python-3.11.9-amd64.exe",
+            "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.11",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.11.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.11.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python311",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python311"
+          ]
+        },
+        "3.10.11": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.10.11/python-3.10.11-amd64.exe",
+            "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.10",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.10.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.10.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python310",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python310"
+          ]
+        },
+        "3.9.13": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.9.13/python-3.9.13-amd64.exe",
+            "https://www.python.org/ftp/python/3.9.13/python-3.9.13-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.9",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.9.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.9.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python39",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python39"
+          ]
+        },
+        "3.8.10": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.8.10/python-3.8.10-amd64.exe",
+            "https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.8",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.8.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.8.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python38",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python38"
+          ]
+        },
+        "3.7.9": {
+          "urls": [
+            "https://mirrors.huaweicloud.com/python/3.7.9/python-3.7.9-amd64.exe",
+            "https://www.python.org/ftp/python/3.7.9/python-3.7.9-amd64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/quiet",
+            "InstallAllUsers=1",
+            "PrependPath=1",
+            "Include_test=0",
+            "Include_launcher=1"
+          ],
+          "detection": {
+            "display_name": "Python 3.7",
+            "publisher": "Python Software Foundation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Python 3.7.lnk",
+            "%PUBLIC%\\Desktop\\Python 3.7.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Python37",
+            "%LOCALAPPDATA%\\Programs\\Python\\Python37"
+          ]
+        }
+      }
+    },
+    "quarkclouddrive": {
+      "name": "quarkclouddrive",
+      "display_name": "夸克网盘",
+      "aliases": [
+        "夸克",
+        "quark",
+        "quark pan",
+        "quark drive",
+        "kk",
+        "kkwp"
+      ],
+      "description": "夸克出品的个人云存储服务（阿里巴巴旗下），支持文件同步、在线预览、AI 处理和极速下载。",
+      "category": "效率增强",
+      "homepage": "https://pan.quark.cn",
+      "versions": {
+        "6.5.5.724": {
+          "urls": [
+            "https://download.quark.cn/download/quarkpc?platform=pc&ch=pcquark@clouddrive_share8",
+            "https://umcdn.quark.cn/download/37211/quarkclouddrivepc/pckk@product_pcweb_mini/QuarkCloudDrivePC_V6.5.5.724_pc_pf30001_(zh-cn)_releasemini_(Build2933328-1001-x64).exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Quark Cloud Drive",
+            "C:\\Program Files\\Quark Cloud Drive"
+          ],
+          "detection": {
+            "display_name": "夸克网盘",
+            "publisher": "Quark"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\夸克网盘.lnk",
+            "%USERPROFILE%\\Desktop\\夸克网盘.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\夸克网盘\\夸克网盘.lnk"
+          ]
+        }
+      }
+    },
+    "snipaste": {
+      "name": "snipaste",
+      "display_name": "Snipaste",
+      "description": "截图 + 贴图工具，支持截图后贴回到屏幕上作为悬浮窗口。便携版无需安装。",
+      "category": "工具",
+      "homepage": "https://www.snipaste.com",
+      "versions": {
+        "2.11.3": {
+          "urls": [
+            "https://dl.snipaste.com/win-x64"
+          ],
+          "arch": "x64",
+          "installer_type": "portable",
+          "install_args": [],
+          "entry_point": "Snipaste.exe",
+          "detection": {
+            "display_name": "Snipaste"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Snipaste.lnk",
+            "%USERPROFILE%\\Desktop\\Snipaste.lnk"
+          ]
+        }
+      }
+    },
+    "spacesniffer": {
+      "name": "spacesniffer",
+      "display_name": "SpaceSniffer",
+      "description": "磁盘空间分析工具，通过树形图可视化硬盘空间使用情况，便携版无需安装。",
+      "category": "工具",
+      "homepage": "https://www.uderzo.it/main_products/space_sniffer/",
+      "versions": {
+        "2.2.0.27": {
+          "urls": [
+            "https://www.uderzo.it/main_products/space_sniffer/files/spacesniffer_2_2_0_27_x64.zip"
+          ],
+          "arch": "x64",
+          "installer_type": "portable",
+          "install_args": [],
+          "entry_point": "SpaceSniffer.exe",
+          "detection": {
+            "display_name": "SpaceSniffer"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\SpaceSniffer.lnk",
+            "%USERPROFILE%\\Desktop\\SpaceSniffer.lnk"
+          ]
+        }
+      }
+    },
+    "ss": {
+      "name": "ss",
+      "description": "环境变量查看器，支持颜色区分、左对齐，支持打开系统环境变量对话框",
+      "versions": {
+        "0.0.1": {
+          "urls": [
+            "https://raw.githubusercontent.com/LinYanZhi/aminos-source/main/tools/ss/ss.zip"
+          ],
+          "entry_point": "ss.exe",
+          "sha256": ""
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "steam": {
+      "name": "steam",
+      "display_name": "Steam",
+      "description": "全球最大的 PC 游戏数字发行平台，由 Valve 公司运营。",
+      "category": "游戏",
+      "homepage": "https://store.steampowered.com",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/NORESTART"
+          ],
+          "detection": {
+            "display_name": "Steam",
+            "publisher": "Valve Corporation"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Steam.lnk",
+            "%USERPROFILE%\\Desktop\\Steam.lnk",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Steam.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Steam"
+          ]
+        }
+      }
+    },
+    "sunlogin": {
+      "name": "sunlogin",
+      "display_name": "向日葵远程控制",
+      "aliases": [
+        "向日葵",
+        "sunlogin",
+        "向日葵远程控制",
+        "oray sunlogin",
+        "xrk"
+      ],
+      "description": "国内知名的远程控制软件，支持远程桌面、文件传输、远程运维等功能。",
+      "category": "工具",
+      "homepage": "https://sunlogin.oray.com/",
+      "downloader": "rust-ureq",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://dl.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "向日葵",
+            "publisher": "上海贝锐"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\向日葵远程控制.lnk",
+            "%USERPROFILE%\\Desktop\\向日葵远程控制.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\向日葵远程控制\\向日葵远程控制.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Sunlogin\\SunloginClient"
+          ]
+        }
+      }
+    },
+    "todesk": {
+      "name": "todesk",
+      "display_name": "ToDesk",
+      "aliases": [
+        "todesk",
+        "totodesk"
+      ],
+      "description": "高速流畅的远程控制软件，支持 4K 高清画质、文件传输。",
+      "category": "工具",
+      "homepage": "https://www.todesk.com/",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://dl.todesk.com/irrigation/ToDesk_4.9.7.1.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "ToDesk",
+            "publisher": "ToDesk"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\ToDesk.lnk",
+            "%USERPROFILE%\\Desktop\\ToDesk.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\ToDesk"
+          ]
+        }
+      }
+    },
+    "trae": {
+      "name": "trae",
+      "display_name": "Trae CN",
+      "aliases": [
+        "trae",
+        "trae cn",
+        "字节trae"
+      ],
+      "description": "字节跳动推出的 AI 原生 IDE，基于 VS Code 构建，集成 AI 编程能力。",
+      "category": "开发工具",
+      "homepage": "https://www.trae.com.cn/",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://lf-trae.toscdn.com/obj/trae-ai-cn/pkg/app/releases/stable/1.0.10283/win32/Trae-Setup-x64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "Trae CN",
+            "publisher": "字节跳动"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Trae CN.lnk",
+            "%USERPROFILE%\\Desktop\\Trae CN.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\Trae CN\\Trae CN.lnk"
+          ],
+          "install_dir_candidates": [
+            "%LOCALAPPDATA%\\Programs\\Trae CN"
+          ]
+        }
+      }
+    },
+    "ttime": {
+      "name": "ttime",
+      "display_name": "TTime",
+      "description": "一款简洁高效的翻译工具，支持多平台翻译引擎和截图翻译。",
+      "category": "工具",
+      "homepage": "https://github.com/InkTimeRecord/TTime",
+      "versions": {
+        "0.9.15": {
+          "urls": [
+            "https://github.com/InkTimeRecord/TTime/releases/download/v0.9.15/TTime-0.9.15-setup.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "%LOCALAPPDATA%\\Programs\\TTime"
+          ],
+          "detection": {
+            "display_name": "TTime"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\TTime.lnk",
+            "%USERPROFILE%\\Desktop\\TTime.lnk"
+          ]
+        }
+      }
+    },
+    "utools": {
+      "name": "utools",
+      "display_name": "uTools",
+      "description": "新一代效率工具平台，支持 3000+ 插件，提供搜索、翻译、OCR 等丰富功能。",
+      "category": "工具",
+      "homepage": "https://u.tools",
+      "versions": {
+        "7.8.0": {
+          "urls": [
+            "https://open.u-tools.cn/download/uTools-7.8.0.exe",
+            "https://open.u-tools.cn/download/uTools-7.6.1.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "%LOCALAPPDATA%\\Programs\\uTools"
+          ],
+          "detection": {
+            "display_name": "uTools",
+            "publisher": "uTools"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\uTools.lnk",
+            "%USERPROFILE%\\Desktop\\uTools.lnk"
+          ]
+        }
+      }
+    },
+    "uuremote": {
+      "name": "uuremote",
+      "display_name": "网易UU远程",
+      "aliases": [
+        "uu远程",
+        "uuremote",
+        "网易uu远程",
+        "uuyc",
+        "UU"
+      ],
+      "description": "网易出品的高性能远程控制软件，支持 4K 144Hz，免费低延迟远程办公和游戏。",
+      "category": "工具",
+      "homepage": "https://uuyc.163.com",
+      "versions": {
+        "4.27.2": {
+          "urls": [
+            "https://api.nrd.nie.163.com/api/v1/release/dl/1?channel=gw",
+            "https://adl.netease.com/d/g/uuremote/c/gw"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/NORESTART"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Netease\\UU远程",
+            "C:\\Program Files (x86)\\Netease\\UURemote"
+          ],
+          "detection": {
+            "display_name": "UU远程",
+            "publisher": "NetEase"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\UU远程.lnk",
+            "%USERPROFILE%\\Desktop\\UU远程.lnk"
+          ]
+        }
+      }
+    },
+    "uv": {
+      "name": "uv",
+      "description": "用 Rust 编写的极速 Python 包管理器",
+      "versions": {
+        "0.11.19": {
+          "urls": [
+            "https://github.com/astral-sh/uv/releases/download/0.11.19/uv-x86_64-pc-windows-msvc.zip"
+          ],
+          "entry_point": "uv.exe"
+        }
+      },
+      "category": "工具",
+      "kind": "self"
+    },
+    "visual-studio": {
+      "name": "visual-studio",
+      "display_name": "Visual Studio Community 2026",
+      "aliases": [
+        "visual studio",
+        "vs community",
+        "vs2026"
+      ],
+      "description": "微软推出的功能强大的集成开发环境（IDE），支持多种编程语言。",
+      "category": "开发工具",
+      "homepage": "https://visualstudio.microsoft.com/",
+      "versions": {
+        "2026": {
+          "urls": [
+            "https://c2rsetup.officeapps.live.com/c2r/downloadVS.aspx?sku=community&channel=Release&version=VS2026&source=VSCDN&includeRecommended=true"
+          ],
+          "arch": "x64",
+          "installer_type": "custom",
+          "install_args": [
+            "--quiet",
+            "--wait"
+          ],
+          "detection": {
+            "display_name": "Visual Studio Community 2026",
+            "publisher": "Microsoft Corporation"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Visual Studio 2026.lnk",
+            "%USERPROFILE%\\Desktop\\Visual Studio 2026.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\Visual Studio 2026\\Visual Studio 2026.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Microsoft Visual Studio\\2026\\Community"
+          ]
+        }
+      }
+    },
+    "vmware": {
+      "name": "vmware",
+      "display_name": "VMware Workstation",
+      "aliases": [
+        "vmware",
+        "vmware workstation",
+        "vmware workstation pro"
+      ],
+      "description": "强大的桌面虚拟化软件，允许在一台物理机上运行多个虚拟机。",
+      "category": "开发工具",
+      "homepage": "https://www.vmware.com/products/workstation-pro.html",
+      "downloader": "rust-ureq",
+      "versions": {
+        "17.6.3": {
+          "urls": [
+            "https://www.techpowerup.com/download/vmware-workstation-pro/"
+          ],
+          "arch": "x64",
+          "installer_type": "custom",
+          "install_args": [
+            "/S",
+            "/v",
+            "/qn"
+          ],
+          "detection": {
+            "display_name": "VMware Workstation",
+            "publisher": "VMware"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\VMware Workstation.lnk",
+            "%USERPROFILE%\\Desktop\\VMware Workstation.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\VMware\\VMware Workstation.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\VMware\\VMware Workstation"
+          ]
+        }
+      }
+    },
+    "vscode": {
+      "name": "vscode",
+      "display_name": "Visual Studio Code",
+      "aliases": [
+        "code",
+        "vsc",
+        "visual studio code"
+      ],
+      "description": "微软推出的轻量级代码编辑器，支持丰富的扩展生态。",
+      "category": "开发工具",
+      "homepage": "https://code.visualstudio.com/",
+      "versions": {
+        "latest-user": {
+          "urls": [
+            "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/MERGETASKS=!runcode"
+          ],
+          "detection": {
+            "display_name": "Microsoft Visual Studio Code",
+            "publisher": "Microsoft Corporation"
+          },
+          "shortcut_candidates": [
+            "%USERPROFILE%\\Desktop\\Visual Studio Code.lnk",
+            "%PUBLIC%\\Desktop\\Visual Studio Code.lnk",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Visual Studio Code.lnk"
+          ],
+          "install_dir_candidates": [
+            "%LOCALAPPDATA%\\Programs\\Microsoft VS Code",
+            "C:\\Program Files\\Microsoft VS Code"
+          ]
+        },
+        "latest-system": {
+          "urls": [
+            "https://update.code.visualstudio.com/latest/win32-x64/stable"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/SILENT",
+            "/MERGETASKS=!runcode"
+          ],
+          "detection": {
+            "display_name": "Microsoft Visual Studio Code",
+            "publisher": "Microsoft Corporation"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Visual Studio Code.lnk",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Visual Studio Code.lnk",
+            "%USERPROFILE%\\Desktop\\Visual Studio Code.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Microsoft VS Code",
+            "%LOCALAPPDATA%\\Programs\\Microsoft VS Code"
+          ]
+        }
+      }
+    },
+    "watt-toolkit": {
+      "name": "watt-toolkit",
+      "display_name": "Watt Toolkit",
+      "aliases": [
+        "watt toolkit",
+        "steam++",
+        "steampp",
+        "瓦特工具箱"
+      ],
+      "description": "一款功能强大的开源游戏工具箱，支持 Steam 加速、账号切换、库存管理等功能。",
+      "category": "工具",
+      "homepage": "https://steampp.net/",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://gitee.com/rmbgame/SteamTools/releases/download/3.1.0/Steam%20%20_v3.1.0_win_x64.exe",
+            "https://dd.soft9527.com/ali213/AhG0VLgvvxUvkvUcFee2WA",
+            "https://github.com/BeyondDimension/SteamTools/releases/download/3.1.0/Steam++_v3.1.0_win_x64.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "Watt Toolkit",
+            "publisher": "BeyondDimension"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\Watt Toolkit.lnk",
+            "%USERPROFILE%\\Desktop\\Watt Toolkit.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\Watt Toolkit"
+          ]
+        }
+      }
+    },
+    "wechat": {
+      "name": "wechat",
+      "display_name": "微信",
+      "aliases": [
+        "微信",
+        "weixin",
+        "wx"
+      ],
+      "description": "微信桌面版。腾讯推出的即时通讯社交软件。",
+      "category": "社交",
+      "homepage": "https://weixin.qq.com/",
+      "versions": {
+        "4.1.10": {
+          "urls": [
+            "https://dldir1v6.qq.com/weixin/Universal/Windows/WeChatWin_4.1.10.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Tencent\\WeChat"
+          ],
+          "detection": {
+            "display_name": "微信",
+            "publisher": "腾讯"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\微信.lnk",
+            "%USERPROFILE%\\Desktop\\微信.lnk"
+          ]
+        }
+      }
+    },
+    "wecom": {
+      "name": "wecom",
+      "display_name": "企业微信",
+      "aliases": [
+        "企业微信",
+        "wecom",
+        "企微",
+        "work weixin",
+        "qywx"
+      ],
+      "description": "腾讯微信团队为企业打造的专业办公管理工具，与微信一致的沟通体验。",
+      "category": "社交",
+      "homepage": "https://work.weixin.qq.com/",
+      "versions": {
+        "5.0.8.6009": {
+          "urls": [
+            "https://work.weixin.qq.com/wework_admin/commdownload?platform=win"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "企业微信",
+            "publisher": "腾讯"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\企业微信.lnk",
+            "%USERPROFILE%\\Desktop\\企业微信.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\企业微信\\企业微信.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Tencent\\WeCom"
+          ]
+        }
+      }
+    },
+    "wepe": {
+      "name": "wepe",
+      "display_name": "微PE工具箱",
+      "aliases": [
+        "微PE",
+        "wepe",
+        "微PE工具箱",
+        "wepe工具箱"
+      ],
+      "description": "免费纯净的 Windows PE 工具箱，用于系统维护、数据恢复等。",
+      "category": "工具",
+      "homepage": "https://www.wepe.com.cn/",
+      "versions": {
+        "2.3": {
+          "urls": [
+            "https://mirrors.sdu.edu.cn/wepe/WePE_64_V2.3.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "微PE工具箱",
+            "publisher": "微PE"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\微PE工具箱.lnk",
+            "%USERPROFILE%\\Desktop\\微PE工具箱.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\WePE"
+          ]
+        }
+      }
+    },
+    "wps": {
+      "name": "wps",
+      "display_name": "WPS Office",
+      "aliases": [
+        "wps office",
+        "金山wps",
+        "wps"
+      ],
+      "description": "金山推出的免费办公软件套装，包含文字、表格、演示等功能，兼容 Microsoft Office 格式。",
+      "category": "办公",
+      "homepage": "https://www.wps.cn/",
+      "versions": {
+        "latest": {
+          "urls": [
+            "https://official-package.wpscdn.cn/wps/download/WPS_Setup_26895.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "WPS Office"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\WPS Office.lnk",
+            "%USERPROFILE%\\Desktop\\WPS Office.lnk",
+            "%USERPROFILE%\\Desktop\\WPS文字.lnk",
+            "%USERPROFILE%\\Desktop\\WPS表格.lnk",
+            "%USERPROFILE%\\Desktop\\WPS演示.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Kingsoft\\WPS Office",
+            "C:\\Program Files\\WPS Office"
+          ]
+        }
+      }
+    },
+    "xunlei": {
+      "name": "xunlei",
+      "display_name": "迅雷",
+      "aliases": [
+        "thunder",
+        "迅雷12",
+        "xunlei12",
+        "xunlei download",
+        "xl"
+      ],
+      "description": "20 余年技术沉淀的专业下载工具，支持 HTTP/FTP/BT/磁力链接/电驴多协议下载，集成云盘和影音播放功能。",
+      "category": "效率增强",
+      "homepage": "https://www.xunlei.com",
+      "versions": {
+        "12.4.10": {
+          "urls": [
+            "https://down.sandai.net/thunder11/XunLeiWebSetup12.4.10.3940xl11.exe"
+          ],
+          "arch": "x64",
+          "installer_type": "nsis",
+          "install_args": [
+            "/S"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files (x86)\\Thunder Network\\Thunder",
+            "C:\\Program Files\\Thunder Network\\Thunder"
+          ],
+          "detection": {
+            "display_name": "迅雷",
+            "publisher": "深圳市迅雷网络技术有限公司"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\迅雷.lnk",
+            "%USERPROFILE%\\Desktop\\迅雷.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\迅雷\\迅雷.lnk"
+          ]
+        }
+      }
+    },
+    "yingdao": {
+      "name": "yingdao",
+      "display_name": "影刀RPA",
+      "aliases": [
+        "影刀",
+        "yingdao",
+        "影刀RPA",
+        "shadowbot"
+      ],
+      "description": "国产 RPA 自动化工具，支持桌面软件、网页、Excel 等自动化操作。",
+      "category": "开发工具",
+      "homepage": "https://www.yingdao.com/",
+      "versions": {
+        "6.0.30": {
+          "urls": [
+            "https://www.yingdao.com/download/?index=nav&arch=x64"
+          ],
+          "arch": "x64",
+          "installer_type": "inno",
+          "install_args": [
+            "/S"
+          ],
+          "detection": {
+            "display_name": "影刀",
+            "publisher": "影刀"
+          },
+          "shortcut_candidates": [
+            "%PUBLIC%\\Desktop\\影刀RPA.lnk",
+            "%USERPROFILE%\\Desktop\\影刀RPA.lnk",
+            "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\影刀RPA\\影刀RPA.lnk"
+          ],
+          "install_dir_candidates": [
+            "C:\\Program Files\\ShadowBot"
+          ]
+        }
+      }
+    }
+  },
+  "local": {}
+}

@@ -67,6 +67,33 @@ pub fn get_uninstall_string(detection: &Detection) -> Option<String> {
     detect_installed(detection).and_then(|m| m.get("UninstallString").cloned())
 }
 
+/// 查找所有匹配的已安装软件（返回所有匹配项，而非第一个）。
+///
+/// 遍历三个 Uninstall 注册表路径，返回所有满足 DisplayName + Publisher 条件的条目。
+pub fn detect_all_installed_by(display_name: &str, publisher: Option<&str>) -> Vec<HashMap<String, String>> {
+    let dn_lower = display_name.to_lowercase();
+    let publisher_lower = publisher.map(|p| p.to_lowercase());
+
+    for check_publisher in [true, false] {
+        if check_publisher && publisher_lower.is_none() {
+            continue;
+        }
+        let mut results = Vec::new();
+        let hives: &[(HKEY, &str)] = &[
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        ];
+        for &(root, path) in hives {
+            collect_matches(&dn_lower, &publisher_lower, check_publisher, RegKey::predef(root), path, &mut results);
+        }
+        if !results.is_empty() {
+            return results;
+        }
+    }
+    vec![]
+}
+
 /// 扫描所有已安装的软件（从全部 Uninstall 注册表）。
 ///
 /// 自动过滤掉 Windows 系统组件（SystemComponent=1）和子组件（含 ParentDisplayName 的），
@@ -200,6 +227,65 @@ where
         }
     }
     None
+}
+
+/// 收集所有匹配的子键（不重复检查 DisplayName），供 `detect_all_installed_by` 使用。
+fn collect_matches(
+    dn_lower: &str,
+    publisher_lower: &Option<String>,
+    check_publisher: bool,
+    root: RegKey,
+    path: &str,
+    results: &mut Vec<HashMap<String, String>>,
+) {
+    let mut seen = std::collections::HashSet::new();
+    let key = match root.open_subkey_with_flags(path, KEY_READ) {
+        Ok(k) => k,
+        Err(_) => return,
+    };
+    for subkey_name in key.enum_keys().flatten() {
+        let subkey = match key.open_subkey_with_flags(&subkey_name, KEY_READ) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let dn: String = match subkey.get_value("DisplayName") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if dn.trim().is_empty() || !seen.insert(dn.clone()) {
+            continue;
+        }
+        // 过滤系统组件和子组件（保持与 scan_all_installed 一致的过滤逻辑）
+        if is_system_component(&subkey) {
+            continue;
+        }
+        if subkey.get_value::<String, _>("ParentDisplayName").is_ok() {
+            continue;
+        }
+        let dn_lc = dn.to_lowercase();
+        if !dn_lc.contains(dn_lower) {
+            continue;
+        }
+        if check_publisher {
+            if let Some(pub_lower) = publisher_lower {
+                let pub_ = subkey.get_value::<String, _>("Publisher").ok();
+                if !pub_.map_or(false, |p| p.to_lowercase().contains(pub_lower.as_str())) {
+                    continue;
+                }
+            }
+        }
+        let mut result = HashMap::new();
+        result.insert("DisplayName".into(), dn);
+        if let Ok(p) = subkey.get_value::<String, _>("Publisher") {
+            result.insert("Publisher".into(), p);
+        }
+        for field in ["DisplayVersion", "InstallLocation", "UninstallString"] {
+            if let Ok(val) = subkey.get_value::<String, _>(field) {
+                result.insert(field.into(), val);
+            }
+        }
+        results.push(result);
+    }
 }
 
 fn is_system_component(subkey: &RegKey) -> bool {

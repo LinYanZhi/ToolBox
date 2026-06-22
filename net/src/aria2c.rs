@@ -284,7 +284,7 @@ fn probe_content_length(url: &str) -> u64 {
     }
 }
 
-fn find_aria2c() -> Option<std::path::PathBuf> {
+pub(crate) fn find_aria2c() -> Option<std::path::PathBuf> {
     // 优先使用工具目录中的 aria2c
     if let Some(tools_dir) = crate::backend::get_tools_bin_dir() {
         let candidate = tools_dir.join("aria2c.exe");
@@ -304,8 +304,10 @@ fn find_aria2c() -> Option<std::path::PathBuf> {
     { if desktop.is_file() { return Some(desktop); } }
     std::env::var_os("PATH").and_then(|paths| {
         for dir in std::env::split_paths(&paths) {
-            let candidate = dir.join("aria2c.exe");
-            if candidate.is_file() { return Some(candidate); }
+            for ext in &["exe", "cmd", "bat"] {
+                let candidate = dir.join(format!("aria2c.{}", ext));
+                if candidate.is_file() { return Some(candidate); }
+            }
         }
         None
     })

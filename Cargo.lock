@@ -706,8 +706,6 @@ dependencies = [
  "ctrlc",
  "indicatif",
  "native-tls",
- "serde",
- "toml",
  "ureq",
 ]
 
@@ -800,6 +798,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "path-rules"
+version = "0.1.0"
+dependencies = [
+ "color",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -838,6 +843,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "color",
+ "path-rules",
 ]
 
 [[package]]
@@ -1069,6 +1075,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "color",
+ "path-rules",
 ]
 
 [[package]]

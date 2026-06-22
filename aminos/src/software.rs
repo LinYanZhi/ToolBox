@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 
-use anyhow::{bail, Context};
-use color;
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use crate::cmd_names;
-use crate::paths;
+
+// ── 内嵌的默认软件源 ──────────────────────────────────
+
+/// 编译时嵌入的默认 source.json 内容。
+const EMBEDDED_JSON: &str = include_str!("../source.json");
 
 // ── JSON Schema ──────────────────────────────────────────
 
@@ -104,309 +105,158 @@ fn default_provenance() -> String {
     "source".to_string()
 }
 
-// ── Software definitions ─────────────────────────────────
+// ── 内部数据结构 ──────────────────────────────────────
 
-/// 委托到 `config::source` 更新源定义。
-pub fn update_sources() -> anyhow::Result<()> {
-    let builtin: Vec<String> = vec![
-        format!("https://ghproxy.net/{}", crate::repo::SOURCE_RAW_URL),
-        format!("https://cdn.jsdelivr.net/gh/{}@main", crate::repo::SOURCE_REPO),
-        crate::repo::SOURCE_RAW_URL.to_string(),
-    ];
+/// 软件源数据库文件（software.json）的结构。
+#[derive(Debug, Deserialize, Serialize)]
+struct SoftwareDatabase {
+    /// 格式版本号，用于未来迁移。
+    version: u32,
+    /// 内置软件（编译时嵌入，升级时自动合并）。
+    builtin: HashMap<String, SoftwareDef>,
+    /// 用户通过 `as add` 添加的本地扩展。
+    local: HashMap<String, SoftwareDef>,
+}
 
-    // 1. 同步所有分类源
-    println!("{}", color::bold_cyan("同步软件源..."));
-    for (i, cat) in paths::CATEGORIES.iter().enumerate() {
-        let (_, label, _) = paths::CATEGORY_META[i];
-        let urls: Vec<String> = builtin.iter().map(|u| format!("{}/apps/{}", u, cat)).collect();
-        let repo = config::SourceRepo::new(urls);
-        let dest = paths::category_dir(cat);
-        if let Err(e) = config::source::update_sources(&dest, &repo) {
-            eprintln!("  {} 同步 {} ({}) 失败: {}", color::red("错误"), label, cat, e);
-        }
+// ── 初始化 ────────────────────────────────────────────
+
+/// 确保 software.json 文件存在（首次运行写入默认值）。
+pub fn ensure_initialized() -> anyhow::Result<()> {
+    let path = crate::paths::software_json_path();
+    if path.is_file() {
+        return Ok(());
     }
-
-    // 2. 同步自研工具源定义到 source/tools/
-    println!("{}", color::bold_cyan("同步工具源..."));
-    let tools_builtin: Vec<String> = builtin.iter().map(|u| format!("{}/tools", u)).collect();
-    let tools_repo = config::SourceRepo::new(tools_builtin);
-    config::source::update_sources(&paths::tools_source_dir(), &tools_repo)?;
-
-    // 3. 同步第三方社区源
-    let config_dir = paths::config_dir();
-    let source_cfg = config::SourceConfig::new(config_dir);
-    let entries = source_cfg.load();
-    for entry in &entries {
-        if !entry.enabled {
-            continue;
-        }
-        println!("  {} {}", color::gray("同步源:"), color::cyan(&entry.name));
-        let dest = paths::community_source_named(&entry.name);
-        let repo = config::SourceRepo::new(vec![entry.url.clone()]);
-        if let Err(e) = config::source::update_sources(&dest, &repo) {
-            eprintln!("  {} 更新源 '{}' 失败: {}", color::red("错误"), entry.name, e);
-        }
+    // 创建父目录
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
     }
-
-    clear_defs_cache();
-    clear_tool_cache();
+    fs::write(&path, EMBEDDED_JSON)?;
     Ok(())
 }
 
-/// 在所有分类目录中查找软件定义。
+// ── 内部读写 ──────────────────────────────────────────
+
+/// 从磁盘读取 software.json，返回合并后的 full（builtin + local）字典。
+fn read_full_db() -> anyhow::Result<HashMap<String, SoftwareDef>> {
+    let path = crate::paths::software_json_path();
+    // 如果文件不存在，先初始化
+    if !path.is_file() {
+        ensure_initialized()?;
+    }
+    let data = fs::read_to_string(&path)?;
+    let db: SoftwareDatabase = serde_json::from_str(&data)
+        .with_context(|| format!("解析 {} 失败", path.display()))?;
+
+    let mut all = db.builtin;
+    // local 覆盖 builtin（同名时 local 优先）
+    for (name, def) in db.local {
+        all.insert(name, def);
+    }
+    Ok(all)
+}
+
+// ── 公开 API ──────────────────────────────────────────
+
+/// 在所有软件定义（builtin + local）中查找指定软件。
 pub fn read_software_def(name: &str) -> anyhow::Result<SoftwareDef> {
     let lower = name.to_lowercase();
+    let all = read_full_db()?;
 
-    // 遍历所有分类目录
-    for cat_dir in paths::app_category_dirs() {
-        if !cat_dir.is_dir() {
-            continue;
-        }
+    // 1. name 精确匹配
+    if let Some(sd) = all.get(&lower) {
+        return Ok(sd.clone());
+    }
 
-        // 1. Exact match filename
-        let exact = cat_dir.join(format!("{}.json", lower));
-        if exact.exists() {
-            return parse_json(&exact);
+    // 2. display_name / aliases 匹配
+    for sd in all.values() {
+        if sd.display_name.to_lowercase() == lower {
+            return Ok(sd.clone());
         }
-
-        // 2. 文件名大小写不敏感
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = fs::read_dir(&cat_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map_or(false, |e| e == "json") && path.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                    candidates.push(path);
-                }
-            }
+        if sd.aliases.iter().any(|a| a.to_lowercase() == lower) {
+            return Ok(sd.clone());
         }
-        for p in &candidates {
-            if p.file_stem().and_then(|s| s.to_str()).map_or(false, |s| s.to_lowercase() == lower) {
-                return parse_json(p);
-            }
-        }
-
-        // 3-4. display_name / aliases match
-        for p in &candidates {
-            if let Ok(sd) = parse_json(p) {
-                if sd.display_name.to_lowercase() == lower {
-                    return Ok(sd);
-                }
-                if sd.aliases.iter().any(|a| a.to_lowercase() == lower) {
-                    return Ok(sd);
-                }
-            }
+        // 3. name 部分匹配（例如传入 "as" 匹配 SoftwareDef{name:"as"}）
+        if sd.name.to_lowercase() == lower {
+            return Ok(sd.clone());
         }
     }
 
-    // 5. 社区源中查找
-    if let Ok(sd) = find_in_community_sources(name) {
-        return Ok(sd);
-    }
-
-    bail!("未找到软件 '{}' 的定义。请先运行: {}", name, cmd_names::SOURCE_UPDATE_HINT)
+    anyhow::bail!("未找到软件 '{}' 的定义", name)
 }
 
-/// 在第三方社区源中查找软件定义。
-fn find_in_community_sources(name: &str) -> anyhow::Result<SoftwareDef> {
-    let lower = name.to_lowercase();
-    let config_dir = paths::config_dir();
-    let source_cfg = config::SourceConfig::new(config_dir);
-    let entries = source_cfg.load();
-
-    for entry in &entries {
-        if !entry.enabled {
-            continue;
-        }
-        let dir = paths::community_source_named(&entry.name);
-        if !dir.is_dir() {
-            continue;
-        }
-
-        // Exact match
-        let exact = dir.join(format!("{}.json", lower));
-        if exact.exists() {
-            if let Ok(sd) = parse_json(&exact) {
-                return Ok(sd);
-            }
-        }
-
-        // display_name / aliases match
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for e in entries.flatten() {
-                let path = e.path();
-                if path.extension().map_or(false, |ext| ext == "json") && path.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                    if let Ok(sd) = parse_json(&path) {
-                        if sd.name.to_lowercase() == lower
-                            || sd.display_name.to_lowercase() == lower
-                            || sd.aliases.iter().any(|a| a.to_lowercase() == lower)
-                        {
-                            return Ok(sd);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    bail!("未在社区源中找到 '{}'", name)
-}
-
-/// 读取自研工具定义（从 source/tools/ 查找）
-pub fn read_tool_def(name: &str) -> anyhow::Result<SoftwareDef> {
-    let source = paths::tools_source_dir();
-    let lower = name.to_lowercase();
-
-    if !source.is_dir() || source.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
-        anyhow::bail!("未找到工具源定义。请先运行: {}", cmd_names::SOURCE_UPDATE_HINT);
-    }
-
-    let exact = source.join(format!("{}.json", lower));
-    if exact.exists() {
-        return parse_json(&exact);
-    }
-
-    if let Ok(entries) = fs::read_dir(&source) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
-                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                if stem.to_lowercase() == lower {
-                    return parse_json(&path);
-                }
-            }
-        }
-    }
-
-    bail!("未找到自研工具 '{}' 的定义", name)
-}
-
-/// 缓存, 避免多次重复解析所有 JSON 文件。
-/// 在 `update_sources()` 中自动失效。
-static DEFS_CACHE: std::sync::Mutex<Option<Vec<SoftwareDef>>> = std::sync::Mutex::new(None);
-static TOOL_CACHE: std::sync::Mutex<Option<Vec<SoftwareDef>>> = std::sync::Mutex::new(None);
-
-/// 清除源定义缓存（由 source update 时调用）。
-pub fn clear_defs_cache() {
-    if let Ok(mut cache) = DEFS_CACHE.lock() {
-        *cache = None;
-    }
-}
-
-/// 清除工具定义缓存
-pub fn clear_tool_cache() {
-    if let Ok(mut cache) = TOOL_CACHE.lock() {
-        *cache = None;
-    }
-}
-
-/// List all available software definitions.
+/// 列出所有软件定义（builtin + local）。
 pub fn list_software_defs() -> anyhow::Result<Vec<SoftwareDef>> {
-    // 命中缓存则直接返回
-    if let Ok(cache) = DEFS_CACHE.lock() {
-        if let Some(ref defs) = *cache {
-            return Ok((*defs).clone());
-        }
-    }
-
-    let mut defs: Vec<SoftwareDef> = Vec::new();
-
-    // 遍历所有分类目录
-    for cat_dir in paths::app_category_dirs() {
-        if cat_dir.is_dir() {
-            read_defs_from_dir(&cat_dir, &mut defs);
-        }
-    }
-
-    // 合并社区源
-    let mut seen: std::collections::HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
-    let config_dir = paths::config_dir();
-    let source_cfg = config::SourceConfig::new(config_dir);
-    for entry in source_cfg.load() {
-        if !entry.enabled {
-            continue;
-        }
-        let comm_dir = paths::community_source_named(&entry.name);
-        if !comm_dir.is_dir() {
-            continue;
-        }
-        let mut community_defs = Vec::new();
-        read_defs_from_dir(&comm_dir, &mut community_defs);
-        for d in community_defs {
-            if seen.insert(d.name.clone()) {
-                defs.push(d);
-            }
-        }
-    }
-
-    // 写入缓存
-    if let Ok(mut cache) = DEFS_CACHE.lock() {
-        *cache = Some(defs.clone());
-    }
-
+    let all = read_full_db()?;
+    let mut defs: Vec<SoftwareDef> = all.into_values().collect();
+    defs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(defs)
 }
 
-/// 从目录读取所有 JSON 定义到集合
-fn read_defs_from_dir(dir: &std::path::Path, defs: &mut Vec<SoftwareDef>) {
-    let mut paths: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.extension().map_or(false, |e| e == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                paths.push(p);
-            }
-        }
-    }
-    paths.sort();
-    for p in paths {
-        if let Ok(sd) = parse_json(&p) {
-            defs.push(sd);
-        }
+/// 读取自研工具定义（从统一的 software.json 中筛选 kind="self" 的条目）。
+pub fn read_tool_def(name: &str) -> anyhow::Result<SoftwareDef> {
+    let sd = read_software_def(name)?;
+    if sd.kind == "self" {
+        Ok(sd)
+    } else {
+        anyhow::bail!("'{}' 不是自研工具", name)
     }
 }
 
-/// 列出所有自研工具定义（从 source/tools/ 读取）
+/// 列出所有自研工具定义。
 pub fn list_tool_defs() -> anyhow::Result<Vec<SoftwareDef>> {
-    if let Ok(cache) = TOOL_CACHE.lock() {
-        if let Some(ref defs) = *cache {
-            return Ok((*defs).clone());
-        }
-    }
-
-    let source = paths::tools_source_dir();
-    if !source.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let mut defs = Vec::new();
-    let mut json_paths: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(&source) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.extension().map_or(false, |e| e == "json") && p.file_name().and_then(|n| n.to_str()) != Some("index.json") {
-                json_paths.push(p);
-            }
-        }
-    }
-    json_paths.sort();
-
-    for p in json_paths {
-        if let Ok(sd) = parse_json(&p) {
-            defs.push(sd);
-        }
-    }
-
-    if let Ok(mut cache) = TOOL_CACHE.lock() {
-        *cache = Some(defs.clone());
-    }
-
+    let all = read_full_db()?;
+    let mut defs: Vec<SoftwareDef> = all.into_values()
+        .filter(|sd| sd.kind == "self")
+        .collect();
+    defs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(defs)
+}
+
+#[allow(dead_code)]
+/// 添加/更新本地扩展软件定义。
+/// 写入到 software.json 的 local 段，同名会覆盖。
+pub fn add_local_software(def: SoftwareDef) -> anyhow::Result<()> {
+    let path = crate::paths::software_json_path();
+    if !path.is_file() {
+        ensure_initialized()?;
+    }
+    let data = fs::read_to_string(&path)?;
+    let mut db: SoftwareDatabase = serde_json::from_str(&data)
+        .with_context(|| format!("解析 {} 失败", path.display()))?;
+
+    db.local.insert(def.name.clone(), def);
+
+    let json = serde_json::to_string_pretty(&db)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+/// 移除本地扩展软件定义。
+pub fn remove_local_software(name: &str) -> anyhow::Result<()> {
+    let path = crate::paths::software_json_path();
+    if !path.is_file() {
+        return Ok(());
+    }
+    let data = fs::read_to_string(&path)?;
+    let mut db: SoftwareDatabase = serde_json::from_str(&data)
+        .with_context(|| format!("解析 {} 失败", path.display()))?;
+
+    db.local.remove(name);
+
+    let json = serde_json::to_string_pretty(&db)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 // ── Installation records ─────────────────────────────────
 
 pub fn read_installed_db() -> anyhow::Result<HashMap<String, InstallRecord>> {
-    let path = paths::installed_json();
+    let path = crate::paths::installed_json();
     if !path.exists() {
         return Ok(HashMap::new());
     }
@@ -415,19 +265,25 @@ pub fn read_installed_db() -> anyhow::Result<HashMap<String, InstallRecord>> {
 }
 
 pub fn write_installed_db(db: &HashMap<String, InstallRecord>) -> anyhow::Result<()> {
-    let dir = paths::apps_dir();
+    let dir = crate::paths::apps_dir();
     fs::create_dir_all(&dir)?;
     let json = serde_json::to_string_pretty(db)?;
-
-    // 原子写入：先写临时文件，再 rename，防止崩溃导致 installed.json 截断
-    let target = paths::installed_json();
+    let target = crate::paths::installed_json();
     let tmp = target.with_extension("json.tmp");
     fs::write(&tmp, json)?;
     fs::rename(&tmp, &target)?;
     Ok(())
 }
 
-pub fn record_installation(name: &str, version: &str, install_path: &str, version_provenance: &str, source_version: &str, installer_type: &str, file_sha256: &str) -> anyhow::Result<()> {
+pub fn record_installation(
+    name: &str,
+    version: &str,
+    install_path: &str,
+    version_provenance: &str,
+    source_version: &str,
+    installer_type: &str,
+    file_sha256: &str,
+) -> anyhow::Result<()> {
     let mut db = read_installed_db()?;
     db.insert(
         name.to_string(),
@@ -455,56 +311,70 @@ pub fn remove_installation_record(name: &str) -> anyhow::Result<()> {
 
 // ── Helpers ──────────────────────────────────────────────
 
-/// 检查是否有任何缓存的源定义文件（至少一个分类目录非空）。
-pub fn has_any_source() -> bool {
-    paths::app_category_dirs().iter().any(|dir| {
-        if !dir.is_dir() {
-            return false;
-        }
-        dir.read_dir()
-            .map(|mut entries| entries.any(|e| {
-                e.ok().and_then(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    Some(name.ends_with(".json") && name != "index.json")
-                }).unwrap_or(false)
-            }))
-            .unwrap_or(false)
-    })
-}
-
-/// 读取源索引中的 `updated` 字段（源最后更新时间）。
+/// 返回软件源的最后更新时间（文件修改时间）。
 pub fn read_source_updated() -> String {
-    read_index_updated(&paths::apps_source_dir().join("index.json"))
-}
-
-/// 读取工具源索引中的 `updated` 字段。
-pub fn read_tool_source_updated() -> String {
-    read_index_updated(&paths::tools_source_dir().join("index.json"))
-}
-
-/// 从指定 index.json 中读取 `updated` 字段。
-fn read_index_updated(index_path: &std::path::Path) -> String {
-    if !index_path.is_file() {
+    let path = crate::paths::software_json_path();
+    if !path.is_file() {
         return String::new();
     }
-    #[derive(serde::Deserialize)]
-    struct IndexMeta {
-        #[serde(default)]
-        updated: String,
-    }
-    match std::fs::read_to_string(index_path)
-        .and_then(|s| Ok(serde_json::from_str::<IndexMeta>(&s).map(|m| m.updated).unwrap_or_default()))
-    {
-        Ok(u) => u,
+    match path.metadata()
+        .and_then(|m| m.modified())
+        .map(|t| {
+            let secs = t.duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            chrono_like(secs)
+        }) {
+        Ok(s) => s,
         Err(_) => String::new(),
     }
 }
 
-pub fn parse_json(path: &PathBuf) -> anyhow::Result<SoftwareDef> {
-    let data = fs::read_to_string(path)
-        .with_context(|| format!("读取文件失败: {}", path.display()))?;
-    serde_json::from_str(&data)
-        .with_context(|| format!("解析 JSON 失败: {}", path.display()))
+/// 简单的 unix timestamp → YYYY-MM-DD 格式化（不依赖 chrono crate）。
+fn chrono_like(secs: u64) -> String {
+    // 使用 time::OffsetDateTime 
+    let days = secs / 86400;
+    let remaining = secs % 86400;
+    let h = remaining / 3600;
+    let m = (remaining % 3600) / 60;
+
+    // 近似年份计算
+    let mut y = 1970i64;
+    let mut d = days as i64;
+    loop {
+        let days_in_year = if is_leap(y) { 366 } else { 365 };
+        if d < days_in_year {
+            break;
+        }
+        d -= days_in_year;
+        y += 1;
+    }
+    let is_leap_yr = is_leap(y);
+    let month_days = [31, if is_leap_yr { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut mo = 1u32;
+    for &md in &month_days {
+        if d < md {
+            break;
+        }
+        d -= md;
+        mo += 1;
+    }
+    let day = d + 1;
+    format!("{:04}-{:02}-{:02} {:02}:{:02}", y, mo, day, h, m)
+}
+
+fn is_leap(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+/// 工具源的最后更新（与主源共用同一文件）。
+pub fn read_tool_source_updated() -> String {
+    read_source_updated()
+}
+
+/// 总是返回 true（内置源始终可用）。
+pub fn has_any_source() -> bool {
+    true
 }
 
 /// 根据软件定义中的 color 字段将文本着色。
@@ -594,23 +464,16 @@ pub fn paint_by_color_name(text: &str, color_name: &str) -> String {
         "green"       => color::green(text),
         "blue"        => color::blue(text),
         "red"         => color::red(text),
-        "cyan"        => color::cyan(text),
         "yellow"      => color::yellow(text),
-        "magenta"     => color::magenta(text),
-        "gray"        => color::gray(text),
+        "cyan"        => color::cyan(text),
         "white"       => color::white(text),
-        "black"       => color::black(text),
-        "bold-green"  => color::bold_green(text),
-        "bold-blue"   => color::bold_blue(text),
-        "bold-cyan"   => color::bold_cyan(text),
-        "bold-red"    => color::bold_red(text),
-        "bold-yellow" => color::bold_yellow(text),
-        "bright-green"   => color::bright_green(text),
-        "bright-blue"    => color::bright_blue(text),
-        "bright-cyan"    => color::bright_cyan(text),
-        "bright-red"     => color::bright_red(text),
-        "bright-yellow"  => color::bright_yellow(text),
-        "bright-magenta" => color::bright_magenta(text),
-        _ => color::cyan(text), // 默认兜底
+        "gray"        => color::gray(text),
+        "bright-green"   => color::bold_green(text),
+        "bright-blue"    => color::bold_blue(text),
+        "bright-red"     => color::bold_red(text),
+        "bright-yellow"  => color::bold_yellow(text),
+        "bright-cyan"    => color::bold_cyan(text),
+        "bright-magenta" => color::bold_magenta(text),
+        _ => color::cyan(text),
     }
 }

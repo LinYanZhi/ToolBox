@@ -36,6 +36,7 @@ pub(crate) fn format_decimal_progress(cur: u64, total: u64) -> String {
 }
 
 /// 将秒数格式化为 HH:MM:SS。
+/// ⚠️ 固定格式：h:mm:ss（如 0:00:13、1:02:05）。禁止改成其他格式。
 pub(crate) fn format_eta_hms(secs: u64) -> String {
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
@@ -44,6 +45,7 @@ pub(crate) fn format_eta_hms(secs: u64) -> String {
 }
 
 /// 在进度条上设置 ETA（HH:MM:SS 格式），基于已用时间和当前进度估算。
+/// ⚠️ 输出格式固定为 h:mm:ss，通过 {msg} 占位符展示。禁止改成 {eta} 或其他格式。
 pub(crate) fn set_progress_eta(bar: &indicatif::ProgressBar) {
     let pos = bar.position();
     let len = bar.length().unwrap_or(0);
@@ -149,8 +151,8 @@ impl Default for DownloadConfig {
     fn default() -> Self {
         Self {
             strategies: vec![
-                DownloadStrategy::RustRange { threads: 16 },
                 DownloadStrategy::Aria2c,
+                DownloadStrategy::RustRange { threads: 16 },
                 DownloadStrategy::Ureq { fingerprint: Fingerprint::Chrome120, insecure: false },
                 DownloadStrategy::Ureq { fingerprint: Fingerprint::Chrome120, insecure: true },
                 DownloadStrategy::PowerShell,
@@ -322,24 +324,22 @@ pub fn download_with_fallback(
     CTRL_C_PRESSED.store(false, Ordering::Relaxed);
     let start = Instant::now();
 
+    // 自动展开 GitHub 镜像（ghproxy 优先于原链）
+    let urls = expand_github_urls(urls);
+
     if urls.is_empty() {
         bail!("没有可用的下载地址");
     }
 
-    // ── 确定后端列表：配置文件优先 ──
-    let (backends, verify_enabled) = {
-        let file_cfg = crate::config::DownloaderConfig::load();
-        if !file_cfg.backends.is_empty() && config_file_exists() {
-            (file_cfg.backends, file_cfg.verify)
-        } else {
-            (backends_from_config(config), config.verify)
-        }
-    };
+    // ── 确定后端列表：直接使用入参配置 ──
+    let backends = backends_from_config(config);
+    let verify_enabled = config.verify;
 
     // 清理上次残留的临时文件
     let _ = std::fs::remove_file(target_path.with_extension("tmp"));
 
     // ── 进度条模板 ──
+    // ⚠️ 使用 {msg} 显示 ETA（h:mm:ss 格式），禁止改成 {eta} 或其他格式
     let tracked_style = indicatif::ProgressStyle::default_bar()
         .template("    {bar:40.green/white} {prefix:.green} {decimal_bytes_per_sec:.red} {msg:.cyan}")
         .unwrap()
@@ -369,6 +369,7 @@ pub fn download_with_fallback(
         let bar = progress().add(indicatif::ProgressBar::new(1));
         if tracked {
             bar.set_style(tracked_style.clone());
+            bar.enable_steady_tick(std::time::Duration::from_millis(500));
         }
         let ctx = ProgressCtx::new(bar, sname);
         let cancel = Cancel::global();
@@ -376,7 +377,7 @@ pub fn download_with_fallback(
         eprintln!("    使用 {} ({})", yellow(sname), backend.thread_label());
 
         // 逐 URL 尝试
-        for url in urls {
+        for url in &urls {
             if CTRL_C_PRESSED.load(Ordering::Relaxed) {
                 bail!("用户取消 (Ctrl+C)");
             }
@@ -457,12 +458,7 @@ pub fn download_with_fallback(
     bail!("下载失败: {}", last_error.as_deref().unwrap_or("未知错误"));
 }
 
-/// 检查配置文件是否存在。
-fn config_file_exists() -> bool {
-    crate::config::config_file_path().is_file()
-}
-
-/// 从旧的 `DownloadConfig` 转换后端列表（配置文件不存在时的降级）。
+/// 从 `DownloadConfig` 转换后端列表。
 fn backends_from_config(config: &DownloadConfig) -> Vec<Box<dyn DownloadBackend>> {
     config.strategies.iter().map(|s| {
         let be: Box<dyn DownloadBackend> = match s {

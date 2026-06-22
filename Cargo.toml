@@ -6,6 +6,7 @@ members = [
     "config",
     "ls",
     "net",
+    "path-rules",
     "pp",
     "ss",
     "sys",

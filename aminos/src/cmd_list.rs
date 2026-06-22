@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use color::{self, DisplayWidth, pad_left as pad, truncate};
 
 use crate::helpers::name_matches;
-use crate::cmd_names;
 use crate::opts::ListOpts;
 use crate::{paths, registry, software};
 
@@ -432,26 +431,6 @@ fn render_grouped(rows: &[Row]) {
 // ── 公开入口 ────────────────────────────────────────────
 
 pub fn run_list(opts: ListOpts) -> anyhow::Result<()> {
-    // 检查是否有缓存的源定义（至少一个分类目录非空）
-    let has_defs = paths::app_category_dirs().iter().any(|dir| {
-        if !dir.is_dir() {
-            return false;
-        }
-        dir.read_dir()
-            .map(|mut entries| entries.any(|e| {
-                e.ok().and_then(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    Some(name.ends_with(".json") && name != "index.json")
-                }).unwrap_or(false)
-            }))
-            .unwrap_or(false)
-    });
-    if !has_defs {
-        println!("{}", color::yellow("  未找到源定义。首次使用请运行:"));
-        println!("  {}\n", cmd_names::SOURCE_UPDATE_HINT);
-        return Ok(());
-    }
-
     let reg_installed: Vec<_> = {
         let raw = registry::scan_all_installed();
         let list_cfg = crate::list_config::ListConfig::load();
