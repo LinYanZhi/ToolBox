@@ -124,7 +124,7 @@ impl Formatter {
 
     /// 打印类型标记 <dir> / <file>
     pub fn print_type_marker(&self, marker: &str) -> String {
-        let text = format!("{:>7} ", marker);
+        let text = format!("{:>6} ", marker);
         if self.no_color {
             text
         } else {
@@ -170,13 +170,13 @@ impl Formatter {
                 .map(|e| format!(".{}", e.to_string_lossy()))
                 .unwrap_or_default();
             if ext.is_empty() {
-                format!("{}{} ", pad_str, paint_by_code(name, "97"))
+                format!("{}{} ", pad_str, paint_by_code(name, "37"))
             } else {
                 let name_part = name.strip_suffix(&ext).unwrap_or(name);
                 let ext_color = self.config.ext_color(&ext);
                 match ext_color {
-                    Some(ec) => format!("{}{}{} ", pad_str, paint_by_code(name_part, "97"), paint_by_code(&ext, ec)),
-                    None => format!("{}{} ", pad_str, paint_by_code(name, "97")),
+                    Some(ec) => format!("{}{}{} ", pad_str, paint_by_code(name_part, "37"), paint_by_code(&ext, ec)),
+                    None => format!("{}{} ", pad_str, paint_by_code(name, "37")),
                 }
             }
         }
@@ -196,7 +196,7 @@ impl Formatter {
                 .extension()
                 .map(|e| format!(".{}", e.to_string_lossy()))
                 .unwrap_or_default();
-            self.config.ext_color(&ext).or(Some("97"))
+            self.config.ext_color(&ext).or(Some("37"))
         }
     }
 
@@ -207,7 +207,7 @@ impl Formatter {
         } else {
             (&self.config.file_link_arrow, &self.config.file_link_arrow_color)
         };
-        let text = format!(" {} ", arrow);
+        let text = format!("{} ", arrow);
         if self.no_color {
             text
         } else {
@@ -246,7 +246,7 @@ impl Formatter {
                     &self.config.dir_link_path_basename_color
                 }
             } else {
-                "97"
+                "37"
             };
 
             result.push_str(&paint_by_code(name, color));

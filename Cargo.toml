@@ -1,15 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "_arg",
     "as",
-    "color",
-    "config",
+    "_color",
+    "_net",
     "ls",
-    "net",
-    "path-rules",
-    "pp",
+    "lw",
     "ss",
-    "sys",
 ]
 
 [profile.release]
