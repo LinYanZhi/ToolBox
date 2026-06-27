@@ -1,4 +1,5 @@
 # 排除 cargo 锁文件和构建产物
 .idea
-/target
-/aspkg/target
+*target
+/待删除/target
+as.exe

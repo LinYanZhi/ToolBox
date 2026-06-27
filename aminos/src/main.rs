@@ -1,285 +1,266 @@
-mod cmd_cache;
-mod cmd_download;
-mod cmd_downloader;
-mod cmd_info;
-mod cmd_init;
-mod cmd_install;
-mod cmd_list;
-mod cmd_names;
-mod cmd_self_update;
-mod cmd_source;
-mod cmd_tool;
-mod cmd_uninstall;
-mod downloader;
-mod helpers;
-mod help;
-mod installer;
-mod list_config;
-mod opts;
-mod paths;
-mod pe_version;
-mod registry;
-mod repo;
+mod download;
 mod software;
-mod speedtest;
+
+use std::io::Write;
 
 use clap::Parser;
-use opts::*;
+use color::{DisplayWidth, pad_left};
+use color::*;
+use terminal_size::{Width, terminal_size};
+
+// ── CLI ────────────────────────────────────────────
+
+#[derive(Parser)]
+#[clap(name = "as", version, about = "极简 Windows 软件下载器 — 只下载，不安装")]
+struct Cli {
+    #[clap(subcommand)]
+    command: Command,
+}
+
+#[derive(Parser)]
+enum Command {
+    /// 下载软件
+    #[clap(name = "install", aliases = &["i"])]
+    Install {
+        /// 软件名（可多个）
+        names: Vec<String>,
+    },
+    /// 列出所有支持的软件
+    #[clap(name = "list", aliases = &["l"])]
+    List,
+}
 
 fn main() {
-    color::enable_ansi();
-    net::backend::set_tools_bin_dir(paths::tools_bin_dir());
+    color::ansi::enable_ansi();
+    let cli = Cli::parse();
 
-    // ── 拦截无参数子命令，避免 clap 写 stderr（PowerShell 会变红） ──────────
-    //
-    // 规则：自动检测——子命令有 arg_required_else_help 或包含嵌套子命令，就拦截。
-    //       纯靠 clap API（is_arg_required_else_help_set / has_subcommands），
-    //       不需要手动维护列表，加新子命令后拦截自动生效。
-    //
-    // 拦截后先查白名单 print_custom_subcommand_help()（自定义样式），
-    // 没注册白名单则 fallback 到 clap 帮助（带 styles() 颜色，不丑）。
-    //
-    // ⚠️  开发注意事项：
-    //   - 子命令「所有参数可选」（如 cache、list），clap 不会报错，根本进不了这里。
-    //     所以你想让 cache 显示自定义缓存列表，什么都不用改。
-    //   - 子命令「需要参数」（如 install、info、uninstall），
-    //     拦截后会先调 print_custom_subcommand_help()。
-    //     如果想给它配自定义用法输出（而不是 clap 帮助），
-    //     去它模块里加个 pub fn print_usage()，
-    //     再在下方 print_custom_subcommand_help() 白名单注册一行即可。
-    //   - 如果只想改个颜色/clap 帮助的样式，别来这里改——
-    //     去 opts.rs 的 styles() 函数里调整，所有 clap 帮助统一生效。
-    //   - 记得保持白名单按字母序排列，方便查找。
-    {
-        let args: Vec<String> = std::env::args().collect();
-        if args.len() == 2 {
-            let sub = &args[1].to_lowercase();
-            let mut cmd = <Cli as clap::CommandFactory>::command();
-            if let Some(subcmd) = cmd.find_subcommand_mut(&sub) {
-                if subcmd.has_subcommands() || subcmd.is_arg_required_else_help_set() {
-                    if !print_custom_subcommand_help(&sub) {
-                        let _ = subcmd.print_help();
-                        println!();
-                    }
-                    return;
-                }
-            }
-        }
+    match cli.command {
+        Command::Install { names } => cmd_install(names),
+        Command::List => cmd_list(),
     }
+}
 
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
+// ── as list ────────────────────────────────────────
+
+fn cmd_list() {
+    let entries = match software::all_entries() {
+        Ok(e) => e,
         Err(e) => {
-            // 帮助/版本信息直接输出到 stdout（避免 clap 默认写 stderr 导致 PowerShell 变红）
-            if e.kind() == clap::error::ErrorKind::DisplayHelp
-                || e.kind() == clap::error::ErrorKind::DisplayVersion
-            {
-                let _ = e.print();
-                std::process::exit(0);
-            }
-            let msg = translate_error(&e);
-            eprintln!("  {}", color::bold_red(msg));
+            eprintln!("错误: {}", e);
             std::process::exit(1);
         }
     };
 
-    if cli.example {
-        print_examples();
+    let term_width = terminal_size().map(|(Width(w), _)| w as usize).unwrap_or(80);
+
+    // 排序
+    let mut sorted: Vec<(&String, &software::SoftwareEntry)> = entries.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+
+    // 预先计算各列最大宽度
+    let mut max_name_w = "名称".display_width();
+    let mut max_ver_w = "版本".display_width();
+
+    struct Line {
+        name: String,
+        versions: Vec<String>,
+        ver_line: String,
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    for (name, entry) in &sorted {
+        let mut versions: Vec<&str> = entry.versions.keys().map(|s| s.as_str()).collect();
+        versions.sort_by(|a, b| cmp_versions(b, a));
+
+        let ver_line = versions.join(", ");
+
+        let nw = name.display_width();
+        let vw = ver_line.display_width();
+        if nw > max_name_w { max_name_w = nw; }
+        if vw > max_ver_w { max_ver_w = vw; }
+
+        lines.push(Line {
+            name: name.to_string(),
+            versions: versions.iter().map(|s| s.to_string()).collect(),
+            ver_line,
+        });
+    }
+
+    let gap = 2; // 两列之间的空格数
+
+    // ---- 表头 ----
+    println!("{}{}{}",
+        pad_left("名称", max_name_w),
+        " ".repeat(gap),
+        "版本",
+    );
+
+    // ---- 分隔线：宽度取决于下方内容 ----
+    let name_sep = "-".repeat(max_name_w);
+    let ver_sep = "-".repeat(max_ver_w);
+    println!("{}{}{}",
+        name_sep,
+        " ".repeat(gap),
+        ver_sep,
+    );
+
+    // ---- 内容 ----
+    for line in &lines {
+        let name_display = truncate_display(&line.name, max_name_w);
+
+        let remaining = term_width.saturating_sub(max_name_w + gap);
+        if line.ver_line.display_width() <= remaining {
+            println!("{}{}{}",
+                pad_left(name_display, max_name_w),
+                " ".repeat(gap),
+                line.ver_line,
+            );
+        } else {
+            // 换行展示版本
+            println!("{}{}{}",
+                pad_left(name_display, max_name_w),
+                " ".repeat(gap),
+                line.versions[0],
+            );
+            for v in &line.versions[1..] {
+                println!("{}{}{}",
+                    " ".repeat(max_name_w),
+                    " ".repeat(gap),
+                    v,
+                );
+            }
+        }
+    }
+
+    println!();
+    println!("共 {} 个", sorted.len());
+    println!();
+}
+
+// ── as install ─────────────────────────────────────
+
+fn cmd_install(names: Vec<String>) {
+    if names.is_empty() {
+        eprintln!("  {} 请指定软件名（如 as install 7zip everything）", yellow("提示:"));
         return;
     }
 
-    match cli.command {
-        Some(cmd) => {
-            let code = dispatch(cmd);
-            std::process::exit(code);
-        }
-        None => {
-            // 无子命令时显示帮助
-            let mut cmd = <Cli as clap::CommandFactory>::command();
-            let _ = cmd.print_help();
-            println!();
-        }
-    }
-}
+    let mut targets = Vec::new();
 
-/// 将 clap 错误翻译为中文（帮助/版本以外的错误）
-fn translate_error(e: &clap::error::Error) -> String {
-    use clap::error::ErrorKind;
-    let raw_str = e.to_string();
-    let raw = color::ansi::strip_ansi(&raw_str);
-    match e.kind() {
-        ErrorKind::UnknownArgument => {
-            let flag = raw.split('\'').nth(1).unwrap_or("?");
-            format!("未知的选项 '{}'\n提示: 使用 --help 查看可用选项", flag)
-        }
-        ErrorKind::InvalidSubcommand => {
-            let sub = raw.split('\'').nth(1).unwrap_or("?");
-            format!("未知的子命令 '{}'\n提示: 使用 --help 查看可用子命令", sub)
-        }
-        ErrorKind::MissingRequiredArgument => {
-            "错误: 缺少必要参数\n提示: 使用 --help 查看正确用法".to_string()
-        }
-        _ => {
-            raw
-                .replace("error:", "错误:")
-                .replace("tip:", "提示:")
-                .replace("Usage:", "用法:")
-                .replace("Commands:", "子命令:")
-                .replace("Options:", "选项:")
-                .replace("Arguments:", "参数:")
-                .trim()
-                .to_string()
-        }
-    }
-}
+    for input in &names {
+        let (name, requested_version) = if let Some(eq_pos) = input.find('=') {
+            (input[..eq_pos].to_string(), Some(input[eq_pos + 1..].to_string()))
+        } else {
+            (input.to_string(), None)
+        };
 
-fn dispatch(cmd: Commands) -> i32 {
-    match cmd {
-        Commands::Install(opts) => {
-            help::run(|| cmd_install::run_install(opts))
-        }
-        Commands::List(opts) => {
-            help::run(|| cmd_list::run_list(opts))
-        }
-        Commands::Info(opts) => {
-            help::run(|| cmd_info::run_info(&opts.name, opts.urls))
-        }
-        Commands::Download(opts) => {
-            help::run(|| cmd_download::run_download(opts))
-        }
-        Commands::Uninstall(opts) => {
-            help::run(|| cmd_uninstall::run_uninstall(opts))
-        }
-        Commands::Cache(opts) => {
-            help::run(|| cmd_cache::run_cache(opts.list, opts.clear, opts.open))
-        }
-        Commands::Source(cmd) => {
-            help::run(|| cmd_source::run_source(&cmd))
-        }
-        Commands::Downloader(cmd) => {
-            help::run(|| cmd_downloader::run_downloader(&cmd))
-        }
-        Commands::Tool(tool) => {
-            dispatch_tool(tool)
-        }
-    }
-}
+        let (matched_name, entry) = match software::resolve(&name) {
+            Some(r) => r,
+            None => {
+                let all = software::all_entries().unwrap_or_default();
+                let fuzzy: Vec<&String> = all.keys()
+                    .filter(|k| k.contains(&name.to_lowercase()))
+                    .collect();
 
-fn dispatch_tool(tool: ToolCli) -> i32 {
-    match tool {
-        ToolCli::Init(opts) => {
-            help::run(|| cmd_init::run_init(opts.global))
-        }
-        ToolCli::Add(opts) => {
-            if opts.upgrade && opts.names.len() == 1 && opts.names[0].to_lowercase() == "as" {
-                help::run(|| cmd_self_update::run_self_update())
-            } else {
-                help::run(|| cmd_tool::run_add(opts))
+                if fuzzy.is_empty() {
+                    eprintln!("  {} 未找到软件 '{}'", yellow("跳过"), bold_cyan(&name));
+                    continue;
+                } else if fuzzy.len() == 1 {
+                    (fuzzy[0].clone(), all.get(fuzzy[0]).unwrap().clone())
+                } else {
+                    eprintln!("  {} '{}' 匹配到多个:", yellow("提示"), bold_cyan(&name));
+                    for k in &fuzzy {
+                        eprintln!("    - {}", k);
+                    }
+                    continue;
+                }
             }
-        }
-        ToolCli::List => {
-            help::run(|| cmd_tool::run_list())
-        }
-        ToolCli::Remove(opts) => {
-            help::run(|| cmd_tool::run_remove(&opts.name))
-        }
+        };
+
+        let version = match &requested_version {
+            Some(v) => {
+                if entry.versions.contains_key(v) {
+                    v.clone()
+                } else {
+                    eprintln!("  {} '{}' 没有版本 '{}'", yellow("跳过"), bold_cyan(&matched_name), v);
+                    continue;
+                }
+            }
+            None => {
+                let mut versions: Vec<&String> = entry.versions.keys().collect();
+                versions.sort_by(|a, b| cmp_versions(b, a));
+                if versions.len() == 1 {
+                    versions[0].clone()
+                } else {
+                    println!("  {} 可用版本:", bold_cyan(&matched_name));
+                    for (i, v) in versions.iter().enumerate() {
+                        println!("    {}. {}", i + 1, v);
+                    }
+                    print!("  请选择版本 (1-{}): ", versions.len());
+                    std::io::stdout().flush().ok();
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).ok();
+                    match input.trim().parse::<usize>() {
+                        Ok(n) if n >= 1 && n <= versions.len() => versions[n - 1].clone(),
+                        _ => {
+                            eprintln!("  {} 无效选择", yellow("跳过"));
+                            continue;
+                        }
+                    }
+                }
+            }
+        };
+
+        let vi = entry.versions[&version].clone();
+        targets.push((matched_name, version, vi));
+    }
+
+    if targets.is_empty() {
+        return;
+    }
+
+    if let Err(e) = download::download_all(targets) {
+        eprintln!("  {} {}", bold_red("错误:"), e);
     }
 }
 
-/// 无参数子命令的白名单分发表。
-///
-/// 返回 true 表示已处理，false 表示无自定义处理（调用方应 fallback 到 clap 帮助）。
-///
-/// ⚠️  开发注意事项：
-///   - 这里是「白名单」——想自定义无参数输出的子命令才加到这里。
-///     没加的不出 bug，只是 fallback 到 clap 帮助（带 styles() 颜色）。
-///   - 添加新子命令时需要：
-///     1. 在对应模块实现 `pub fn print_usage()`
-///     2. 在此函数注册一行，如 `"xxx" => { cmd_xxx::print_usage(); true }`
-///   - 保持按字母序排列，方便查找。
-fn print_custom_subcommand_help(name: &str) -> bool {
-    match name {
-        "install" => { cmd_install::print_usage(); true }
-        "info" => { cmd_info::print_usage(); true }
-        "uninstall" => { cmd_uninstall::print_usage(); true }
-        _ => false,
+// ── 辅助函数 ──────────────────────────────────────
+
+/// 版本号比较（降序）
+fn cmp_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let va: Vec<i64> = a.split('.').filter_map(|s| s.parse().ok()).collect();
+    let vb: Vec<i64> = b.split('.').filter_map(|s| s.parse().ok()).collect();
+    let max_len = va.len().max(vb.len());
+    for i in 0..max_len {
+        let na = va.get(i).copied().unwrap_or(0);
+        let nb = vb.get(i).copied().unwrap_or(0);
+        if na != nb {
+            return na.cmp(&nb);
+        }
     }
+    if a == "latest" && b != "latest" { return std::cmp::Ordering::Greater; }
+    if b == "latest" && a != "latest" { return std::cmp::Ordering::Less; }
+    std::cmp::Ordering::Equal
 }
 
-fn print_examples() {
-    let examples: Vec<(&str, &str, Vec<(&str, &str)>)> = vec![
-        ("install", "安装指定软件", vec![
-            (cmd_names::INSTALL, "安装 7-Zip（最新版）"),
-            (cmd_names::INSTALL, "同时安装多个软件"),
-            (cmd_names::INSTALL, "安装指定版本"),
-            (cmd_names::INSTALL, "使用图形界面向导安装"),
-            (cmd_names::INSTALL, "强制重新下载并安装"),
-            (cmd_names::INSTALL, "仅下载，不安装"),
-            (cmd_names::INSTALL, "指定安装类型为便携版"),
-            (cmd_names::INSTALL, "检测更新，卸载旧版后安装新版"),
-        ]),
-        ("list", "列出已安装的软件", vec![
-            (cmd_names::LIST, "仅列出已安装的软件"),
-            (cmd_names::LIST, "列出全部（已安装 + 源中可用）"),
-            (cmd_names::LIST, "按分类分组显示"),
-            (cmd_names::LIST, "查看分类概览"),
-            (cmd_names::LIST, "搜索名称、别名或描述"),
-            (cmd_names::LIST, "按分类过滤"),
-        ]),
-        ("info", "查看软件详细信息", vec![
-            (cmd_names::INFO, "查看 7-Zip 的详细信息"),
-            (cmd_names::INFO, "查看 7-Zip 所有下载地址"),
-        ]),
-        ("download", "下载软件或文件", vec![
-            (cmd_names::DOWNLOAD, "通过软件名称下载最新版"),
-            (cmd_names::DOWNLOAD, "通过链接直接下载文件"),
-            (cmd_names::DOWNLOAD, "打开下载目录"),
-            (cmd_names::DOWNLOAD, "下载到指定目录"),
-        ]),
-        ("uninstall", "卸载指定软件", vec![
-            ("as uninstall 7zip", "弹出卸载窗口卸载 7-Zip"),
-            ("as uninstall 7zip --force", "强制删除（跳过卸载器）"),
-        ]),
-        ("cache", "管理下载缓存", vec![
-            (cmd_names::CACHE, "列出缓存文件"),
-            (cmd_names::CACHE_CLEAR, "清除所有缓存"),
-            (cmd_names::CACHE_OPEN, "打开缓存目录"),
-        ]),
-        ("source", "管理软件源", vec![
-            (cmd_names::SOURCE_UPDATE, "更新所有源"),
-            (cmd_names::SOURCE_SPEEDTEST, "测速所有源"),
-            (cmd_names::SOURCE_OPEN, "打开源目录"),
-            (cmd_names::SOURCE_CLEAR, "清空所有源"),
-        ]),
-        ("downloader", "管理下载引擎后端", vec![
-            (cmd_names::DOWNLOADER_LIST, "列出所有后端"),
-            ("as downloader set curl on", "启用 curl"),
-            ("as downloader set curl off", "禁用 curl"),
-            (cmd_names::DOWNLOADER_OPEN, "打开配置目录"),
-        ]),
-        ("tool init", "初始化 as 环境", vec![
-            (cmd_names::TOOL_INIT, "打印 tools/bin 加入 PATH 的配置提示"),
-            ("as tool init -g", "写入用户 PATH 注册表"),
-        ]),
-        ("tool add", "安装/升级自研工具", vec![
-            ("as tool add ls", "安装 ls 工具"),
-            ("as tool add ls --upgrade", "升级 ls 工具"),
-            ("as tool add as --upgrade", "升级 as 自身"),
-        ]),
-        ("tool", "管理自研工具", vec![
-            (cmd_names::TOOL_LIST, "列出自研工具"),
-            ("as tool remove ls", "移除 ls 工具"),
-        ]),
-    ];
-
-    println!("{}", color::bold_green("使用示例"));
-    println!();
-    for group in examples {
-        let (display, desc, entries) = group;
-        println!("  {}   {}", color::bold_cyan(display), desc);
-        for &(ex, help) in entries.iter() {
-            println!("    {}  {}", color::bold(ex), color::gray(help));
+/// 截断字符串到指定显示宽度
+fn truncate_display(s: &str, max: usize) -> String {
+    let w = s.display_width();
+    if w <= max {
+        s.to_string()
+    } else {
+        let mut result = String::new();
+        let mut cur = 0usize;
+        for c in s.chars() {
+            let cw = c.to_string().display_width();
+            if cur + cw > max.saturating_sub(1) {
+                result.push('…');
+                break;
+            }
+            result.push(c);
+            cur += cw;
         }
-        println!();
+        result
     }
 }
