@@ -53,16 +53,17 @@ fn cmd_list() {
 
     let term_width = terminal_size().map(|(Width(w), _)| w as usize).unwrap_or(80);
 
-    // 排序
     let mut sorted: Vec<(&String, &software::SoftwareEntry)> = entries.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
 
-    // 预先计算各列最大宽度
+    // 计算各列最大宽度（含表头）
     let mut max_name_w = "名称".display_width();
+    let mut max_desc_w = "说明".display_width();
     let mut max_ver_w = "版本".display_width();
 
     struct Line {
         name: String,
+        desc: String,
         versions: Vec<String>,
         ver_line: String,
     }
@@ -70,62 +71,78 @@ fn cmd_list() {
     let mut lines: Vec<Line> = Vec::new();
 
     for (name, entry) in &sorted {
+        let nw = name.display_width();
+        let dw = entry.desc.display_width();
+        if nw > max_name_w { max_name_w = nw; }
+        if dw > max_desc_w { max_desc_w = dw; }
+    }
+
+    // 限制说明列宽度，防止过宽
+    let max_desc_w = max_desc_w.min(20);
+
+    for (name, entry) in &sorted {
         let mut versions: Vec<&str> = entry.versions.keys().map(|s| s.as_str()).collect();
         versions.sort_by(|a, b| cmp_versions(b, a));
 
         let ver_line = versions.join(", ");
 
-        let nw = name.display_width();
         let vw = ver_line.display_width();
-        if nw > max_name_w { max_name_w = nw; }
         if vw > max_ver_w { max_ver_w = vw; }
 
         lines.push(Line {
             name: name.to_string(),
+            desc: truncate_display(&entry.desc, max_desc_w),
             versions: versions.iter().map(|s| s.to_string()).collect(),
             ver_line,
         });
     }
 
-    let gap = 2; // 两列之间的空格数
+    let gap = 2;
 
-    // ---- 表头 ----
-    println!("{}{}{}",
+    // 表头
+    println!("{}{}{}{}{}",
         pad_left("名称", max_name_w),
+        " ".repeat(gap),
+        pad_left("说明", max_desc_w),
         " ".repeat(gap),
         "版本",
     );
 
-    // ---- 分隔线：宽度取决于下方内容 ----
-    let name_sep = "-".repeat(max_name_w);
-    let ver_sep = "-".repeat(max_ver_w);
-    println!("{}{}{}",
-        name_sep,
+    // 分隔线
+    println!("{}{}{}{}{}",
+        "-".repeat(max_name_w),
         " ".repeat(gap),
-        ver_sep,
+        "-".repeat(max_desc_w),
+        " ".repeat(gap),
+        "-".repeat(max_ver_w),
     );
 
-    // ---- 内容 ----
+    // 内容
     for line in &lines {
         let name_display = truncate_display(&line.name, max_name_w);
+        let remaining = term_width.saturating_sub(max_name_w + gap + max_desc_w + gap);
 
-        let remaining = term_width.saturating_sub(max_name_w + gap);
         if line.ver_line.display_width() <= remaining {
-            println!("{}{}{}",
+            println!("{}{}{}{}{}",
                 pad_left(name_display, max_name_w),
+                " ".repeat(gap),
+                pad_left(&line.desc, max_desc_w),
                 " ".repeat(gap),
                 line.ver_line,
             );
         } else {
-            // 换行展示版本
-            println!("{}{}{}",
+            println!("{}{}{}{}{}",
                 pad_left(name_display, max_name_w),
+                " ".repeat(gap),
+                pad_left(&line.desc, max_desc_w),
                 " ".repeat(gap),
                 line.versions[0],
             );
             for v in &line.versions[1..] {
-                println!("{}{}{}",
+                println!("{}{}{}{}{}",
                     " ".repeat(max_name_w),
+                    " ".repeat(gap),
+                    " ".repeat(max_desc_w),
                     " ".repeat(gap),
                     v,
                 );
