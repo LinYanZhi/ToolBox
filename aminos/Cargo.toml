@@ -1,19 +1,4 @@
 [package]
-name = "as"
-version = "0.2.0"
+name = "aminos"
+version = "0.0.0"
 edition = "2024"
-description = "极简 Windows 软件下载器 — 只下载，不安装"
-
-[[bin]]
-name = "as"
-path = "src/main.rs"
-
-[dependencies]
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-anyhow = "1"
-color = { path = "../color" }
-net = { path = "../net" }
-indicatif = "0.17"
-terminal_size = "0.4"

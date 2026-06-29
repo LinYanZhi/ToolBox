@@ -1,0 +1,76 @@
+{
+  "7zip": {
+    "desc": "文件压缩工具",
+    "aliases": ["7-zip", "7z"],
+    "category": "工具",
+    "versions": {
+      "23.01": {
+        "urls": {
+          "portable": ["https://www.7-zip.org/a/7z2301-extra.7z"],
+          "installer": ["https://www.7-zip.org/a/7z2301-x64.msi"]
+        }
+      }
+    }
+  },
+  "everything": {
+    "desc": "快速文件搜索",
+    "category": "工具",
+    "detect": {
+      "display_name": "Everything",
+      "publisher": "voidtools"
+    },
+    "versions": {
+      "1.4.1.1023": {
+        "urls": {
+          "portable": ["https://www.voidtools.com/Everything-1.4.1.1023.x64.zip"],
+          "installer": ["https://www.voidtools.com/Everything-1.4.1.1023.x64.msi"]
+        }
+      }
+    }
+  },
+  "notepadpp": {
+    "desc": "文本编辑器",
+    "aliases": ["notepad++"],
+    "category": "开发工具",
+    "detect": {
+      "display_name": "Notepad++"
+    },
+    "versions": {
+      "8.5.8": {
+        "urls": {
+          "portable": ["https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.5.8/npp.8.5.8.portable.x64.zip"],
+          "installer": ["https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.5.8/npp.8.5.8.Installer.x64.exe"]
+        }
+      }
+    }
+  },
+  "obs": {
+    "desc": "录屏直播软件",
+    "category": "影音",
+    "detect": {
+      "display_name": "OBS Studio"
+    },
+    "versions": {
+      "30.1.2": {
+        "urls": {
+          "installer": ["https://github.com/obsproject/obs-studio/releases/download/30.1.2/OBS-Studio-30.1.2-Full-Installer-x64.exe"]
+        }
+      }
+    }
+  },
+  "snipaste": {
+    "desc": "截图工具",
+    "category": "工具",
+    "detect": {
+      "display_name": "Snipaste"
+    },
+    "versions": {
+      "2.9.10": {
+        "urls": {
+          "portable": ["https://bitbucket.org/liulei/snipaste/downloads/Snipaste-2.9.10-x64.zip"],
+          "installer": ["https://bitbucket.org/liulei/snipaste/downloads/Snipaste-2.9.10-x64.exe"]
+        }
+      }
+    }
+  }
+}
