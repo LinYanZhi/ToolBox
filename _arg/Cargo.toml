@@ -1,0 +1,8 @@
+[package]
+name = "arg"
+version = "0.1.0"
+edition = "2024"
+description = "ToolBox 自研 CLI 框架 — 中文友好、颜色可定制、零依赖解析"
+
+[dependencies]
+color = { path = "../_color" }

@@ -9,5 +9,5 @@ anyhow = "1"
 ureq = { version = "2", features = ["native-tls"] }
 native-tls = "0.2"
 indicatif = "0.17"
-color = { path = "../color" }
+color = { path = "../_color" }
 ctrlc = "3.4"

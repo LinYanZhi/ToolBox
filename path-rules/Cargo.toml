@@ -1,8 +1,0 @@
-[package]
-name = "path-rules"
-version = "0.1.0"
-edition = "2024"
-description = "PATH 着色规则共享库 — pp 和 ss 共用"
-
-[dependencies]
-color = { path = "../color" }

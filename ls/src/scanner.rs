@@ -145,19 +145,9 @@ impl ItemInfo {
             return None;
         }
 
-        // 尝试获取当前分支名（git 不可用时仍标记为 git 项目）
-        let output = Command::new("git")
-            .args(["-C", &self.path.to_string_lossy(), "rev-parse", "--abbrev-ref", "HEAD"])
-            .output()
-            .ok();
-
-        if let Some(output) = output {
-            if output.status.success() {
-                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !branch.is_empty() {
-                    return Some(format!("git:({})", branch));
-                }
-            }
+        // 检查 .git 目录
+        if !git_dir.exists() || !git_dir.is_dir() {
+            return None;
         }
 
         Some("git".to_string())

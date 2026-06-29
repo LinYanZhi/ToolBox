@@ -1,0 +1,16 @@
+[package]
+name = "lw"
+version = "0.1.0"
+edition = "2024"
+description = "窗口位置和大小管理工具 — 自动居中、快捷键交互、规则匹配"
+
+[dependencies]
+arg = { path = "../_arg" }
+color = { path = "../_color" }
+rdev = "0.5"
+windows = { version = "0.58", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+]}
+windows-core = "0.58"
